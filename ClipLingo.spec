@@ -1,5 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
+import sys
+
+VERSION = "1.2.1.0"
 
 block_cipher = None
 
@@ -98,6 +101,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon='frontend\\public\\favicon.ico',
+    version='version_info.txt',
 )
 
 coll = COLLECT(

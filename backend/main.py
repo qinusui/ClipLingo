@@ -81,7 +81,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Anki Card Generator API",
     description="智能提取视频学习内容，生成 Anki 卡片",
-    version="1.0.0",
+    version="1.2.1",
     lifespan=lifespan
 )
 
@@ -141,7 +141,7 @@ async def root():
         return FileResponse(frontend_index)
     return {
         "message": "ClipLingo API",
-        "version": "1.0.0",
+        "version": "1.2.1",
         "docs": "/docs"
     }
 
