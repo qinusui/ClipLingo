@@ -10,6 +10,7 @@ import { CardPreview } from './components/CardPreview';
 import { SubtitleItem, ProcessedCard, AIRecommendation, CardStyle, CardTheme, WorkflowPhase, AnnotationPurpose } from './types';
 import { subtitleAPI, processAPI } from './services/api';
 import { useTheme } from './hooks/useTheme';
+import { getFriendlyMessage, getApiErrorMessage } from './utils/errors';
 
 // 格式化时间为 SRT 格式
 function formatSRTTime(seconds: number): string {
@@ -288,8 +289,8 @@ function App() {
     try {
       const res = await processAPI.testConnection(apiKey, apiBase, modelName);
       setTestResult(res);
-    } catch {
-      setTestResult({ valid: false, message: '请求失败，请检查 API 地址' });
+    } catch (error) {
+      setTestResult({ valid: false, message: getApiErrorMessage(error) });
     }
     setIsTesting(false);
   };
@@ -398,7 +399,7 @@ function App() {
             clearInterval(pollInterval);
             setIsTranscribing(false);
             transcribingRef.current = false;
-            alert(progress.error || '转录失败');
+            alert(getFriendlyMessage(progress.error_code, progress.error));
           }
         } catch (e) {
           // 轮询失败不中断
@@ -409,7 +410,7 @@ function App() {
 
     } catch (error) {
       console.error('转录失败:', error);
-      alert('转录失败: ' + (error instanceof Error ? error.message : '未知错误'));
+      alert('转录失败: ' + getApiErrorMessage(error));
       setIsTranscribing(false);
       transcribingRef.current = false;
     }
@@ -528,7 +529,7 @@ function App() {
         console.log('AI 筛选已中止');
       } else {
         console.error('AI 筛选失败:', error);
-        alert('AI 筛选失败: ' + (error instanceof Error ? error.message : '未知错误'));
+        alert('AI 筛选失败: ' + getApiErrorMessage(error));
       }
       setIsRecommending(false);
       // 保留已有部分结果，回到 screened 状态（而非 idle）
@@ -611,7 +612,7 @@ function App() {
         console.log('AI 注释已中止');
       } else {
         console.error('AI 注释失败:', error);
-        alert('AI 注释失败: ' + (error instanceof Error ? error.message : '未知错误'));
+        alert('AI 注释失败: ' + getApiErrorMessage(error));
       }
       setWorkflowPhase('screened');
     }
@@ -689,7 +690,7 @@ function App() {
         console.log('重试已中止');
       } else {
         console.error('重试失败:', error);
-        alert('重试失败: ' + (error instanceof Error ? error.message : '未知错误'));
+        alert('重试失败: ' + getApiErrorMessage(error));
       }
       setIsRecommending(false);
     }
@@ -794,7 +795,7 @@ function App() {
           if (progress.status === 'error') {
             clearInterval(pollInterval);
             setIsProcessing(false);
-            const errMsg = progress.error || '未知错误';
+            const errMsg = getFriendlyMessage(progress.error_code, progress.error || undefined);
             alert(`处理失败: ${errMsg}`);
             setProcessingSteps(s =>
               s.map((step) =>
@@ -814,7 +815,7 @@ function App() {
 
     } catch (error) {
       console.error('处理失败:', error);
-      const errorMessage = error instanceof Error ? error.message : '未知错误';
+      const errorMessage = getApiErrorMessage(error);
       alert(`处理失败: ${errorMessage}`);
 
       setProcessingSteps(s =>

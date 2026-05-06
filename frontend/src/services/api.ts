@@ -61,6 +61,7 @@ export const subtitleAPI = {
       total_steps: number;
       message: string;
       error?: string;
+      error_code?: string;
       result?: SubtitleListResponse;
     };
   },
@@ -401,6 +402,7 @@ export const processAPI = {
       message: string;
       details: Record<string, number> | null;
       error: string | null;
+      error_code: string | null;
       result: ProcessResult | null;
     };
   },

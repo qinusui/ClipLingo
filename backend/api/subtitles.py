@@ -25,6 +25,7 @@ from models.schemas import (
 sys.path.append(str(Path(__file__).parent.parent.parent))
 from core.parse_srt import parse_srt, filter_short_subtitles
 from core.whisper_manager import is_whisper_installed, install_whisper
+from errors import translate_error, is_transient, get_message, ErrorCode
 
 logger = logging.getLogger(__name__)
 
@@ -63,25 +64,6 @@ def _get_temp_dir() -> Path:
     return temp_dir
 
 router = APIRouter()
-
-# 常见 API 错误信息的中文翻译
-_API_ERROR_TRANSLATE = [
-    ("model does not exist", "模型不存在，请检查模型名称"),
-    ("invalid api key", "API Key 无效"),
-    ("insufficient", "API 余额不足"),
-    ("rate limit", "请求太频繁，请稍后重试"),
-    ("timeout", "请求超时"),
-    ("connection", "无法连接 API 服务器"),
-]
-
-
-def _tr(msg: str) -> str:
-    """将 API 错误信息翻译为中文"""
-    lower = msg.lower()
-    for keyword, chinese in _API_ERROR_TRANSLATE:
-        if keyword in lower:
-            return chinese
-    return msg
 
 
 @router.post("/upload", response_model=SubtitleListResponse)
@@ -396,14 +378,6 @@ _recommend_lock = _threading.Lock()
 # AI 批次调用常量
 _MAX_RETRIES = 3
 _RETRY_DELAYS = [2, 5, 10]  # 秒
-_TRANSIENT_KW = ("connection", "timeout", "timeouterror", "rate limit", "server error",
-                 "503", "502", "500", "429", "unreachable", "refused",
-                 "reset by peer", "too many requests")
-
-
-def _is_transient(err_msg: str) -> bool:
-    lower = err_msg.lower()
-    return any(kw in lower for kw in _TRANSIENT_KW)
 
 
 def _parse_ai_items(parsed) -> list:
@@ -445,8 +419,8 @@ def _call_ai_batch(client, system_prompt: str, batch: list, model_name: str) -> 
             items = _parse_ai_items(parsed)
             return items, ""
         except Exception as e:
-            last_error = _tr(str(e))
-            if _is_transient(str(e)) and attempt < _MAX_RETRIES:
+            _, last_error = translate_error(e)
+            if is_transient(e) and attempt < _MAX_RETRIES:
                 delay = _RETRY_DELAYS[attempt]
                 _time.sleep(delay)
             else:
@@ -520,8 +494,8 @@ async def _call_ai_batch_async(client, system_prompt: str, batch: list, model_na
             return items, ""
         except Exception as e:
             err_msg = str(e) or type(e).__name__
-            last_error = _tr(err_msg)
-            if _is_transient(err_msg) and attempt < _MAX_RETRIES:
+            _, last_error = translate_error(e)
+            if is_transient(e) and attempt < _MAX_RETRIES:
                 delay = min(2 ** attempt + random.random(), 30)
                 print(f"    批次重试 {attempt+1}/{_MAX_RETRIES}，等待 {delay:.1f}s: {err_msg}")
                 await asyncio.sleep(delay)
@@ -535,8 +509,18 @@ def _run_ai_recommend(task_id: str, subtitle_dicts: list, api_key: str, system_p
                       model_name: str = "deepseek-chat"):
     """同步执行 AI 推荐（后台线程，带重试机制）"""
     from openai import OpenAI
-
-    client = OpenAI(api_key=api_key, base_url=api_base)
+    try:
+        client = OpenAI(api_key=api_key, base_url=api_base)
+    except Exception as e:
+        error_code, error_msg = translate_error(e)
+        with _recommend_lock:
+            _recommend_store[task_id] = {
+                "status": "error",
+                "message": error_msg,
+                "error": error_msg,
+                "error_code": error_code.value
+            }
+        return
     results = []
     batch_size = max(1, min(100, batch_size))
     total_batches = (len(subtitle_dicts) + batch_size - 1) // batch_size
@@ -550,53 +534,66 @@ def _run_ai_recommend(task_id: str, subtitle_dicts: list, api_key: str, system_p
             "message": "开始分析..."
         }
 
-    for i in range(0, len(subtitle_dicts), batch_size):
-        batch = subtitle_dicts[i:i + batch_size]
-        batch_num = i // batch_size + 1
-        msg = f"处理第 {batch_num}/{total_batches} 批 ({len(batch)} 条)..."
-        print(f"  AI 推荐：{msg}")
+    try:
+        for i in range(0, len(subtitle_dicts), batch_size):
+            batch = subtitle_dicts[i:i + batch_size]
+            batch_num = i // batch_size + 1
+            msg = f"处理第 {batch_num}/{total_batches} 批 ({len(batch)} 条)..."
+            print(f"  AI 推荐：{msg}")
+
+            with _recommend_lock:
+                _recommend_store[task_id].update({
+                    "batch": batch_num,
+                    "total_batches": total_batches,
+                    "message": msg
+                })
+
+            items, error = _call_ai_batch(client, system_prompt, batch, model_name)
+            if items:
+                results.extend(items)
+            else:
+                failed_batches += 1
+                reason = f"处理失败: {error}"
+                print(f"    批次 {batch_num} 最终失败: {error}")
+                for item in batch:
+                    results.append({"index": item["index"], "include": False, "reason": reason})
+
+        # 构建最终推荐结果
+        recommendations = []
+        for item in results:
+            recommendations.append(AIRecommendItem(
+                index=item.get("index", 0),
+                include=item.get("include", False),
+                reason=item.get("reason", ""),
+                translation=item.get("translation") if item.get("include") else None,
+                notes=item.get("notes") if item.get("include") else None,
+                word=item.get("word") if item.get("include") else None,
+                definition=item.get("definition") if item.get("include") else None
+            ))
+
+        finish_msg = f"分析完成，共 {len(recommendations)} 条"
+        if failed_batches > 0:
+            finish_msg += f"（{failed_batches} 批失败）"
 
         with _recommend_lock:
             _recommend_store[task_id].update({
-                "batch": batch_num,
-                "total_batches": total_batches,
-                "message": msg
+                "status": "completed",
+                "batch": total_batches,
+                "message": finish_msg,
+                "result": AIRecommendResponse(recommendations=recommendations).model_dump()
             })
 
-        items, error = _call_ai_batch(client, system_prompt, batch, model_name)
-        if items:
-            results.extend(items)
-        else:
-            failed_batches += 1
-            reason = f"处理失败: {error}"
-            print(f"    批次 {batch_num} 最终失败: {error}")
-            for item in batch:
-                results.append({"index": item["index"], "include": False, "reason": reason})
-
-    # 构建最终推荐结果
-    recommendations = []
-    for item in results:
-        recommendations.append(AIRecommendItem(
-            index=item.get("index", 0),
-            include=item.get("include", False),
-            reason=item.get("reason", ""),
-            translation=item.get("translation") if item.get("include") else None,
-            notes=item.get("notes") if item.get("include") else None,
-            word=item.get("word") if item.get("include") else None,
-            definition=item.get("definition") if item.get("include") else None
-        ))
-
-    finish_msg = f"分析完成，共 {len(recommendations)} 条"
-    if failed_batches > 0:
-        finish_msg += f"（{failed_batches} 批失败）"
-
-    with _recommend_lock:
-        _recommend_store[task_id].update({
-            "status": "completed",
-            "batch": total_batches,
-            "message": finish_msg,
-            "result": AIRecommendResponse(recommendations=recommendations).model_dump()
-        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        error_code, error_msg = translate_error(e)
+        with _recommend_lock:
+            _recommend_store[task_id].update({
+                "status": "error",
+                "message": error_msg,
+                "error": error_msg,
+                "error_code": error_code.value
+            })
 
 
 @router.post("/ai-recommend")
@@ -966,13 +963,15 @@ def _run_transcribe_task(task_id: str, video_path_str: str, srt_path_str: str,
             }
 
     except Exception as e:
+        error_code, error_msg = translate_error(e)
         with _transcribe_lock:
             _transcribe_store[task_id] = {
                 "status": "error",
                 "step": 0,
                 "total_steps": 4,
-                "message": f"转录失败: {str(e)}",
-                "error": str(e)
+                "message": f"转录失败: {error_msg}",
+                "error": error_msg,
+                "error_code": error_code.value
             }
 
     finally:
@@ -999,8 +998,8 @@ def _run_transcribe_task(task_id: str, video_path_str: str, srt_path_str: str,
 def _check_ffmpeg_installed() -> dict:
     """检测 ffmpeg 是否已安装"""
     import subprocess
+    ffmpeg_path = _get_bin_path("ffmpeg.exe" if os.name == 'nt' else "ffmpeg")
     try:
-        ffmpeg_path = _get_bin_path("ffmpeg.exe" if os.name == 'nt' else "ffmpeg")
         result = subprocess.run(
             [ffmpeg_path, "-version"],
             capture_output=True,
@@ -1008,12 +1007,15 @@ def _check_ffmpeg_installed() -> dict:
             timeout=5
         )
         if result.returncode == 0:
-            # 提取版本号
             version_line = result.stdout.split('\n')[0] if result.stdout else ""
             return {"installed": True, "version": version_line, "path": ffmpeg_path}
-    except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
-        pass
-    return {"installed": False, "version": None, "path": None}
+        return {"installed": False, "version": None, "path": ffmpeg_path, "reason": "ffmpeg 执行返回非零退出码"}
+    except FileNotFoundError:
+        return {"installed": False, "version": None, "path": ffmpeg_path, "reason": "未找到 ffmpeg 可执行文件"}
+    except subprocess.TimeoutExpired:
+        return {"installed": False, "version": None, "path": ffmpeg_path, "reason": "ffmpeg 响应超时"}
+    except Exception as e:
+        return {"installed": False, "version": None, "path": ffmpeg_path, "reason": str(e)[:200]}
 
 
 @router.get("/ffmpeg/status")

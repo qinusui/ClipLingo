@@ -6,7 +6,15 @@ import os
 import sys
 import subprocess
 import logging
+from pathlib import Path
 from typing import Optional, Any
+
+# 确保项目根目录在 sys.path 中
+_root = str(Path(__file__).parent.parent)
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+
+from errors import ClipLingoError, ErrorCode
 
 logger = logging.getLogger(__name__)
 
@@ -90,4 +98,7 @@ def load_model(model_name: str = "base") -> Optional[Any]:
     faster_whisper = get_whisper()
     if faster_whisper is None:
         return None
-    return faster_whisper.WhisperModel(model_name)
+    try:
+        return faster_whisper.WhisperModel(model_name)
+    except Exception as e:
+        raise ClipLingoError(ErrorCode.WHISPER_MODEL_FAILED, str(e)[:200])

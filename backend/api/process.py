@@ -27,26 +27,9 @@ else:
 
 from main import run as process_cards
 
+from errors import translate_error, get_message, ErrorCode, ClipLingoError
+
 router = APIRouter()
-
-# 常见 API 错误信息的中文翻译
-_API_ERROR_MAP = [
-    ("model does not exist", "模型不存在，请检查模型名称是否正确"),
-    ("invalid api key", "API Key 无效"),
-    ("insufficient", "API 余额不足"),
-    ("rate limit", "请求太频繁，请稍后再试"),
-    ("timeout", "请求超时，请检查网络或 API 地址"),
-    ("connection", "无法连接到 API 服务器，请检查地址是否正确"),
-]
-
-
-def _translate_api_error(msg: str) -> str:
-    """将 API 错误信息翻译为中文"""
-    lower = msg.lower()
-    for keyword, chinese in _API_ERROR_MAP:
-        if keyword in lower:
-            return chinese
-    return msg
 
 # 临时文件存储目录
 if getattr(sys, 'frozen', False):
@@ -158,7 +141,8 @@ async def upload_and_process(
             "message": "准备处理...",
             "details": None,
             "result": None,
-            "error": None
+            "error": None,
+            "error_code": None
         }
 
     def progress_callback(step, total_steps, message, details=None):
@@ -225,11 +209,13 @@ async def upload_and_process(
         except Exception as e:
             import traceback
             traceback.print_exc()
+            error_code, error_msg = translate_error(e)
             with task_store_lock:
                 task_store[task_id].update({
                     "status": "error",
-                    "message": f"处理失败: {str(e)}",
-                    "error": str(e)
+                    "message": f"处理失败: {error_msg}",
+                    "error": error_msg,
+                    "error_code": error_code.value
                 })
         finally:
             shutil.rmtree(task_dir, ignore_errors=True)
@@ -265,7 +251,8 @@ async def get_progress(task_id: str):
         "total_steps": task["total_steps"],
         "message": task["message"],
         "details": task["details"],
-        "error": task.get("error")
+        "error": task.get("error"),
+        "error_code": task.get("error_code")
     }
 
     # 如果已完成，附带结果
@@ -273,6 +260,7 @@ async def get_progress(task_id: str):
         response["result"] = task["result"]
     elif task["status"] == "error":
         response["error"] = task.get("error")
+        response["error_code"] = task.get("error_code")
 
     return response
 
@@ -376,7 +364,8 @@ async def start_processing(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"处理失败: {str(e)}")
+        _, error_msg = translate_error(e)
+        raise HTTPException(status_code=500, detail=error_msg)
 
 
 @router.post("/test-connection")
@@ -400,7 +389,7 @@ async def test_connection(
         return {"valid": True, "message": f"连接成功（{model_name}）"}
 
     except Exception as e:
-        msg = _translate_api_error(str(e))
+        _, msg = translate_error(e)
         return {"valid": False, "message": msg}
 
 
@@ -424,4 +413,5 @@ async def list_models(
         return {"models": model_ids}
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取模型列表失败: {str(e)}")
+        _, error_msg = translate_error(e)
+        raise HTTPException(status_code=500, detail=f"获取模型列表失败: {error_msg}")

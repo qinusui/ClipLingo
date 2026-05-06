@@ -4,8 +4,17 @@ AI 批量处理模块 - 调用 DeepSeek API 进行翻译和注释
 
 import json
 import os
+import sys
+from pathlib import Path
 from openai import OpenAI
 from dotenv import load_dotenv
+
+# 确保项目根目录在 sys.path 中
+_root = str(Path(__file__).parent.parent)
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+
+from errors import ClipLingoError, ErrorCode
 
 # 加载 .env 配置
 load_dotenv()
@@ -47,7 +56,7 @@ class AIProcessor:
         """
         self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY")
         if not self.api_key:
-            raise ValueError("需要设置 DEEPSEEK_API_KEY 环境变量或在 .env 文件中配置")
+            raise ClipLingoError(ErrorCode.API_KEY_MISSING)
         self.client = OpenAI(api_key=self.api_key, base_url=base_url or "https://api.deepseek.com")
         self.model_name = model_name or "deepseek-chat"
         src_name = LANGUAGE_NAMES.get(source_language, source_language)
@@ -107,9 +116,15 @@ class AIProcessor:
 
             except Exception as e:
                 print(f"    批次处理失败: {e}")
-                # 失败的批次标记为 skip
-                for _ in batch:
-                    results.append({"skip": True})
+                error_msg = str(e)[:200]
+                for item in batch:
+                    results.append({
+                        "index": item["index"],
+                        "skip": True,
+                        "translation": "",
+                        "notes": "",
+                        "reason": f"AI 处理失败: {error_msg}"
+                    })
 
         return results
 

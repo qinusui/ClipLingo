@@ -10,6 +10,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from dataclasses import dataclass
 
+# 确保项目根目录在 sys.path 中（支持从 backend 导入时使用）
+_root = str(Path(__file__).parent.parent)
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+
+from errors import ClipLingoError, ErrorCode
+
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -62,8 +69,20 @@ def get_video_duration(video_path: str) -> float:
         "-of", "default=noprint_wrappers=1:nokey=1",
         video_path
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-    return float(result.stdout.strip())
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+    except FileNotFoundError:
+        raise ClipLingoError(ErrorCode.FFMPEG_NOT_FOUND, "ffprobe 未找到")
+    except subprocess.TimeoutExpired:
+        raise ClipLingoError(ErrorCode.FFMPEG_FAILED, "ffprobe 获取视频时长超时")
+
+    if result.returncode != 0:
+        raise ClipLingoError(ErrorCode.FFMPEG_FAILED, f"ffprobe 失败: {result.stderr[:200]}")
+
+    try:
+        return float(result.stdout.strip())
+    except ValueError:
+        raise ClipLingoError(ErrorCode.FFMPEG_FAILED, f"无法解析视频时长: {result.stdout[:100]}")
 
 
 def apply_padding(items: list[dict], video_duration: float,
@@ -105,8 +124,8 @@ def apply_padding(items: list[dict], video_duration: float,
     return items
 
 
-def extract_full_audio(video_path: str, output_path: str, quality: int = 2) -> bool:
-    """从视频提取完整音轨（MP3），仅解码一次视频"""
+def extract_full_audio(video_path: str, output_path: str, quality: int = 2) -> tuple[bool, str]:
+    """从视频提取完整音轨（MP3），仅解码一次视频。返回 (成功, 错误信息)"""
     cmd = [
         get_ffmpeg_path(), "-y",
         "-i", video_path,
@@ -116,9 +135,13 @@ def extract_full_audio(video_path: str, output_path: str, quality: int = 2) -> b
     ]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-        return result.returncode == 0
+        if result.returncode == 0:
+            return True, ""
+        return False, result.stderr[:300] if result.stderr else "ffmpeg 返回非零退出码"
+    except FileNotFoundError:
+        raise ClipLingoError(ErrorCode.FFMPEG_NOT_FOUND, "ffmpeg 未找到")
     except subprocess.TimeoutExpired:
-        return False
+        return False, "提取音轨超时"
 
 
 def cut_audio(
@@ -153,6 +176,8 @@ def cut_audio(
             timeout=max(30, duration * 2)
         )
         return result.returncode == 0
+    except FileNotFoundError:
+        raise ClipLingoError(ErrorCode.FFMPEG_NOT_FOUND, "ffmpeg 未找到")
     except subprocess.TimeoutExpired:
         return False
 
@@ -194,6 +219,8 @@ def capture_screenshot(
             timeout=30
         )
         return result.returncode == 0
+    except FileNotFoundError:
+        raise ClipLingoError(ErrorCode.FFMPEG_NOT_FOUND, "ffmpeg 未找到")
     except subprocess.TimeoutExpired:
         return False
 
@@ -234,8 +261,9 @@ def process_media_items(
         print(f"完整音轨已存在，跳过提取")
     else:
         print(f"提取完整音轨...")
-        if not extract_full_audio(video_path, full_audio_path):
-            raise RuntimeError("提取音轨失败")
+        ok, err_msg = extract_full_audio(video_path, full_audio_path)
+        if not ok:
+            raise ClipLingoError(ErrorCode.FFMPEG_FAILED, f"提取音轨失败: {err_msg}")
 
     # Step 2: 并行逐条截图（-ss 在 -i 前，输入跳转快）
     print(f"截图 {len(items)} 帧，{num_workers} 并发...")
