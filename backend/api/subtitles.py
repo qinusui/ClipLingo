@@ -17,7 +17,8 @@ from typing import List, Optional
 
 from models.schemas import (
     SubtitleItem, SubtitleListResponse, AIRecommendRequest,
-    AIRecommendItem, AIRecommendResponse, EmbeddedSubtitleStream, ExtractEmbeddedResponse
+    AIRecommendItem, AIRecommendResponse, AIAnnotateRequest,
+    EmbeddedSubtitleStream, ExtractEmbeddedResponse
 )
 
 # 导入现有的字幕解析模块
@@ -315,6 +316,73 @@ def _build_system_prompt(custom_prompt: str = None, source_language: str = "en",
         criteria = DEFAULT_CRITERIA.format(source_language=src_name)
     formatted_format = RETURN_FORMAT.format(target_language=tgt_name)
     return criteria + formatted_format
+
+
+# ─────────────────── 两阶段 AI：筛选专用提示词 ───────────────────
+
+SCREENING_CRITERIA = """你是{source_language}学习材料筛选专家。对输入的字幕列表，每条判断是否值得作为学习材料：
+
+判断标准：
+- 有明确的语法知识点（如时态、从句、虚拟语气等）
+- 有实用表达或固定搭配
+- 对话内容有意义（非简单寒暄如'okay', 'yeah', 'uh-huh'等）
+- 有文化背景或情境意义"""
+
+SCREENING_RETURN_FORMAT = """
+
+返回格式（严格遵守）：
+{{"items": [{{"index": 数字, "include": true/false, "reason": "简短原因"}}]}}
+
+注意：
+- 必须返回一个 JSON 对象，items 是数组
+- include=true 表示值得加入学习
+- include=false 时 reason 说明原因（如：纯简单应答、无知识价值）
+- 保持原文顺序输出，每条都必须有 index 字段"""
+
+
+def _build_screening_prompt(custom_prompt: str = None, source_language: str = "en", target_language: str = "zh") -> str:
+    """构建筛选专用提示词（只判断 include/reason，不返回翻译注释）"""
+    src_name = _get_lang_name(source_language)
+    tgt_name = _get_lang_name(target_language)
+    criteria = custom_prompt if custom_prompt else SCREENING_CRITERIA.format(source_language=src_name)
+    return criteria + SCREENING_RETURN_FORMAT.format(target_language=tgt_name)
+
+
+# ─────────────────── 两阶段 AI：注释专用提示词 ───────────────────
+
+ANNOTATION_GRAMMAR_PROMPT = """你是{source_language}学习教材编写专家。为输入的字幕列表（已筛选为值得学习的内容）提供翻译和语法句型注释。
+
+返回格式（严格遵守）：
+{{"items": [{{"index": 数字, "translation": "{target_language}翻译", "notes": "语法知识点和实用表达", "word": "句子中最值得学习的核心单词或词组", "definition": "该单词/词组的{target_language}释义"}}]}}
+
+注意：
+- 必须返回一个 JSON 对象，items 是数组
+- 所有项目必须包含 translation、notes、word、definition
+- notes 应侧重语法结构和实用表达
+- word 为句子中最值得背诵的核心单词或词组
+- 保持原文顺序输出"""
+
+ANNOTATION_VOCAB_PROMPT = """你是{target_language}词汇教学专家。为输入的字幕列表（已筛选为值得学习的内容）提供翻译和词汇注释。
+
+返回格式（严格遵守）：
+{{"items": [{{"index": 数字, "translation": "{target_language}翻译", "notes": "重点单词-词性-释义", "word": "句子中最值得学习的核心单词或词组", "definition": "该单词/词组的{target_language}释义"}}]}}
+
+注意：
+- 必须返回一个 JSON 对象，items 是数组
+- 所有项目必须包含 translation、notes、word、definition
+- notes 格式：重点单词-词性-释义；遇词组则整体标注
+- word 为句子中最值得背诵的核心单词或词组
+- 保持原文顺序输出"""
+
+
+def _build_annotation_prompt(purpose: str, source_language: str = "en", target_language: str = "zh") -> str:
+    """构建注释专用提示词（根据用途选择语法或词汇模板）"""
+    src_name = _get_lang_name(source_language)
+    tgt_name = _get_lang_name(target_language)
+    if purpose == "vocab":
+        return ANNOTATION_VOCAB_PROMPT.format(source_language=src_name, target_language=tgt_name)
+    else:
+        return ANNOTATION_GRAMMAR_PROMPT.format(source_language=src_name, target_language=tgt_name)
 
 
 # AI 推荐任务进度存储
@@ -619,6 +687,114 @@ async def ai_recommend_stream(request: AIRecommendRequest):
                 items = [{"index": item["index"], "include": False, "reason": f"处理失败: {error}"} for item in batch]
             completed += 1
             print(f"  AI 推荐流式：第 {num}/{total_batches} 批完成 ({completed}/{total_batches})")
+            yield f"data: {json.dumps({'type': 'batch', 'batch': num, 'items': items}, ensure_ascii=False)}\n\n"
+
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
+
+
+@router.post("/ai-screen-stream")
+async def ai_screen_stream(request: AIRecommendRequest):
+    """AI 筛选 — 只返回 include/reason，不做翻译注释（第一阶段）"""
+    from openai import AsyncOpenAI
+
+    api_key = request.api_key or os.getenv("DEEPSEEK_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="需要提供 API Key")
+
+    system_prompt = _build_screening_prompt(request.custom_prompt, request.source_language, request.target_language)
+    subtitle_dicts = [
+        {"index": s.index, "start_sec": s.start_sec, "end_sec": s.end_sec, "text": s.text}
+        for s in request.subtitles
+    ]
+    api_base = request.api_base or "https://api.deepseek.com"
+    model_name = request.model_name or "deepseek-chat"
+
+    batches = _dynamic_batches(subtitle_dicts, max_chars=1500)
+    total_batches = len(batches)
+    numbered_batches = [(i + 1, b) for i, b in enumerate(batches)]
+
+    semaphore = asyncio.Semaphore(3)
+
+    async def event_generator():
+        client = AsyncOpenAI(api_key=api_key, base_url=api_base)
+        yield f"data: {json.dumps({'type': 'start', 'total_batches': total_batches})}\n\n"
+
+        async def run_batch(num: int, batch: list):
+            items, error = await _call_ai_batch_async(client, system_prompt, batch, model_name, semaphore)
+            return num, batch, items, error
+
+        tasks = [asyncio.create_task(run_batch(num, batch)) for num, batch in numbered_batches]
+
+        completed = 0
+        for coro in asyncio.as_completed(tasks):
+            num, batch, items, error = await coro
+            if not items:
+                items = [{"index": item["index"], "include": False, "reason": f"处理失败: {error}"} for item in batch]
+            # 筛选模式：只保留 include 和 reason，剥离注释字段
+            for item in items:
+                item.pop("translation", None)
+                item.pop("notes", None)
+                item.pop("word", None)
+                item.pop("definition", None)
+            completed += 1
+            print(f"  AI 筛选流式：第 {num}/{total_batches} 批完成 ({completed}/{total_batches})")
+            yield f"data: {json.dumps({'type': 'batch', 'batch': num, 'items': items}, ensure_ascii=False)}\n\n"
+
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
+
+
+@router.post("/ai-annotate-stream")
+async def ai_annotate_stream(request: AIAnnotateRequest):
+    """AI 注释 — 根据用途（语法/词汇）为已筛选字幕生成翻译和注释（第二阶段）"""
+    from openai import AsyncOpenAI
+
+    api_key = request.api_key or os.getenv("DEEPSEEK_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="需要提供 API Key")
+
+    system_prompt = _build_annotation_prompt(request.purpose, request.source_language, request.target_language)
+    subtitle_dicts = [
+        {"index": s.index, "start_sec": s.start_sec, "end_sec": s.end_sec, "text": s.text}
+        for s in request.subtitles
+    ]
+    api_base = request.api_base or "https://api.deepseek.com"
+    model_name = request.model_name or "deepseek-chat"
+
+    batches = _dynamic_batches(subtitle_dicts, max_chars=1500)
+    total_batches = len(batches)
+    numbered_batches = [(i + 1, b) for i, b in enumerate(batches)]
+
+    semaphore = asyncio.Semaphore(3)
+
+    async def event_generator():
+        client = AsyncOpenAI(api_key=api_key, base_url=api_base)
+        yield f"data: {json.dumps({'type': 'start', 'total_batches': total_batches})}\n\n"
+
+        async def run_batch(num: int, batch: list):
+            items, error = await _call_ai_batch_async(client, system_prompt, batch, model_name, semaphore)
+            return num, batch, items, error
+
+        tasks = [asyncio.create_task(run_batch(num, batch)) for num, batch in numbered_batches]
+
+        completed = 0
+        for coro in asyncio.as_completed(tasks):
+            num, batch, items, error = await coro
+            if not items:
+                items = [{"index": item["index"], "translation": "", "notes": "", "word": "", "definition": ""} for item in batch]
+            completed += 1
+            print(f"  AI 注释流式：第 {num}/{total_batches} 批完成 ({completed}/{total_batches})")
             yield f"data: {json.dumps({'type': 'batch', 'batch': num, 'items': items}, ensure_ascii=False)}\n\n"
 
         yield f"data: {json.dumps({'type': 'done'})}\n\n"

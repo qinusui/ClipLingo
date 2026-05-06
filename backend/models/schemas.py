@@ -135,6 +135,18 @@ class AIRecommendResponse(BaseModel):
     recommendations: List[AIRecommendItem]
 
 
+class AIAnnotateRequest(BaseModel):
+    """AI 注释请求（第二阶段：根据用途生成翻译和注释）"""
+    subtitles: List[SubtitleItem]
+    purpose: str = Field(default="grammar", description="用途：'grammar'（语法句型）或 'vocab'（背单词）")
+    api_key: Optional[str] = None
+    api_base: Optional[str] = None
+    model_name: Optional[str] = None
+    batch_size: int = 30
+    source_language: str = Field(default="en", description="源语言代码")
+    target_language: str = Field(default="zh", description="目标语言代码")
+
+
 class CardPreviewRequest(BaseModel):
     """卡片预览请求"""
     cards: List[ProcessedCard]

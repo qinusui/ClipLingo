@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { SubtitleListResponse, ProcessResult, ProcessedCard, SubtitleItem, AIRecommendResponse } from '../types';
+import type { SubtitleListResponse, ProcessResult, ProcessedCard, SubtitleItem, AIRecommendResponse, AnnotationPurpose } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
@@ -155,6 +155,110 @@ export const subtitleAPI = {
     }
   },
 
+  // AI 筛选：SSE 流式（只返回 include/reason，不做翻译注释）
+  startScreenStream: async function* (
+    subtitles: SubtitleItem[],
+    apiKey?: string,
+    customPrompt?: string,
+    batchSize?: number,
+    apiBase?: string,
+    modelName?: string,
+    sourceLanguage?: string,
+    targetLanguage?: string,
+    signal?: AbortSignal
+  ): AsyncGenerator<{ type: string; total_batches?: number; batch?: number; items?: any[] }> {
+    const response = await fetch(`${API_BASE_URL}/api/subtitles/ai-screen-stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        subtitles,
+        api_key: apiKey || undefined,
+        custom_prompt: customPrompt || undefined,
+        batch_size: batchSize ?? 30,
+        api_base: apiBase || undefined,
+        model_name: modelName || undefined,
+        source_language: sourceLanguage || 'en',
+        target_language: targetLanguage || 'zh'
+      }),
+      signal
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(err || `HTTP ${response.status}`);
+    }
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const lines = buffer.split('\n');
+      buffer = lines.pop()!;
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          yield JSON.parse(line.slice(6));
+        }
+      }
+    }
+  },
+
+  // AI 注释：SSE 流式（根据用途生成翻译和注释）
+  startAnnotateStream: async function* (
+    subtitles: SubtitleItem[],
+    purpose: AnnotationPurpose,
+    apiKey?: string,
+    batchSize?: number,
+    apiBase?: string,
+    modelName?: string,
+    sourceLanguage?: string,
+    targetLanguage?: string,
+    signal?: AbortSignal
+  ): AsyncGenerator<{ type: string; total_batches?: number; batch?: number; items?: any[] }> {
+    const response = await fetch(`${API_BASE_URL}/api/subtitles/ai-annotate-stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        subtitles,
+        purpose,
+        api_key: apiKey || undefined,
+        batch_size: batchSize ?? 30,
+        api_base: apiBase || undefined,
+        model_name: modelName || undefined,
+        source_language: sourceLanguage || 'en',
+        target_language: targetLanguage || 'zh'
+      }),
+      signal
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(err || `HTTP ${response.status}`);
+    }
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const lines = buffer.split('\n');
+      buffer = lines.pop()!;
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          yield JSON.parse(line.slice(6));
+        }
+      }
+    }
+  },
+
   // 检查 ffmpeg 安装状态
   getFFmpegStatus: async (): Promise<{ installed: boolean; version: string | null; path: string | null }> => {
     const response = await api.get('/api/subtitles/ffmpeg/status');
@@ -220,7 +324,8 @@ export const processAPI = {
     modelName?: string,
     paddingStartMs?: number,
     paddingEndMs?: number,
-    cardStyles?: string[]
+    cardStyles?: string[],
+    theme?: string
   ): Promise<{ task_id: string; status: string }> => {
     const formData = new FormData();
     formData.append('video', videoFile);
@@ -246,6 +351,9 @@ export const processAPI = {
     }
     if (cardStyles && cardStyles.length > 0) {
       formData.append('card_styles', JSON.stringify(cardStyles));
+    }
+    if (theme) {
+      formData.append('theme', theme);
     }
 
     const response = await api.post<{ task_id: string; status: string }>(

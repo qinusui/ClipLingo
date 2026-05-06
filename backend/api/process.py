@@ -104,7 +104,8 @@ async def upload_and_process(
     pre_processed: Optional[str] = Form(None),
     padding_start_ms: int = Form(200),
     padding_end_ms: int = Form(200),
-    card_styles: Optional[str] = Form(None)
+    card_styles: Optional[str] = Form(None),
+    theme: str = Form("default")
 ):
     """
     上传视频和字幕文件，后台异步处理
@@ -187,7 +188,8 @@ async def upload_and_process(
                 model_name=model_name,
                 padding_start_ms=padding_start_ms,
                 padding_end_ms=padding_end_ms,
-                card_styles=card_styles_list
+                card_styles=card_styles_list,
+                theme=theme
             )
 
             apkg_filename = Path(result["apkg_path"]).name

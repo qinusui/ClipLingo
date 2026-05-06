@@ -79,6 +79,14 @@ def load_model(model_name: str = "base") -> Optional[Any]:
         os.makedirs(os.path.dirname(token_path), exist_ok=True)
         open(token_path, "w").close()
 
+    # 修复 PyInstaller 打包后 SSL 证书验证失败的问题
+    if not os.environ.get("SSL_CERT_FILE"):
+        try:
+            import certifi
+            os.environ["SSL_CERT_FILE"] = certifi.where()
+        except ImportError:
+            pass
+
     faster_whisper = get_whisper()
     if faster_whisper is None:
         return None

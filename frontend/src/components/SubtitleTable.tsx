@@ -60,7 +60,7 @@ export const SubtitleTable = ({
         <div className="col-span-2 text-xs font-medium text-gray-500 dark:text-gray-400">时间</div>
         <div className="col-span-1 text-xs font-medium text-gray-500 dark:text-gray-400">时长</div>
         <div className="col-span-2 text-xs font-medium text-gray-500 dark:text-gray-400">
-          AI 推荐
+          AI 筛选
           {recommendations && (
             <span className="ml-1 text-green-600 dark:text-green-400">({recommendedCount})</span>
           )}

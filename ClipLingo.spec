@@ -52,6 +52,7 @@ a = Analysis(
         'genanki',
         'pysrt',
         'dotenv',
+        'certifi',
         'uvicorn.logging',
         'uvicorn.loops',
         'uvicorn.loops.auto',
@@ -65,7 +66,7 @@ a = Analysis(
     ],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=['runtime_hook_ssl.py'],
     excludes=[
         'paddlepaddle', 'paddleocr', 'cv2', 'opencv',
         'whisper', 'openai-whisper',

@@ -3,3 +3,4 @@ genanki>=0.13.0
 pysrt>=1.1.2
 python-dotenv>=1.0.0
 faster-whisper>=1.0.0
+certifi>=2023.7.22

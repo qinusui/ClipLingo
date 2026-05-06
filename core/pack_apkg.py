@@ -164,7 +164,7 @@ _VOCAB_BACK = """\
 </div>"""
 
 
-def _create_model(model_id: int, name: str, templates: list[dict]) -> genanki.Model:
+def _create_model(model_id: int, name: str, templates: list[dict], css: str = None) -> genanki.Model:
     """创建统一字段的 Anki 模型"""
     return genanki.Model(
         model_id=model_id,
@@ -179,8 +179,600 @@ def _create_model(model_id: int, name: str, templates: list[dict]) -> genanki.Mo
             {'name': 'Definition'},
         ],
         templates=templates,
-        css=_CSS
+        css=css or _CSS
     )
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  主题 1: 极简沉浸风 (Minimal Immersive)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+_CSS_MINIMAL = """\
+.card {
+  font-family: Georgia, "Noto Serif SC", "Source Han Serif CN", serif;
+  font-size: 20px;
+  text-align: center;
+  color: #1a1a2e;
+  background-color: #fafaf8;
+  margin: 0;
+  padding: 0;
+  position: relative;
+  min-height: 80vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.bg-image {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  opacity: 0.12;
+  background-size: cover;
+  background-position: center;
+  pointer-events: none;
+}
+.container {
+  position: relative;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 40px 30px;
+}
+.image-box { display: none; }
+.divider {
+  width: 40px;
+  height: 1px;
+  background: #c0b8a8;
+  margin: 24px auto;
+}
+.original {
+  font-weight: 600;
+  font-size: 1.3em;
+  line-height: 1.6;
+  color: #1a1a2e;
+  letter-spacing: 0.01em;
+}
+.translation {
+  color: #8a8578;
+  font-size: 0.95em;
+  margin-top: 12px;
+  line-height: 1.5;
+}
+.notes {
+  text-align: left;
+  color: #6b6560;
+  font-size: 0.85em;
+  margin-top: 20px;
+  padding: 12px 0;
+  border-top: 1px solid #e8e4dc;
+  white-space: pre-line;
+  font-family: "Courier New", "Source Code Pro", monospace;
+  line-height: 1.6;
+}
+.target-word {
+  font-size: 3em;
+  font-weight: 700;
+  color: #1a1a2e;
+  margin: 0 0 8px 0;
+  letter-spacing: -0.02em;
+}
+.phonetic {
+  font-size: 0.9em;
+  color: #a09888;
+  font-style: italic;
+  margin-bottom: 16px;
+}
+.word-meaning {
+  font-size: 1.3em;
+  color: #8a8578;
+  font-weight: 400;
+  margin: 16px 0;
+}
+.hint {
+  color: #c0b8a8;
+  font-size: 0.8em;
+  margin-top: 24px;
+  letter-spacing: 0.05em;
+}
+.example-box {
+  text-align: left;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #e8e4dc;
+}
+.example-box .tag {
+  display: inline-block;
+  font-size: 0.65em;
+  padding: 2px 8px;
+  color: #a09888;
+  border: 1px solid #e0dcd4;
+  border-radius: 2px;
+  margin-bottom: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.example-box .image-box { display: none; }
+.example-box .original {
+  font-weight: 400;
+  font-size: 0.95em;
+  color: #3a3530;
+  margin: 6px 0;
+  line-height: 1.5;
+}
+.nightMode .card { background-color: #161618; color: #d8d4cc; }
+.nightMode .bg-image { opacity: 0.08; }
+.nightMode .original { color: #d8d4cc; }
+.nightMode .translation { color: #7a7568; }
+.nightMode .notes { color: #8a8578; border-top-color: #2a2824; }
+.nightMode .target-word { color: #d8d4cc; }
+.nightMode .word-meaning { color: #7a7568; }
+.nightMode .hint { color: #4a4540; }
+.nightMode .divider { background: #3a3830; }
+.nightMode .example-box { border-top-color: #2a2824; }
+.nightMode .example-box .tag { color: #7a7568; border-color: #3a3830; }
+.nightMode .example-box .original { color: #a09888; }"""
+
+_MINIMAL_SENTENCE_FRONT = """\
+<div class="bg-image" style="background-image: url({{Screenshot}})"></div>
+<div class="container">
+  <div class="image-box">{{Screenshot}}</div>
+  <div class="audio-box">{{Audio}}</div>
+</div>"""
+
+_MINIMAL_SENTENCE_BACK = """\
+<div class="bg-image" style="background-image: url({{Screenshot}})"></div>
+<div class="container">
+  <div class="image-box">{{Screenshot}}</div>
+  <div class="original">{{Sentence}}</div>
+  <div class="divider"></div>
+  {{#Translation}}
+  <div class="translation">{{Translation}}</div>
+  {{/Translation}}
+  {{#Notes}}
+  <div class="notes">{{Notes}}</div>
+  {{/Notes}}
+</div>"""
+
+_MINIMAL_VOCAB_FRONT = """\
+<div class="container">
+  <div class="target-word">{{Word}}</div>
+  <div class="hint">recall the meaning from context</div>
+</div>"""
+
+_MINIMAL_VOCAB_BACK = """\
+<div class="container">
+  <div class="target-word">{{Word}}</div>
+  {{#Definition}}
+  <div class="word-meaning">{{Definition}}</div>
+  {{/Definition}}
+  <div class="divider"></div>
+  <div class="example-box">
+    <div class="tag">Context</div>
+    {{#Screenshot}}
+    <div class="image-box">{{Screenshot}}</div>
+    {{/Screenshot}}
+    <div class="original">{{Sentence}}</div>
+    <div class="audio-box">{{Audio}}</div>
+  </div>
+</div>"""
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  主题 2: Netflix 剧照风 (Netflix Stills)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+_CSS_NETFLIX = """\
+.card {
+  font-family: "Helvetica Neue", Arial, "PingFang SC", sans-serif;
+  font-size: 18px;
+  text-align: center;
+  color: #e5e5e5;
+  background-color: #141414;
+  margin: 0;
+  padding: 0;
+}
+.container { max-width: 600px; margin: 0 auto; padding: 16px; }
+.image-box img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+}
+.audio-box { margin-top: 8px; }
+.original {
+  font-weight: 600;
+  font-size: 1.15em;
+  color: #ffffff;
+  margin-top: 14px;
+  line-height: 1.5;
+}
+.translation {
+  color: #e50914;
+  font-size: 0.95em;
+  margin-top: 8px;
+  font-weight: 500;
+}
+.notes {
+  text-align: left;
+  background: rgba(255,255,255,0.08);
+  border-left: 3px solid #e50914;
+  padding: 10px 12px;
+  margin-top: 14px;
+  font-size: 0.85em;
+  border-radius: 0 4px 4px 0;
+  white-space: pre-line;
+  color: #b3b3b3;
+}
+.progress-bar {
+  width: 100%;
+  height: 3px;
+  background: #333;
+  margin-top: 20px;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.progress-bar::after {
+  content: '';
+  display: block;
+  width: 35%;
+  height: 100%;
+  background: #e50914;
+  border-radius: 2px;
+}
+.target-word {
+  font-size: 2.8em;
+  font-weight: 800;
+  color: #ffffff;
+  margin: 30px 0 8px 0;
+  text-shadow: 0 2px 20px rgba(229,9,20,0.3);
+}
+.word-meaning {
+  font-size: 1.3em;
+  color: #e50914;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+.hint {
+  color: #666;
+  font-size: 0.85em;
+  margin-top: 16px;
+}
+.example-box {
+  background: rgba(255,255,255,0.06);
+  padding: 14px;
+  border-radius: 8px;
+  text-align: left;
+  margin-top: 14px;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.example-box .tag {
+  display: inline-block;
+  font-size: 0.65em;
+  padding: 2px 10px;
+  background: #e50914;
+  color: white;
+  border-radius: 3px;
+  margin-bottom: 8px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+.example-box .image-box img {
+  width: 100%;
+  border-radius: 4px;
+}
+.example-box .original {
+  font-weight: 600;
+  font-size: 0.95em;
+  color: #e5e5e5;
+  margin: 8px 0;
+}
+.nightMode .card { background-color: #141414; }
+.nightMode .original { color: #fff; }
+.nightMode .translation { color: #e50914; }
+.nightMode .notes { background: rgba(255,255,255,0.08); border-left-color: #e50914; color: #b3b3b3; }
+.nightMode .target-word { color: #fff; }
+.nightMode .word-meaning { color: #e50914; }
+.nightMode .hint { color: #555; }
+.nightMode .example-box { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.08); }
+.nightMode .example-box .original { color: #e5e5e5; }"""
+
+_NETFLIX_SENTENCE_FRONT = """\
+<div class="container">
+  <div class="image-box">{{Screenshot}}</div>
+  <div class="audio-box">{{Audio}}</div>
+</div>"""
+
+_NETFLIX_SENTENCE_BACK = """\
+<div class="container">
+  <div class="image-box">{{Screenshot}}</div>
+  <div class="original">{{Sentence}}</div>
+  {{#Translation}}
+  <div class="translation">{{Translation}}</div>
+  {{/Translation}}
+  {{#Notes}}
+  <div class="notes">{{Notes}}</div>
+  {{/Notes}}
+  <div class="progress-bar"></div>
+</div>"""
+
+_NETFLIX_VOCAB_FRONT = """\
+<div class="container">
+  <div class="target-word">{{Word}}</div>
+  <div class="hint">recall from the scene</div>
+</div>"""
+
+_NETFLIX_VOCAB_BACK = """\
+<div class="container">
+  <div class="target-word">{{Word}}</div>
+  {{#Definition}}
+  <div class="word-meaning">{{Definition}}</div>
+  {{/Definition}}
+  <div class="example-box">
+    <div class="tag">SCENE</div>
+    {{#Screenshot}}
+    <div class="image-box">{{Screenshot}}</div>
+    {{/Screenshot}}
+    <div class="original">{{Sentence}}</div>
+    <div class="audio-box">{{Audio}}</div>
+  </div>
+  <div class="progress-bar"></div>
+</div>"""
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  主题 3: 硬核词典风 (Hardcore Dictionary)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+_CSS_DICTIONARY = """\
+.card {
+  font-family: "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+  font-size: 17px;
+  text-align: left;
+  color: #2d2a26;
+  background-color: #fefcf3;
+  margin: 0;
+  padding: 0;
+  line-height: 1.55;
+}
+.container {
+  max-width: 580px;
+  margin: 0 auto;
+  padding: 24px 28px;
+  border: 1px solid #e0dcd0;
+  box-shadow: 2px 2px 8px rgba(0,0,0,0.06);
+}
+.image-box { display: none; }
+.section-label {
+  font-size: 0.7em;
+  font-weight: 700;
+  color: #8b7355;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  margin: 16px 0 6px 0;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #e8e2d4;
+}
+.section-label:first-child { margin-top: 0; }
+.original {
+  font-weight: 600;
+  font-size: 1.1em;
+  color: #2d2a26;
+  line-height: 1.6;
+}
+.translation {
+  color: #5a5248;
+  font-size: 0.95em;
+  margin-top: 4px;
+}
+.notes {
+  background: #f5f0e4;
+  border-left: 3px solid #c4a96a;
+  padding: 10px 12px;
+  margin-top: 6px;
+  font-size: 0.85em;
+  border-radius: 0 3px 3px 0;
+  white-space: pre-line;
+  font-family: "Courier New", "Source Code Pro", monospace;
+  color: #4a4538;
+  line-height: 1.6;
+}
+.thumb {
+  float: right;
+  width: 110px;
+  margin: 0 0 8px 14px;
+  border: 1px solid #d4cfc0;
+  border-radius: 3px;
+}
+.thumb img {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 2px;
+}
+.headword {
+  font-size: 2.2em;
+  font-weight: 700;
+  color: #2d2a26;
+  margin: 0;
+  display: inline;
+}
+.headword-phonetic {
+  font-size: 0.85em;
+  color: #8b7355;
+  font-style: italic;
+  margin-left: 8px;
+}
+.pos-tag {
+  display: inline-block;
+  font-size: 0.7em;
+  font-weight: 700;
+  padding: 1px 8px;
+  background: #c4a96a;
+  color: #fff;
+  border-radius: 3px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+.word-meaning {
+  font-size: 1.2em;
+  color: #4a4538;
+  font-weight: 600;
+  margin: 10px 0;
+}
+.hint {
+  color: #b0a890;
+  font-size: 0.8em;
+  margin-top: 12px;
+  font-style: italic;
+}
+.example-box {
+  background: #f5f0e4;
+  padding: 12px 14px;
+  border-radius: 4px;
+  margin-top: 10px;
+  border: 1px solid #e8e2d4;
+}
+.example-box .tag {
+  display: inline-block;
+  font-size: 0.6em;
+  font-weight: 700;
+  padding: 1px 6px;
+  background: #8b7355;
+  color: white;
+  border-radius: 2px;
+  margin-bottom: 6px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.example-box .image-box { display: none; }
+.example-box .original {
+  font-weight: 600;
+  font-size: 0.95em;
+  color: #3a3530;
+  margin: 4px 0;
+}
+.dict-divider {
+  border: none;
+  border-top: 2px solid #c4a96a;
+  margin: 16px 0 12px 0;
+}
+.clearfix::after { content: ''; display: table; clear: both; }
+.nightMode .card { background-color: #1e1c18; color: #d4cfc0; border-color: #3a3530; }
+.nightMode .container { border-color: #3a3530; box-shadow: 2px 2px 8px rgba(0,0,0,0.3); }
+.nightMode .section-label { color: #a09070; border-bottom-color: #3a3530; }
+.nightMode .original { color: #d4cfc0; }
+.nightMode .translation { color: #a09888; }
+.nightMode .notes { background: #2a2620; border-left-color: #a09070; color: #b0a890; }
+.nightMode .headword { color: #e8e2d4; }
+.nightMode .headword-phonetic { color: #a09070; }
+.nightMode .pos-tag { background: #8b7355; }
+.nightMode .word-meaning { color: #c4b898; }
+.nightMode .hint { color: #6a6050; }
+.nightMode .example-box { background: #2a2620; border-color: #3a3530; }
+.nightMode .example-box .tag { background: #6a6050; }
+.nightMode .example-box .original { color: #b0a890; }
+.nightMode .dict-divider { border-top-color: #5a5040; }
+.nightMode .thumb { border-color: #3a3530; }"""
+
+_DICT_SENTENCE_FRONT = """\
+<div class="container">
+  <div class="image-box">{{Screenshot}}</div>
+  <div class="audio-box">{{Audio}}</div>
+  <div class="section-label">Sentence</div>
+  <div class="original" style="text-align: center;">聆听音频，回忆句子</div>
+</div>"""
+
+_DICT_SENTENCE_BACK = """\
+<div class="container clearfix">
+  <div class="section-label">Sentence</div>
+  {{#Screenshot}}
+  <div class="thumb"><div class="image-box">{{Screenshot}}</div></div>
+  {{/Screenshot}}
+  <div class="original">{{Sentence}}</div>
+
+  {{#Translation}}
+  <div class="section-label">Translation</div>
+  <div class="translation">{{Translation}}</div>
+  {{/Translation}}
+
+  {{#Notes}}
+  <div class="section-label">Notes</div>
+  <div class="notes">{{Notes}}</div>
+  {{/Notes}}
+
+  <hr class="dict-divider">
+  <div class="audio-box">{{Audio}}</div>
+</div>"""
+
+_DICT_VOCAB_FRONT = """\
+<div class="container">
+  <div class="section-label">Entry</div>
+  <div>
+    <span class="headword">{{Word}}</span>
+  </div>
+  <div class="hint">try to recall the definition</div>
+</div>"""
+
+_DICT_VOCAB_BACK = """\
+<div class="container clearfix">
+  <div class="section-label">Entry</div>
+  {{#Screenshot}}
+  <div class="thumb"><div class="image-box">{{Screenshot}}</div></div>
+  {{/Screenshot}}
+  <div>
+    <span class="headword">{{Word}}</span>
+  </div>
+
+  {{#Definition}}
+  <div class="word-meaning">{{Definition}}</div>
+  {{/Definition}}
+
+  <hr class="dict-divider">
+
+  <div class="section-label">Example</div>
+  <div class="example-box">
+    <div class="tag">Usage</div>
+    <div class="original">{{Sentence}}</div>
+    <div class="audio-box">{{Audio}}</div>
+  </div>
+
+  {{#Translation}}
+  <div class="section-label">Translation</div>
+  <div class="translation">{{Translation}}</div>
+  {{/Translation}}
+
+  {{#Notes}}
+  <div class="section-label">Notes</div>
+  <div class="notes">{{Notes}}</div>
+  {{/Notes}}
+</div>"""
+
+
+# ── 主题注册表 ──────────────────────────────────────────────
+THEMES = {
+    "default": {
+        "name": "经典",
+        "css": _CSS,
+        "sentence": (_SENTENCE_FRONT, _SENTENCE_BACK),
+        "vocab": (_VOCAB_FRONT, _VOCAB_BACK),
+    },
+    "minimal": {
+        "name": "极简沉浸",
+        "css": _CSS_MINIMAL,
+        "sentence": (_MINIMAL_SENTENCE_FRONT, _MINIMAL_SENTENCE_BACK),
+        "vocab": (_MINIMAL_VOCAB_FRONT, _MINIMAL_VOCAB_BACK),
+    },
+    "netflix": {
+        "name": "Netflix 剧照",
+        "css": _CSS_NETFLIX,
+        "sentence": (_NETFLIX_SENTENCE_FRONT, _NETFLIX_SENTENCE_BACK),
+        "vocab": (_NETFLIX_VOCAB_FRONT, _NETFLIX_VOCAB_BACK),
+    },
+    "dictionary": {
+        "name": "硬核词典",
+        "css": _CSS_DICTIONARY,
+        "sentence": (_DICT_SENTENCE_FRONT, _DICT_SENTENCE_BACK),
+        "vocab": (_DICT_VOCAB_FRONT, _DICT_VOCAB_BACK),
+    },
+}
 
 
 def create_deck(
@@ -188,7 +780,8 @@ def create_deck(
     cards: list[CardData],
     card_styles: list[str] = None,
     audio_dir: str = None,
-    screenshot_dir: str = None
+    screenshot_dir: str = None,
+    theme: str = "default"
 ) -> genanki.Deck:
     """
     创建 Anki 牌组
@@ -199,6 +792,7 @@ def create_deck(
         card_styles: 卡片样式列表，如 ["sentence"]、["vocab"]、["sentence", "vocab"]
         audio_dir: 音频目录
         screenshot_dir: 截图目录
+        theme: 主题名称，可选 "default"、"minimal"、"netflix"、"dictionary"
 
     Returns:
         genanki.Deck 对象
@@ -206,20 +800,26 @@ def create_deck(
     if card_styles is None:
         card_styles = ["sentence"]
 
+    theme_cfg = THEMES.get(theme, THEMES["default"])
+
     # 根据选中的样式构建模板列表
     templates = []
     if "sentence" in card_styles:
-        templates.append({'name': '句型卡', 'qfmt': _SENTENCE_FRONT, 'afmt': _SENTENCE_BACK})
+        qfmt, afmt = theme_cfg["sentence"]
+        templates.append({'name': '句型卡', 'qfmt': qfmt, 'afmt': afmt})
     if "vocab" in card_styles:
-        templates.append({'name': '词汇卡', 'qfmt': _VOCAB_FRONT, 'afmt': _VOCAB_BACK})
+        qfmt, afmt = theme_cfg["vocab"]
+        templates.append({'name': '词汇卡', 'qfmt': qfmt, 'afmt': afmt})
 
     if not templates:
-        templates.append({'name': '句型卡', 'qfmt': _SENTENCE_FRONT, 'afmt': _SENTENCE_BACK})
+        qfmt, afmt = theme_cfg["sentence"]
+        templates.append({'name': '句型卡', 'qfmt': qfmt, 'afmt': afmt})
 
     model = _create_model(
-        generate_model_id("ClipLingo_" + deck_name),
-        'ClipLingo',
-        templates
+        generate_model_id("ClipLingo_" + deck_name + "_" + theme),
+        f'ClipLingo-{theme_cfg["name"]}',
+        templates,
+        css=theme_cfg["css"]
     )
 
     deck = genanki.Deck(
@@ -333,7 +933,8 @@ def create_apkg(
     output_dir: str,
     audio_dir: str,
     screenshot_dir: str,
-    card_styles: list[str] = None
+    card_styles: list[str] = None,
+    theme: str = "default"
 ) -> str:
     """
     创建完整的 .apkg 文件
@@ -345,6 +946,7 @@ def create_apkg(
         audio_dir: 音频目录
         screenshot_dir: 截图目录
         card_styles: 卡片样式列表，如 ["sentence"]、["vocab"]、["sentence", "vocab"]
+        theme: 主题名称，可选 "default"、"minimal"、"netflix"、"dictionary"
 
     Returns:
         输出的 .apkg 文件路径
@@ -368,7 +970,7 @@ def create_apkg(
             definition=c.get("definition", "")
         ))
 
-    deck = create_deck(deck_name, card_data_list, card_styles=card_styles)
+    deck = create_deck(deck_name, card_data_list, card_styles=card_styles, theme=theme)
 
     # 收集媒体文件
     audio_files = []

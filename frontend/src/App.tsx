@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Film, Download, Info, Sparkles, ChevronDown, ChevronUp, MessageSquare, Sun, Moon, Monitor } from 'lucide-react';
+import { Film, Download, Info, Sparkles, ChevronDown, ChevronUp, MessageSquare, Sun, Moon, Monitor, BookOpen, GraduationCap } from 'lucide-react';
 import { Button } from './components/Button';
 import { Card, CardContent, CardHeader, CardTitle } from './components/Card';
 import { ProgressBar } from './components/ProgressBar';
@@ -7,7 +7,7 @@ import { FileUpload } from './components/FileUpload';
 import { SubtitleTable } from './components/SubtitleTable';
 import { ProcessingStatus } from './components/ProcessingStatus';
 import { CardPreview } from './components/CardPreview';
-import { SubtitleItem, ProcessedCard, AIRecommendation, CardStyle } from './types';
+import { SubtitleItem, ProcessedCard, AIRecommendation, CardStyle, CardTheme, WorkflowPhase, AnnotationPurpose } from './types';
 import { subtitleAPI, processAPI } from './services/api';
 import { useTheme } from './hooks/useTheme';
 
@@ -169,9 +169,15 @@ function App() {
   const transcribeAnimRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [recommendBatch, setRecommendBatch] = useState(0);
   const [recommendTotalBatches, setRecommendTotalBatches] = useState(0);
+  // 两阶段 AI 工作流
+  const [workflowPhase, setWorkflowPhase] = useState<WorkflowPhase>('idle');
+  const [annotationPurpose, setAnnotationPurpose] = useState<AnnotationPurpose | null>(null);
+  const [annotateBatch, setAnnotateBatch] = useState(0);
+  const [annotateTotalBatches, setAnnotateTotalBatches] = useState(0);
   const [customPrompt, setCustomPrompt] = useState<string>(buildPresetPrompt(DEFAULT_RECOMMEND_PROMPT, savedConfig?.sourceLanguage || 'en'));
   const [promptPreset, setPromptPreset] = useState<PresetKey>('grammar');
   const [cardStyles, setCardStyles] = useState<Set<CardStyle>>(new Set(['sentence']));
+  const [cardTheme, setCardTheme] = useState<CardTheme>('default');
   const [showPromptEditor, setShowPromptEditor] = useState(false);
   const recommendBatchSize = 30;
   const [ffmpegInstalled, setFFmpegInstalled] = useState<boolean | null>(null);
@@ -442,10 +448,10 @@ function App() {
     }
   };
 
-  // AI 推荐字幕
-  const handleAIRecommend = async () => {
+  // AI 筛选字幕（第一阶段：只返回 include/reason）
+  const handleAIScreen = async () => {
     if (!apiKey) {
-      alert('请先在配置中填写 DeepSeek API Key');
+      alert('请先在配置中填写 API Key');
       return;
     }
     if (subtitles.length === 0) {
@@ -457,6 +463,7 @@ function App() {
       return;
     }
 
+    setWorkflowPhase('screening');
     setIsRecommending(true);
     setRecommendations(new Map());
     setFailedIndices(new Set());
@@ -467,7 +474,7 @@ function App() {
     abortControllerRef.current = controller;
 
     try {
-      const stream = subtitleAPI.startRecommendStream(
+      const stream = subtitleAPI.startScreenStream(
         subtitles.filter(s => selectedIndices.has(s.index)),
         apiKey,
         customPrompt || undefined,
@@ -480,18 +487,15 @@ function App() {
       );
 
       for await (const event of stream) {
-        console.log('[AI推荐] SSE事件:', event.type, event.type === 'batch' ? `batch=${event.batch} items=${event.items?.length}` : '');
         if (event.type === 'start') {
           setRecommendTotalBatches(event.total_batches!);
         } else if (event.type === 'batch') {
           setRecommendBatch(event.batch!);
-          // 增量更新 recommendations
           setRecommendations(prev => {
             const next = new Map(prev || []);
             for (const item of event.items!) {
               next.set(item.index, item);
             }
-            console.log('[AI推荐] 批次', event.batch, '更新后 Map 大小:', next.size, '示例:', event.items?.[0]);
             return next;
           });
         } else if (event.type === 'done') {
@@ -499,10 +503,9 @@ function App() {
         }
       }
 
-      // 流结束后，收集失败项、标记已学单词、自动选中推荐的句子
+      // 流结束后，收集失败项、自动选中推荐的句子
       setRecommendations(prev => {
         if (!prev || prev.size === 0) return prev;
-        // 收集失败项
         const failed = new Set<number>();
         for (const [index, rec] of prev) {
           if (rec.reason?.startsWith('处理失败:')) {
@@ -511,28 +514,106 @@ function App() {
         }
         setFailedIndices(failed);
 
-        // 自动选中推荐的句子（排除失败项和已学单词）
         const recommendedIndices = Array.from(prev.values())
-          .filter(r => {
-            if (!r.include || r.reason?.startsWith('处理失败:')) return false;
-            // 跳过已学单词
-            const word = r.word?.trim().toLowerCase();
-            if (word && learnedWords.has(word)) return false;
-            return true;
-          })
+          .filter(r => r.include && !r.reason?.startsWith('处理失败:'))
           .map(r => r.index);
         setSelectedIndices(new Set(recommendedIndices));
         return prev;
       });
 
+      setWorkflowPhase('screened');
+
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
-        console.log('AI 推荐已中止');
+        console.log('AI 筛选已中止');
       } else {
-        console.error('AI 推荐失败:', error);
-        alert('AI 推荐失败: ' + (error instanceof Error ? error.message : '未知错误'));
+        console.error('AI 筛选失败:', error);
+        alert('AI 筛选失败: ' + (error instanceof Error ? error.message : '未知错误'));
       }
       setIsRecommending(false);
+      // 保留已有部分结果，回到 screened 状态（而非 idle）
+      setRecommendations(prev => {
+        if (prev && prev.size > 0) {
+          setWorkflowPhase('screened');
+        } else {
+          setWorkflowPhase('idle');
+        }
+        return prev;
+      });
+    }
+  };
+
+  // AI 注释字幕（第二阶段：根据用途生成翻译和注释）
+  const handleAIAnnotate = async (purpose: AnnotationPurpose) => {
+    if (!apiKey) {
+      alert('请先配置 API Key');
+      return;
+    }
+
+    const selectedSubs = subtitles.filter(s => {
+      const rec = recommendations?.get(s.index);
+      return rec?.include && selectedIndices.has(s.index);
+    });
+
+    if (selectedSubs.length === 0) {
+      alert('请先选择需要注释的句子');
+      return;
+    }
+
+    setAnnotationPurpose(purpose);
+    setWorkflowPhase('annotating');
+    setAnnotateBatch(0);
+    setAnnotateTotalBatches(0);
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    try {
+      const stream = subtitleAPI.startAnnotateStream(
+        selectedSubs,
+        purpose,
+        apiKey,
+        recommendBatchSize,
+        apiBase || undefined,
+        modelName || undefined,
+        sourceLanguage,
+        targetLanguage,
+        controller.signal
+      );
+
+      for await (const event of stream) {
+        if (event.type === 'start') {
+          setAnnotateTotalBatches(event.total_batches!);
+        } else if (event.type === 'batch') {
+          setAnnotateBatch(event.batch!);
+          setRecommendations(prev => {
+            const next = new Map(prev || []);
+            for (const item of event.items!) {
+              const existing = next.get(item.index);
+              if (existing) {
+                next.set(item.index, {
+                  ...existing,
+                  translation: item.translation,
+                  notes: item.notes,
+                  word: item.word,
+                  definition: item.definition,
+                });
+              }
+            }
+            return next;
+          });
+        } else if (event.type === 'done') {
+          setWorkflowPhase('annotated');
+        }
+      }
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.log('AI 注释已中止');
+      } else {
+        console.error('AI 注释失败:', error);
+        alert('AI 注释失败: ' + (error instanceof Error ? error.message : '未知错误'));
+      }
+      setWorkflowPhase('screened');
     }
   };
 
@@ -540,12 +621,7 @@ function App() {
   const selectRecommended = () => {
     if (!recommendations) return;
     const recommendedIndices = Array.from(recommendations.values())
-      .filter(r => {
-        if (!r.include) return false;
-        const word = r.word?.trim().toLowerCase();
-        if (word && learnedWords.has(word)) return false;
-        return true;
-      })
+      .filter(r => r.include && !r.reason?.startsWith('处理失败:'))
       .map(r => r.index);
     setSelectedIndices(new Set(recommendedIndices));
   };
@@ -566,7 +642,7 @@ function App() {
     abortControllerRef.current = controller;
 
     try {
-      const stream = subtitleAPI.startRecommendStream(
+      const stream = subtitleAPI.startScreenStream(
         failedSubtitles,
         apiKey,
         customPrompt || undefined,
@@ -673,7 +749,8 @@ function App() {
         modelName || undefined,
         paddingStartMs,
         paddingEndMs,
-        Array.from(cardStyles)
+        Array.from(cardStyles),
+        cardTheme
       );
 
       // 2. 轮询进度
@@ -793,6 +870,9 @@ function App() {
       setCurrentStep(-1);
       setExtractedSource('');
       transcribedVideoName.current = null;
+      setWorkflowPhase('idle');
+      setAnnotationPurpose(null);
+      setCardTheme('default');
 
     } catch (error) {
       console.error('下载失败:', error);
@@ -1025,97 +1105,77 @@ function App() {
                     onFileSelect={setSubtitleFile}
                     selectedFile={subtitleFile}
                     onClear={() => setSubtitleFile(null)}
-                    label="字幕文件"
+                    label="字幕文件（可选）"
                     icon="text"
                   />
-                  {subtitleFile ? (
-                    <Button
-                      variant="primary"
-                      className="w-full"
-                      onClick={handleLoadSubtitles}
-                      disabled={!subtitleFile || isProcessing}
-                    >
-                      加载字幕
-                    </Button>
-                  ) : (
-                    <div className="space-y-2">
-                      {/* 已提取内嵌字幕 */}
-                      {extractedSource && (
-                        <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 px-3 py-2 rounded border border-green-200 dark:text-green-400 dark:bg-green-900/30 dark:border-green-800">
-                          <span className="flex-1">{extractedSource}</span>
-                          <button
-                            className="text-xs text-gray-500 underline hover:text-gray-700 shrink-0 dark:text-gray-400 dark:hover:text-gray-200"
-                            onClick={() => { setExtractedSource(''); setShowModelPicker(true); }}
+
+                  {/* Whisper 模型选择器 */}
+                  {showModelPicker && !isTranscribing && (
+                    <div className="border border-gray-200 rounded-lg p-4 bg-gray-50 space-y-3 dark:border-gray-600 dark:bg-gray-800">
+                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">选择 Whisper 模型（首次使用会自动下载模型）</p>
+                      <div className="space-y-2">
+                        {WHISPER_MODELS.map(m => (
+                          <label
+                            key={m.key}
+                            className={`flex items-center gap-3 p-2 rounded cursor-pointer border transition-colors ${
+                              whisperModel === m.key
+                                ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30 dark:border-primary-400'
+                                : 'border-gray-200 hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-700'
+                            }`}
                           >
-                            改用 Whisper 转录
-                          </button>
-                        </div>
-                      )}
-                      {/* 未提取时显示生成按钮或进度 */}
-                      {!extractedSource && (
-                        <>
-                          <Button
-                            variant={subtitles.length > 0 ? 'secondary' : 'primary'}
-                            className="w-full"
-                            onClick={handleTranscribe}
-                            disabled={!videoFile || isProcessing || isTranscribing || checkingEmbedded || subtitles.length > 0}
-                          >
-                            {subtitles.length > 0 ? '字幕已就绪' : checkingEmbedded ? '检测字幕中...' : isTranscribing ? '转录中...' : '生成字幕'}
-                          </Button>
-                        </>
-                      )}
-                      {showModelPicker && !isTranscribing && (
-                        <div className="border border-gray-200 rounded-lg p-4 bg-gray-50 space-y-3 dark:border-gray-600 dark:bg-gray-800">
-                          <p className="text-sm font-medium text-gray-700 dark:text-gray-300">选择 Whisper 模型（首次使用会自动下载模型）</p>
-                          <div className="space-y-2">
-                            {WHISPER_MODELS.map(m => (
-                              <label
-                                key={m.key}
-                                className={`flex items-center gap-3 p-2 rounded cursor-pointer border transition-colors ${
-                                  whisperModel === m.key
-                                    ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30 dark:border-primary-400'
-                                    : 'border-gray-200 hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-700'
-                                }`}
-                              >
-                                <input
-                                  type="radio"
-                                  name="whisperModel"
-                                  value={m.key}
-                                  checked={whisperModel === m.key}
-                                  onChange={() => setWhisperModel(m.key)}
-                                  className="w-4 h-4 text-primary-600"
-                                />
-                                <div className="flex-1">
-                                  <span className="font-medium text-sm">{m.label}</span>
-                                  <span className="text-xs text-gray-500 ml-2 dark:text-gray-400">{m.size}</span>
-                                </div>
-                                <span className="text-xs text-gray-400 dark:text-gray-500">{m.speed}</span>
-                              </label>
-                            ))}
-                          </div>
-                          <div className="flex gap-2">
-                            <Button variant="primary" size="sm" onClick={startTranscribe}>
-                              开始转录
-                            </Button>
-                            <Button variant="ghost" size="sm" onClick={() => setShowModelPicker(false)}>
-                              取消
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-                      {isTranscribing && (
-                        <div className="space-y-1">
-                          <div className="w-full bg-gray-200 rounded-full h-2 dark:bg-gray-600">
-                            <div
-                              className="bg-blue-500 h-2 rounded-full transition-all duration-300"
-                              style={{ width: `${transcribeAnimProgress}%` }}
+                            <input
+                              type="radio"
+                              name="whisperModel"
+                              value={m.key}
+                              checked={whisperModel === m.key}
+                              onChange={() => setWhisperModel(m.key)}
+                              className="w-4 h-4 text-primary-600"
                             />
-                          </div>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">{transcribeMessage}</p>
-                        </div>
-                      )}
+                            <div className="flex-1">
+                              <span className="font-medium text-sm">{m.label}</span>
+                              <span className="text-xs text-gray-500 ml-2 dark:text-gray-400">{m.size}</span>
+                            </div>
+                            <span className="text-xs text-gray-400 dark:text-gray-500">{m.speed}</span>
+                          </label>
+                        ))}
+                      </div>
+                      <div className="flex gap-2">
+                        <Button variant="primary" size="sm" onClick={startTranscribe}>
+                          开始转录
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => setShowModelPicker(false)}>
+                          取消
+                        </Button>
+                      </div>
                     </div>
                   )}
+
+                  {/* 转录进度 */}
+                  {isTranscribing && (
+                    <div className="space-y-1">
+                      <div className="w-full bg-gray-200 rounded-full h-2 dark:bg-gray-600">
+                        <div
+                          className="bg-blue-500 h-2 rounded-full transition-all duration-300"
+                          style={{ width: `${transcribeAnimProgress}%` }}
+                        />
+                      </div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">{transcribeMessage}</p>
+                    </div>
+                  )}
+
+                  {/* 已提取内嵌字幕提示 */}
+                  {extractedSource && (
+                    <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 px-3 py-2 rounded border border-green-200 dark:text-green-400 dark:bg-green-900/30 dark:border-green-800">
+                      <span className="flex-1">{extractedSource}</span>
+                      <button
+                        className="text-xs text-gray-500 underline hover:text-gray-700 shrink-0 dark:text-gray-400 dark:hover:text-gray-200"
+                        onClick={() => { setExtractedSource(''); setShowModelPicker(true); }}
+                      >
+                        改用 Whisper 转录
+                      </button>
+                    </div>
+                  )}
+
                   {/* 字幕处理配置 */}
                   <div className="p-4 bg-gray-50 rounded-lg space-y-3 dark:bg-gray-800">
                     <div className="text-xs font-medium text-gray-600 dark:text-gray-400">字幕处理配置</div>
@@ -1277,159 +1337,74 @@ function App() {
                   )}
                 </div>
               </div>
+
+              {/* 确认操作行 */}
+              <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
+                <div className="flex items-center gap-3 flex-wrap">
+                  {/* 状态指示 */}
+                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
+                    videoFile
+                      ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                      : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500'
+                  }`}>
+                    {videoFile ? '✓' : '○'} 视频
+                  </span>
+                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
+                    subtitles.length > 0
+                      ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                      : subtitleFile
+                        ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+                        : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500'
+                  }`}>
+                    {subtitles.length > 0 ? `✓ 字幕 (${subtitles.length} 条)` : subtitleFile ? '○ 字幕待加载' : '○ 字幕'}
+                  </span>
+
+                  <div className="flex-1" />
+
+                  {/* 操作按钮 */}
+                  {subtitles.length > 0 ? (
+                    <span className="text-sm text-green-600 dark:text-green-400 font-medium">字幕已就绪，进入下一步</span>
+                  ) : subtitleFile ? (
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={handleLoadSubtitles}
+                      disabled={isProcessing}
+                    >
+                      加载字幕
+                    </Button>
+                  ) : videoFile ? (
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={handleTranscribe}
+                      disabled={isProcessing || isTranscribing || checkingEmbedded}
+                    >
+                      {checkingEmbedded ? '检测字幕中...' : isTranscribing ? '转录中...' : '生成字幕'}
+                    </Button>
+                  ) : (
+                    <span className="text-sm text-gray-400 dark:text-gray-500">请先上传视频</span>
+                  )}
+                </div>
+              </div>
             </CardContent>
           </Card>
 
-          {/* Step 2 · 筛选内容 */}
+          {/* Step 2 · AI 筛选 */}
           {subtitles.length > 0 && (
             <div ref={step2Ref}>
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <span className="bg-primary-100 text-primary-700 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold dark:bg-primary-900/40 dark:text-primary-300">2</span>
-                  筛选内容
+                  AI 筛选
                   <span className="text-sm font-normal text-gray-500 ml-2 dark:text-gray-400">
                     (已选 {selectedIndices.size} / {filteredSubtitles.length}{filteredSubtitles.length !== subtitles.length ? `，共 ${subtitles.length} 条` : ''})
                   </span>
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                {/* 工具栏 */}
-                <div className="flex items-center gap-2 mb-4">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={handleAIRecommend}
-                    disabled={isRecommending || isProcessing}
-                  >
-                    <Sparkles className="w-4 h-4 mr-2" />
-                    {isRecommending
-                      ? recommendTotalBatches > 0
-                        ? `分析中 ${recommendBatch}/${recommendTotalBatches}`
-                        : 'AI 分析中...'
-                      : 'AI 推荐'}
-                  </Button>
-                  {isRecommending && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => abortControllerRef.current?.abort()}
-                    >
-                      停止
-                    </Button>
-                  )}
-                  {recommendations && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={selectRecommended}
-                    >
-                      仅选推荐
-                    </Button>
-                  )}
-                  {failedIndices.size > 0 && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={handleRetryFailed}
-                      disabled={isRecommending}
-                      className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
-                    >
-                      重试失败 ({failedIndices.size})
-                    </Button>
-                  )}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setShowPromptEditor(!showPromptEditor)}
-                  >
-                    {showPromptEditor ? (
-                      <ChevronUp className="w-4 h-4 mr-1" />
-                    ) : (
-                      <ChevronDown className="w-4 h-4 mr-1" />
-                    )}
-                    提示词
-                  </Button>
-                </div>
-
-                {/* 提示词编辑器 */}
-                {showPromptEditor && (
-                  <div className="mb-4 p-4 bg-gray-50 rounded-lg space-y-3 dark:bg-gray-800">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">提示词预设</label>
-                      <div className="flex gap-2">
-                        {(Object.keys(PRESET_TEMPLATES) as PresetKey[]).map((key) => (
-                          <button
-                            key={key}
-                            onClick={() => {
-                              setPromptPreset(key);
-                              setCustomPrompt(buildPresetPrompt(PRESET_TEMPLATES[key].prompt, sourceLanguage));
-                            }}
-                            disabled={isRecommending}
-                            className={`px-3 py-1.5 rounded text-sm font-medium border transition-colors ${
-                              promptPreset === key
-                                ? 'bg-primary-500 text-white border-primary-500'
-                                : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-600'
-                            }`}
-                          >
-                            {PRESET_TEMPLATES[key].label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">卡片样式</label>
-                      <div className="flex gap-3">
-                        {([
-                          { key: 'sentence' as CardStyle, label: '句型卡', desc: '正面：截图+音频 → 背面：原文+翻译+注释' },
-                          { key: 'vocab' as CardStyle, label: '词汇卡', desc: '正面：单词 → 背面：释义+例句（含截图音频）' },
-                        ]).map(({ key, label, desc }) => (
-                          <label
-                            key={key}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium border cursor-pointer transition-colors ${
-                              cardStyles.has(key)
-                                ? 'bg-primary-500 text-white border-primary-500'
-                                : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-600'
-                            }`}
-                            title={desc}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={cardStyles.has(key)}
-                              disabled={isProcessing}
-                              onChange={() => {
-                                setCardStyles(prev => {
-                                  const next = new Set(prev);
-                                  if (next.has(key)) {
-                                    if (next.size > 1) next.delete(key); // 至少保留一种
-                                  } else {
-                                    next.add(key);
-                                  }
-                                  return next;
-                                });
-                              }}
-                              className="sr-only"
-                            />
-                            {label}
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">提示词内容（可自由修改）</label>
-                      <textarea
-                        value={customPrompt}
-                        onChange={(e) => setCustomPrompt(e.target.value)}
-                        rows={4}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm font-mono dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                        placeholder="输入自定义提示词..."
-                        disabled={isRecommending}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* 规则筛选 */}
+                {/* 规则筛选（前置） */}
                 <div className="flex flex-wrap items-end gap-3 mb-4 p-3 bg-gray-50 rounded-lg dark:bg-gray-800/50">
                   <div className="flex items-center gap-1.5">
                     <label className="text-xs text-gray-500 dark:text-gray-400">时长</label>
@@ -1481,7 +1456,104 @@ function App() {
                   </span>
                 </div>
 
-                {/* 字幕表格 - 全宽 */}
+                {/* 工具栏 */}
+                <div className="flex items-center gap-2 mb-4">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleAIScreen}
+                    disabled={isRecommending || isProcessing || workflowPhase === 'annotating'}
+                  >
+                    <Sparkles className="w-4 h-4 mr-2" />
+                    {workflowPhase === 'screening'
+                      ? recommendTotalBatches > 0
+                        ? `筛选中 ${recommendBatch}/${recommendTotalBatches}`
+                        : 'AI 筛选中...'
+                      : 'AI 筛选'}
+                  </Button>
+                  {workflowPhase === 'screening' && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => abortControllerRef.current?.abort()}
+                    >
+                      停止
+                    </Button>
+                  )}
+                  {recommendations && workflowPhase !== 'idle' && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={selectRecommended}
+                    >
+                      仅选推荐
+                    </Button>
+                  )}
+                  {failedIndices.size > 0 && workflowPhase !== 'screening' && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleRetryFailed}
+                      disabled={isRecommending}
+                      className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                    >
+                      重试失败 ({failedIndices.size})
+                    </Button>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowPromptEditor(!showPromptEditor)}
+                  >
+                    {showPromptEditor ? (
+                      <ChevronUp className="w-4 h-4 mr-1" />
+                    ) : (
+                      <ChevronDown className="w-4 h-4 mr-1" />
+                    )}
+                    提示词
+                  </Button>
+                </div>
+
+                {/* 提示词编辑器（仅筛选标准） */}
+                {showPromptEditor && (
+                  <div className="mb-4 p-4 bg-gray-50 rounded-lg space-y-3 dark:bg-gray-800">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">提示词预设</label>
+                      <div className="flex gap-2">
+                        {(Object.keys(PRESET_TEMPLATES) as PresetKey[]).map((key) => (
+                          <button
+                            key={key}
+                            onClick={() => {
+                              setPromptPreset(key);
+                              setCustomPrompt(buildPresetPrompt(PRESET_TEMPLATES[key].prompt, sourceLanguage));
+                            }}
+                            disabled={isRecommending}
+                            className={`px-3 py-1.5 rounded text-sm font-medium border transition-colors ${
+                              promptPreset === key
+                                ? 'bg-primary-500 text-white border-primary-500'
+                                : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-600'
+                            }`}
+                          >
+                            {PRESET_TEMPLATES[key].label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">提示词内容（可自由修改）</label>
+                      <textarea
+                        value={customPrompt}
+                        onChange={(e) => setCustomPrompt(e.target.value)}
+                        rows={4}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm font-mono dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                        placeholder="输入自定义提示词..."
+                        disabled={isRecommending}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* 字幕表格 */}
                 <SubtitleTable
                   subtitles={filteredSubtitles}
                   selectedIndices={selectedIndices}
@@ -1495,56 +1567,325 @@ function App() {
                   learnedWords={learnedWords}
                 />
 
-                {/* 底部按钮 */}
-                <Button
-                  variant="primary"
-                  className="w-full mt-4"
-                  onClick={handleProcess}
-                  disabled={selectedIndices.size === 0 || isProcessing || !videoFile || isRecommending}
-                >
-                  开始处理 ({selectedIndices.size} 条)
-                </Button>
+                {/* 筛选完成提示 */}
+                {workflowPhase === 'screened' && recommendations && (
+                  <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg dark:bg-green-900/20 dark:border-green-800">
+                    <p className="text-sm text-green-700 dark:text-green-300">
+                      筛选完成 — {Array.from(recommendations.values()).filter(r => r.include).length} 条推荐。
+                      确认选择后，进入下一步进行注释翻译。
+                    </p>
+                  </div>
+                )}
               </CardContent>
             </Card>
             </div>
           )}
 
-          {/* Step 3 · 生成卡片 */}
-          {(isProcessing || (result && result.length > 0)) && (
+          {/* Step 3 · AI 注释 */}
+          {['screened', 'annotating', 'annotated'].includes(workflowPhase) && (
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <span className="bg-primary-100 text-primary-700 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold dark:bg-primary-900/40 dark:text-primary-300">3</span>
-                  生成卡片
+                  AI 注释
+                  <span className="text-sm font-normal text-gray-500 ml-2 dark:text-gray-400">
+                    (已选 {selectedIndices.size} 条)
+                  </span>
                 </CardTitle>
               </CardHeader>
               <CardContent>
+
+                {/* 3a: 选择用途 */}
+                {workflowPhase === 'screened' && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <button
+                      onClick={() => handleAIAnnotate('grammar')}
+                      disabled={isProcessing}
+                      className="p-4 rounded-lg border-2 text-left transition-all border-gray-200 hover:border-primary-300 cursor-pointer dark:border-gray-700 dark:hover:border-primary-600"
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <BookOpen className="w-5 h-5 text-primary-600 dark:text-primary-400" />
+                        <span className="font-medium text-gray-900 dark:text-gray-100">语法句型</span>
+                      </div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        侧重语法结构、句型分析、实用表达
+                      </p>
+                    </button>
+                    <button
+                      onClick={() => handleAIAnnotate('vocab')}
+                      disabled={isProcessing}
+                      className="p-4 rounded-lg border-2 text-left transition-all border-gray-200 hover:border-primary-300 cursor-pointer dark:border-gray-700 dark:hover:border-primary-600"
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <GraduationCap className="w-5 h-5 text-primary-600 dark:text-primary-400" />
+                        <span className="font-medium text-gray-900 dark:text-gray-100">背单词</span>
+                      </div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        侧重生词提取、词性释义、语境记忆
+                      </p>
+                    </button>
+                  </div>
+                )}
+
+                {/* 3b: 注释进行中 + 主题/结构选择（等待时可配置） */}
+                {workflowPhase === 'annotating' && (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* 左：进度 */}
+                    <div>
+                      <div className="flex items-center gap-2 mb-3">
+                        <div className="animate-spin w-4 h-4 border-2 border-primary-500 border-t-transparent rounded-full" />
+                        <span className="text-sm text-gray-600 dark:text-gray-400">
+                          {annotationPurpose === 'grammar' ? '语法句型' : '背单词'}模式 · 注释中
+                          {annotateTotalBatches > 0 ? ` ${annotateBatch}/${annotateTotalBatches}` : '...'}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => abortControllerRef.current?.abort()}
+                        >
+                          停止
+                        </Button>
+                      </div>
+                      {annotateTotalBatches > 0 && (
+                        <ProgressBar progress={(annotateBatch / annotateTotalBatches) * 100} />
+                      )}
+                      <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">
+                        注释完成后可预览卡片并生成牌组
+                      </p>
+                    </div>
+                    {/* 右：主题/结构选择（等待时配置） */}
+                    <div className="space-y-3">
+                      <div className="p-3 bg-gray-50 rounded-lg dark:bg-gray-800">
+                        <label className="block text-xs font-medium text-gray-600 mb-1.5 dark:text-gray-400">卡片结构</label>
+                        <div className="flex gap-2">
+                          {([
+                            { key: 'sentence' as CardStyle, label: '句型卡', desc: '正面：截图+音频 → 背面：原文+翻译+注释' },
+                            { key: 'vocab' as CardStyle, label: '词汇卡', desc: '正面：单词 → 背面：释义+例句（含截图音频）' },
+                          ]).map(({ key, label, desc }) => (
+                            <label
+                              key={key}
+                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border cursor-pointer transition-colors ${
+                                cardStyles.has(key)
+                                  ? 'bg-primary-500 text-white border-primary-500'
+                                  : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-600'
+                              }`}
+                              title={desc}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={cardStyles.has(key)}
+                                onChange={() => {
+                                  setCardStyles(prev => {
+                                    const next = new Set(prev);
+                                    if (next.has(key)) {
+                                      if (next.size > 1) next.delete(key);
+                                    } else {
+                                      next.add(key);
+                                    }
+                                    return next;
+                                  });
+                                }}
+                                className="sr-only"
+                              />
+                              {label}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="p-3 bg-gray-50 rounded-lg dark:bg-gray-800">
+                        <label className="block text-xs font-medium text-gray-600 mb-1.5 dark:text-gray-400">视觉主题</label>
+                        <div className="grid grid-cols-4 gap-1.5">
+                          {([
+                            { key: 'default' as CardTheme, label: '经典', desc: '清爽简洁，适合日常学习' },
+                            { key: 'minimal' as CardTheme, label: '极简沉浸', desc: '衬线字体，纸质书质感' },
+                            { key: 'netflix' as CardTheme, label: 'Netflix', desc: '暗色剧照风，沉浸观影感' },
+                            { key: 'dictionary' as CardTheme, label: '硬核词典', desc: '信息密集，专业词典排版' },
+                          ]).map(({ key, label, desc }) => (
+                            <button
+                              key={key}
+                              onClick={() => setCardTheme(key)}
+                              title={desc}
+                              className={`px-2 py-1.5 rounded text-xs font-medium border transition-colors ${
+                                cardTheme === key
+                                  ? 'bg-primary-500 text-white border-primary-500'
+                                  : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-600'
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 3c: 注释完成 */}
+                {workflowPhase === 'annotated' && (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3">
+                      <div className="p-3 bg-green-50 border border-green-200 rounded-lg dark:bg-green-900/20 dark:border-green-800 flex-1">
+                        <p className="text-sm text-green-700 dark:text-green-300">
+                          注释完成 — {selectedIndices.size} 条句子
+                          {annotationPurpose && `（${annotationPurpose === 'grammar' ? '语法句型' : '背单词'}模式）`}
+                        </p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setWorkflowPhase('screened');
+                          setAnnotationPurpose(null);
+                        }}
+                      >
+                        重新选择
+                      </Button>
+                    </div>
+
+                    {/* 主题/结构选择 */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="p-3 bg-gray-50 rounded-lg dark:bg-gray-800">
+                        <label className="block text-xs font-medium text-gray-600 mb-1.5 dark:text-gray-400">卡片结构</label>
+                        <div className="flex gap-2">
+                          {([
+                            { key: 'sentence' as CardStyle, label: '句型卡', desc: '正面：截图+音频 → 背面：原文+翻译+注释' },
+                            { key: 'vocab' as CardStyle, label: '词汇卡', desc: '正面：单词 → 背面：释义+例句（含截图音频）' },
+                          ]).map(({ key, label, desc }) => (
+                            <label
+                              key={key}
+                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border cursor-pointer transition-colors ${
+                                cardStyles.has(key)
+                                  ? 'bg-primary-500 text-white border-primary-500'
+                                  : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-600'
+                              }`}
+                              title={desc}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={cardStyles.has(key)}
+                                onChange={() => {
+                                  setCardStyles(prev => {
+                                    const next = new Set(prev);
+                                    if (next.has(key)) {
+                                      if (next.size > 1) next.delete(key);
+                                    } else {
+                                      next.add(key);
+                                    }
+                                    return next;
+                                  });
+                                }}
+                                className="sr-only"
+                              />
+                              {label}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="p-3 bg-gray-50 rounded-lg dark:bg-gray-800">
+                        <label className="block text-xs font-medium text-gray-600 mb-1.5 dark:text-gray-400">视觉主题</label>
+                        <div className="grid grid-cols-4 gap-1.5">
+                          {([
+                            { key: 'default' as CardTheme, label: '经典', desc: '清爽简洁，适合日常学习' },
+                            { key: 'minimal' as CardTheme, label: '极简沉浸', desc: '衬线字体，纸质书质感' },
+                            { key: 'netflix' as CardTheme, label: 'Netflix', desc: '暗色剧照风，沉浸观影感' },
+                            { key: 'dictionary' as CardTheme, label: '硬核词典', desc: '信息密集，专业词典排版' },
+                          ]).map(({ key, label, desc }) => (
+                            <button
+                              key={key}
+                              onClick={() => setCardTheme(key)}
+                              title={desc}
+                              className={`px-2 py-1.5 rounded text-xs font-medium border transition-colors ${
+                                cardTheme === key
+                                  ? 'bg-primary-500 text-white border-primary-500'
+                                  : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-600'
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Step 4 · 预览、生成与下载 */}
+          {(workflowPhase === 'annotated' || isProcessing || (result && result.length > 0)) && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <span className="bg-primary-100 text-primary-700 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold dark:bg-primary-900/40 dark:text-primary-300">4</span>
+                  预览与生成
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {/* 注释后预览 + 处理按钮 */}
+                {workflowPhase === 'annotated' && !isProcessing && !(result && result.length > 0) && recommendations && (
+                  <div className="space-y-4">
+                    <CardPreview
+                      cards={Array.from(recommendations.values())
+                        .filter(r => r.include && r.translation && selectedIndices.has(r.index))
+                        .map(r => ({
+                          sentence: subtitles.find(s => s.index === r.index)?.text || '',
+                          translation: r.translation || '',
+                          notes: r.notes || '',
+                          word: r.word,
+                          definition: r.definition,
+                          start_sec: subtitles.find(s => s.index === r.index)?.start_sec || 0,
+                          end_sec: subtitles.find(s => s.index === r.index)?.end_sec || 0,
+                        }))}
+                      cardStyles={Array.from(cardStyles)}
+                      theme={cardTheme}
+                      currentIndex={previewIndex}
+                      onPrevious={() => setPreviewIndex(Math.max(0, previewIndex - 1))}
+                      onNext={() => {
+                        const maxIndex = Array.from(recommendations.values())
+                          .filter(r => r.include && r.translation && selectedIndices.has(r.index)).length - 1;
+                        setPreviewIndex(Math.min(maxIndex, previewIndex + 1));
+                      }}
+                    />
+                    <Button
+                      variant="primary"
+                      className="w-full"
+                      onClick={handleProcess}
+                      disabled={selectedIndices.size === 0 || !videoFile}
+                    >
+                      开始处理 ({selectedIndices.size} 条)
+                    </Button>
+                  </div>
+                )}
+
                 {/* 处理进度 */}
-                <ProcessingStatus
-                  steps={processingSteps}
-                  currentStepIndex={currentStep}
-                />
                 {isProcessing && (
-                  <div className="mt-4">
+                  <div className="space-y-3">
+                    <ProcessingStatus
+                      steps={processingSteps}
+                      currentStepIndex={currentStep}
+                    />
                     <ProgressBar
                       progress={(currentStep + 1) / PROCESSING_STEPS.length * 100}
                     />
                   </div>
                 )}
 
-                {/* 卡片预览 */}
+                {/* 处理完成：卡片预览 + 下载 */}
                 {result && result.length > 0 && (
-                  <div className="mt-6">
+                  <div className="space-y-4">
                     <CardPreview
                       cards={result}
                       cardStyles={Array.from(cardStyles)}
+                      theme={cardTheme}
                       currentIndex={previewIndex}
                       onPrevious={() => setPreviewIndex(Math.max(0, previewIndex - 1))}
                       onNext={() => setPreviewIndex(Math.min(result.length - 1, previewIndex + 1))}
                     />
                     <Button
                       variant="primary"
-                      className="w-full mt-4"
+                      className="w-full"
                       onClick={handleDownload}
                     >
                       <Download className="w-4 h-4 mr-2" />

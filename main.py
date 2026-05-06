@@ -35,7 +35,8 @@ def run(
     model_name: str = None,
     padding_start_ms: int = 200,
     padding_end_ms: int = 200,
-    card_styles: list = None
+    card_styles: list = None,
+    theme: str = "default"
 ) -> dict:
     """
     运行完整流程
@@ -270,7 +271,8 @@ def run(
         str(output_dir),
         str(audio_dir),
         str(screenshot_dir),
-        card_styles=card_styles
+        card_styles=card_styles,
+        theme=theme
     )
 
     # 完成
