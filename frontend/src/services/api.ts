@@ -65,6 +65,12 @@ export const subtitleAPI = {
     };
   },
 
+  // Whisper 转录：取消任务
+  cancelTranscribe: async (taskId: string) => {
+    const response = await api.post(`/api/subtitles/transcribe/cancel/${taskId}`);
+    return response.data;
+  },
+
   // 获取示例字幕
   getExample: async (): Promise<SubtitleListResponse> => {
     const response = await api.get<SubtitleListResponse>('/api/subtitles/example');

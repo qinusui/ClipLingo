@@ -809,6 +809,7 @@ async def ai_annotate_stream(request: AIAnnotateRequest):
 # 转录任务进度存储
 _transcribe_store: dict = {}
 _transcribe_lock = _threading.Lock()
+_MAX_WHISPER_SECONDS = 1800  # 30 分钟超时
 
 # 项目根目录（用于子进程设置 sys.path）
 if getattr(sys, 'frozen', False):
@@ -863,9 +864,12 @@ def _run_transcribe_task(task_id: str, video_path_str: str, srt_path_str: str,
 
     def update(status, step, message):
         with _transcribe_lock:
-            _transcribe_store[task_id] = {"status": status, "step": step, "total_steps": 4, "message": message}
+            store = _transcribe_store.get(task_id, {})
+            store.update({"status": status, "step": step, "total_steps": 4, "message": message})
+            _transcribe_store[task_id] = store
 
     result_json_path = str(Path(video_path_str).with_suffix(".result.json"))
+    proc = None
 
     try:
         update("processing", 1, "准备转录...")
@@ -882,16 +886,38 @@ def _run_transcribe_task(task_id: str, video_path_str: str, srt_path_str: str,
         proc.start()
         child_conn.close()  # 父端不写，关闭子端引用
 
-        transcribe_start = 0
+        # 存储 proc 引用，供 cancel 端点使用
+        with _transcribe_lock:
+            store = _transcribe_store.get(task_id, {})
+            store["_proc"] = proc
+            _transcribe_store[task_id] = store
+
+        transcribe_start = _time.time()
+        last_activity = transcribe_start
+        timed_out = False
+        cancelled = False
+
         while proc.is_alive():
+            # 检查是否被取消
+            with _transcribe_lock:
+                if _transcribe_store.get(task_id, {}).get("_cancelled"):
+                    cancelled = True
+                    break
+
+            # 超时看门狗
+            elapsed_total = _time.time() - transcribe_start
+            if elapsed_total > _MAX_WHISPER_SECONDS:
+                timed_out = True
+                break
+
             if parent_conn.poll(1):
                 try:
                     msg = parent_conn.recv()
+                    last_activity = _time.time()
                     step = msg.get("step")
                     if step == "loading":
                         update("processing", 1, msg.get("message", "加载模型中..."))
                     elif step == "transcribing":
-                        transcribe_start = _time.time()
                         update("processing", 2, "转录中，请耐心等待...")
                     elif step == "done":
                         break
@@ -899,12 +925,21 @@ def _run_transcribe_task(task_id: str, video_path_str: str, srt_path_str: str,
                     break
             else:
                 # 无进度消息时显示已用时间
-                if transcribe_start:
-                    elapsed = int(_time.time() - transcribe_start)
-                    mins, secs = elapsed // 60, elapsed % 60
-                    update("processing", 2, f"转录中... 已用时 {mins}分{secs}秒")
+                elapsed = int(_time.time() - transcribe_start)
+                mins, secs = elapsed // 60, elapsed % 60
+                update("processing", 2, f"转录中... 已用时 {mins}分{secs}秒")
 
-        proc.join()
+        # 终止子进程（超时或取消时）
+        if timed_out or cancelled:
+            if proc.is_alive():
+                proc.terminate()
+                proc.join(timeout=5)
+                if proc.is_alive():
+                    proc.kill()
+            reason = "转录超时（超过 30 分钟）" if timed_out else "转录已取消"
+            raise RuntimeError(reason)
+
+        proc.join(timeout=30)
 
         if proc.exitcode != 0:
             raise RuntimeError(f"Whisper 进程异常退出 (code={proc.exitcode})")
@@ -941,6 +976,17 @@ def _run_transcribe_task(task_id: str, video_path_str: str, srt_path_str: str,
             }
 
     finally:
+        # 确保子进程已终止
+        if proc is not None and proc.is_alive():
+            proc.terminate()
+            proc.join(timeout=5)
+            if proc.is_alive():
+                proc.kill()
+        # 清理 store 中的内部引用
+        with _transcribe_lock:
+            store = _transcribe_store.get(task_id, {})
+            store.pop("_proc", None)
+            store.pop("_cancelled", None)
         # 清理临时文件
         if Path(video_path_str).exists():
             Path(video_path_str).unlink(missing_ok=True)
@@ -1059,7 +1105,25 @@ async def transcribe_progress(task_id: str):
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    return task
+    # 过滤内部字段（_proc, _cancelled 等不可序列化的引用）
+    return {k: v for k, v in task.items() if not k.startswith("_")}
+
+
+@router.post("/transcribe/cancel/{task_id}")
+async def cancel_transcribe(task_id: str):
+    """取消正在进行的转录任务"""
+    with _transcribe_lock:
+        task = _transcribe_store.get(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="任务不存在")
+        task["_cancelled"] = True
+        proc = task.get("_proc")
+
+    # 尝试立即终止子进程
+    if proc is not None and proc.is_alive():
+        proc.terminate()
+
+    return {"status": "cancelling", "message": "转录取消中..."}
 
 
 @router.get("/example", response_model=SubtitleListResponse)

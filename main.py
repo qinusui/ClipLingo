@@ -80,9 +80,21 @@ def run(
         try:
             with open(checkpoint_path, 'r', encoding='utf-8') as f:
                 checkpoint = json.load(f)
-            # 验证 checkpoint 与当前输入匹配
-            if (checkpoint.get("video_path") == str(video_path) and
-                checkpoint.get("subtitle_path") == str(subtitle_path)):
+            # 验证 checkpoint 与当前输入匹配（文件路径 + 所有影响输出的参数）
+            cp = checkpoint.get("params", {})
+            params_match = (
+                checkpoint.get("video_path") == str(video_path) and
+                checkpoint.get("subtitle_path") == str(subtitle_path) and
+                cp.get("min_duration") == min_duration and
+                cp.get("padding_start_ms") == padding_start_ms and
+                cp.get("padding_end_ms") == padding_end_ms and
+                cp.get("model_name") == model_name and
+                cp.get("api_base") == api_base and
+                cp.get("language") == language and
+                cp.get("card_styles") == card_styles and
+                cp.get("theme") == theme
+            )
+            if params_match:
                 print(f"发现 checkpoint，从 Step 3 恢复...")
                 processed = checkpoint["processed"]
                 resume_from_checkpoint = True
@@ -111,7 +123,8 @@ def run(
                     str(output_dir),
                     str(audio_dir),
                     str(screenshot_dir),
-                    card_styles=card_styles
+                    card_styles=card_styles,
+                    theme=theme
                 )
                 # 完成
                 print("\n[5/5] 完成!")
@@ -227,20 +240,26 @@ def run(
                 })
             progress(2, f"跳过 AI 注释（未配置 API Key），共 {len(processed)} 条")
 
-    # 保存 checkpoint（processed 数据）
+    # 保存 checkpoint（processed 数据 + 所有影响输出的参数）
     checkpoint_path = output_dir / "checkpoint.json"
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint_params = {
+        "video_path": str(video_path),
+        "subtitle_path": str(subtitle_path),
+        "processed": processed,
+        "params": {
+            "min_duration": min_duration,
+            "padding_start_ms": padding_start_ms,
+            "padding_end_ms": padding_end_ms,
+            "model_name": model_name,
+            "api_base": api_base,
+            "language": language,
+            "card_styles": card_styles,
+            "theme": theme,
+        }
+    }
     with open(checkpoint_path, 'w', encoding='utf-8') as f:
-        json.dump({
-            "video_path": str(video_path),
-            "subtitle_path": str(subtitle_path),
-            "processed": processed,
-            "params": {
-                "min_duration": min_duration,
-                "padding_start_ms": padding_start_ms,
-                "padding_end_ms": padding_end_ms
-            }
-        }, f, ensure_ascii=False, indent=2)
+        json.dump(checkpoint_params, f, ensure_ascii=False, indent=2)
     print(f"Checkpoint 已保存: {checkpoint_path}")
 
     # Step 3: 媒体处理
