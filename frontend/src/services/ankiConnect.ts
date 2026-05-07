@@ -3,7 +3,7 @@
  * AnkiConnect 默认监听 http://localhost:8765
  */
 
-const ANKI_CONNECT_URL = 'http://localhost:8765';
+import { API_BASE_URL } from './api';
 
 interface AnkiConnectRequest {
   action: string;
@@ -18,7 +18,8 @@ interface AnkiConnectResponse<T = unknown> {
 
 async function ac<T = unknown>(action: string, params?: Record<string, unknown>): Promise<T> {
   const body: AnkiConnectRequest = { action, version: 6, params };
-  const resp = await fetch(ANKI_CONNECT_URL, {
+  // 通过后端代理转发，避免浏览器 CORS 限制（AnkiConnect 只允许 http://localhost）
+  const resp = await fetch(`${API_BASE_URL}/api/anki-connect`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

@@ -184,6 +184,23 @@ async def heartbeat():
     return {"status": "ok"}
 
 
+@app.post("/api/anki-connect")
+async def anki_connect_proxy(request: dict):
+    """代理 AnkiConnect 请求，避免浏览器 CORS 限制"""
+    import urllib.request
+    try:
+        data = json.dumps(request).encode("utf-8")
+        req = urllib.request.Request(
+            "http://localhost:8765",
+            data=data,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        return {"result": None, "error": str(e)}
+
+
 # ---- 业务路由 ----
 
 @app.get("/")
