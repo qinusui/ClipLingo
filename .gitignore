@@ -3,6 +3,9 @@
 .env.local
 .env.*.local
 
+# Claude 本地配置
+.claude/
+
 # Python
 __pycache__/
 *.py[cod]

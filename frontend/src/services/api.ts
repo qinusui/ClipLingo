@@ -414,9 +414,9 @@ export const processAPI = {
   },
 
   // 清理输出文件
-  cleanup: async (apkgFilename: string) => {
+  cleanup: async (taskId: string) => {
     const response = await api.post('/api/process/cleanup', null, {
-      params: { apkg_filename: apkgFilename },
+      params: { task_id: taskId },
     });
     return response.data;
   },
@@ -464,6 +464,110 @@ export const processAPI = {
       release_url?: string;
       error?: string;
     };
+  },
+};
+
+// 队列批量处理 API
+export const queueAPI = {
+  // 批量添加任务
+  add: async (
+    videoFiles: File[],
+    subtitleFiles: File[],
+    params: {
+      apiKey?: string;
+      apiBase?: string;
+      modelName?: string;
+      minDuration?: number;
+      language?: string;
+      whisperModel?: string;
+      forceTranscribe?: boolean;
+      paddingStartMs?: number;
+      paddingEndMs?: number;
+      cardStyles?: string[];
+      theme?: string;
+    } = {}
+  ): Promise<{ batch_id: string; tasks: Array<{ task_id: string; video_name: string; status: string }>; total: number }> => {
+    const formData = new FormData();
+    videoFiles.forEach(f => formData.append('videos', f));
+    subtitleFiles.forEach(f => formData.append('subtitles', f));
+    if (params.apiKey) formData.append('api_key', params.apiKey);
+    if (params.apiBase) formData.append('api_base', params.apiBase);
+    if (params.modelName) formData.append('model_name', params.modelName);
+    if (params.minDuration !== undefined) formData.append('min_duration', params.minDuration.toString());
+    if (params.language) formData.append('language', params.language);
+    if (params.whisperModel) formData.append('whisper_model', params.whisperModel);
+    if (params.forceTranscribe) formData.append('force_transcribe', 'true');
+    if (params.paddingStartMs !== undefined) formData.append('padding_start_ms', params.paddingStartMs.toString());
+    if (params.paddingEndMs !== undefined) formData.append('padding_end_ms', params.paddingEndMs.toString());
+    if (params.cardStyles) formData.append('card_styles', JSON.stringify(params.cardStyles));
+    if (params.theme) formData.append('theme', params.theme);
+
+    const response = await api.post('/api/queue/add', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 600000,
+    });
+    return response.data;
+  },
+
+  // 获取队列状态
+  getStatus: async (batchId?: string) => {
+    const params: Record<string, string> = {};
+    if (batchId) params.batch_id = batchId;
+    const response = await api.get('/api/queue/status', { params });
+    return response.data as {
+      batch_id: string | null;
+      tasks: Array<{
+        task_id: string;
+        video_name: string;
+        status: string;
+        step: number;
+        message: string;
+        result?: {
+          success: boolean;
+          task_id: string;
+          video_name: string;
+          cards_count: number;
+          apkg_path: string;
+          apkg_url: string;
+          cards: Array<{
+            sentence: string;
+            translation: string;
+            notes: string;
+            word?: string;
+            definition?: string;
+            start_sec: number;
+            end_sec: number;
+            audio_path?: string;
+            screenshot_path?: string;
+          }>;
+        };
+        error?: string;
+      }>;
+      total: number;
+      done: number;
+      failed: number;
+      cancelled: number;
+      running: boolean;
+    };
+  },
+
+  // 取消单个任务
+  cancel: async (taskId: string) => {
+    const response = await api.delete(`/api/queue/${taskId}`);
+    return response.data;
+  },
+
+  // 取消整个批次
+  cancelBatch: async (batchId: string) => {
+    const response = await api.delete(`/api/queue/batch/${batchId}`);
+    return response.data;
+  },
+
+  // 下载全部 ZIP
+  downloadAllUrl: (batchId?: string) => {
+    const base = API_BASE_URL;
+    const params = batchId ? `?batch_id=${batchId}` : '';
+    return `${base}/api/queue/download-all${params}`;
   },
 };
 

@@ -72,6 +72,7 @@ from dotenv import load_dotenv
 from api.subtitles import router as subtitles_router
 from api.process import router as process_router
 from api.cards import router as cards_router
+from api.queue import router as queue_router
 
 load_dotenv()
 
@@ -145,6 +146,7 @@ if frontend_dist.exists():
 app.include_router(subtitles_router, prefix="/api/subtitles", tags=["subtitles"])
 app.include_router(process_router, prefix="/api/process", tags=["process"])
 app.include_router(cards_router, prefix="/api/cards", tags=["cards"])
+app.include_router(queue_router, prefix="/api/queue", tags=["queue"])
 
 
 @app.post("/api/shutdown")

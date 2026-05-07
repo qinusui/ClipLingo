@@ -9,7 +9,7 @@ import { ProcessingStatus } from './components/ProcessingStatus';
 import { CardPreview } from './components/CardPreview';
 import { AnkiSyncButton } from './components/AnkiSyncButton';
 import { SubtitleItem, ProcessedCard, AIRecommendation, CardStyle, CardTheme, WorkflowPhase, AnnotationPurpose } from './types';
-import { subtitleAPI, processAPI, API_BASE_URL } from './services/api';
+import { subtitleAPI, processAPI, queueAPI, API_BASE_URL } from './services/api';
 import { pingAnki, fetchWordsFromAnki } from './services/ankiConnect';
 import { useTheme } from './hooks/useTheme';
 import { getFriendlyMessage, getApiErrorMessage } from './utils/errors';
@@ -138,6 +138,39 @@ function App() {
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [subtitleFile, setSubtitleFile] = useState<File | null>(null);
 
+  // 批量处理模式
+  const [batchMode, setBatchMode] = useState(false);
+  const [batchFiles, setBatchFiles] = useState<Array<{ video: File; subtitle: File | null }>>([]);
+  const [batchId, setBatchId] = useState<string | null>(null);
+  const [batchTasks, setBatchTasks] = useState<Array<{
+    task_id: string;
+    video_name: string;
+    status: string;
+    step: number;
+    message: string;
+    result?: {
+      success: boolean;
+      task_id: string;
+      video_name: string;
+      cards_count: number;
+      apkg_url: string;
+      cards: Array<{
+        sentence: string;
+        translation: string;
+        notes: string;
+        word?: string;
+        definition?: string;
+        start_sec: number;
+        end_sec: number;
+        audio_path?: string;
+        screenshot_path?: string;
+      }>;
+    };
+    error?: string;
+  }>>([]);
+  const [batchSubmitting, setBatchSubmitting] = useState(false);
+  const batchPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const [subtitles, setSubtitles] = useState<SubtitleItem[]>([]);
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
 
@@ -259,6 +292,135 @@ function App() {
       // 延迟 5 秒后尝试从 Anki 同步（不阻塞主流程）
       setTimeout(syncFromAnki, 5000);
     });
+  }, []);
+
+  // ── 批量处理函数 ──
+
+  const handleBatchAddFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+
+    const videoExts = ['.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv', '.wmv', '.ts', '.m4v'];
+    const subExts = ['.srt', '.ass', '.ssa', '.vtt', '.sub'];
+
+    const videos = files.filter(f => videoExts.some(ext => f.name.toLowerCase().endsWith(ext)));
+    const subs = files.filter(f => subExts.some(ext => f.name.toLowerCase().endsWith(ext)));
+
+    // 按文件名（去掉扩展名）匹配字幕
+    const subMap = new Map<string, File>();
+    subs.forEach(s => {
+      const base = s.name.replace(/\.[^.]+$/, '').toLowerCase();
+      subMap.set(base, s);
+    });
+
+    const newBatch = videos.map(v => {
+      const base = v.name.replace(/\.[^.]+$/, '').toLowerCase();
+      return { video: v, subtitle: subMap.get(base) || null };
+    });
+
+    setBatchFiles(prev => [...prev, ...newBatch]);
+    e.target.value = '';
+  };
+
+  const handleBatchRemove = (index: number) => {
+    setBatchFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleBatchSubmit = async () => {
+    const videoFiles = batchFiles.map(f => f.video);
+    const subtitleFiles = batchFiles.filter(f => f.subtitle).map(f => f.subtitle!);
+
+    if (subtitleFiles.length !== videoFiles.length) {
+      alert('部分视频未匹配到字幕文件，请手动指定');
+      return;
+    }
+
+    setBatchSubmitting(true);
+    try {
+      const result = await queueAPI.add(videoFiles, subtitleFiles, {
+        apiKey: apiKey || undefined,
+        apiBase: apiBase || undefined,
+        modelName: modelName || undefined,
+        language: sourceLanguage || undefined,
+        whisperModel,
+        paddingStartMs,
+        paddingEndMs,
+        cardStyles: Array.from(cardStyles),
+        theme: cardTheme,
+      });
+
+      setBatchId(result.batch_id);
+      setBatchTasks(result.tasks.map(t => ({
+        ...t,
+        step: 0,
+        message: '等待中',
+      })));
+
+      // 启动轮询
+      startBatchPolling(result.batch_id);
+    } catch (err) {
+      alert('提交失败: ' + getApiErrorMessage(err));
+    } finally {
+      setBatchSubmitting(false);
+    }
+  };
+
+  const startBatchPolling = (bid: string) => {
+    if (batchPollRef.current) clearInterval(batchPollRef.current);
+    batchPollRef.current = setInterval(async () => {
+      try {
+        const status = await queueAPI.getStatus(bid);
+        setBatchTasks(status.tasks);
+
+        // 全部完成或失败时停止轮询
+        const allDone = status.tasks.every(
+          t => t.status === 'done' || t.status === 'failed' || t.status === 'cancelled'
+        );
+        if (allDone || !status.running) {
+          if (batchPollRef.current) clearInterval(batchPollRef.current);
+        }
+      } catch {
+        // 轮询失败不中断
+      }
+    }, 1500);
+  };
+
+  const handleBatchCancelTask = async (taskId: string) => {
+    try {
+      await queueAPI.cancel(taskId);
+    } catch {}
+  };
+
+  const handleBatchCancelAll = async () => {
+    if (!batchId) return;
+    try {
+      await queueAPI.cancelBatch(batchId);
+    } catch {}
+  };
+
+  const handleBatchSyncToAnki = async (task: typeof batchTasks[0]) => {
+    if (!task.result?.cards) return;
+    const { syncToAnki } = await import('./services/syncToAnki');
+    const { pingAnki } = await import('./services/ankiConnect');
+    const online = await pingAnki();
+    if (!online) {
+      alert('未检测到 Anki，请确保 Anki 已安装并运行');
+      return;
+    }
+    try {
+      const deckName = task.video_name.replace(/\.[^.]+$/, '');
+      const res = await syncToAnki(task.result.cards, deckName, API_BASE_URL);
+      alert(`同步完成：新增 ${res.added}，跳过 ${res.skipped}，失败 ${res.failed}`);
+    } catch (err) {
+      alert('同步失败: ' + (err instanceof Error ? err.message : String(err)));
+    }
+  };
+
+  // 清理批量轮询
+  useEffect(() => {
+    return () => {
+      if (batchPollRef.current) clearInterval(batchPollRef.current);
+    };
   }, []);
 
   // 检测 ffmpeg 和 Whisper 插件安装状态（延迟 3 秒等后端就绪）
@@ -1214,6 +1376,205 @@ function App() {
                 </div>
               )}
 
+              {/* 批量/单文件模式切换 */}
+              {!isProcessing && !batchId && (
+                <div className="flex items-center gap-2 mb-4">
+                  <button
+                    onClick={() => setBatchMode(false)}
+                    className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${!batchMode ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'}`}
+                  >
+                    单文件处理
+                  </button>
+                  <button
+                    onClick={() => setBatchMode(true)}
+                    className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${batchMode ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'}`}
+                  >
+                    批量处理
+                  </button>
+                </div>
+              )}
+
+              {/* ── 批量模式：文件列表 + 提交 ── */}
+              {batchMode && !batchId && (
+                <div className="space-y-4">
+                  <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 text-center">
+                    <input
+                      type="file"
+                      id="batch-files"
+                      multiple
+                      accept=".mp4,.mkv,.avi,.mov,.webm,.srt,.ass,.vtt"
+                      onChange={handleBatchAddFiles}
+                      className="hidden"
+                    />
+                    <label htmlFor="batch-files" className="cursor-pointer">
+                      <div className="text-gray-500 dark:text-gray-400">
+                        <p className="text-sm font-medium">点击或拖拽添加视频和字幕文件</p>
+                        <p className="text-xs mt-1">支持同时选择多个文件，按文件名自动匹配字幕</p>
+                      </div>
+                    </label>
+                  </div>
+
+                  {batchFiles.length > 0 && (
+                    <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50 dark:bg-gray-800">
+                          <tr>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 w-8">#</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">视频文件</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">字幕文件</th>
+                            <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 w-12">操作</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                          {batchFiles.map((f, i) => (
+                            <tr key={i}>
+                              <td className="px-3 py-2 text-gray-400">{i + 1}</td>
+                              <td className="px-3 py-2 font-medium text-gray-800 dark:text-gray-200">{f.video.name}</td>
+                              <td className="px-3 py-2">
+                                {f.subtitle ? (
+                                  <span className="text-green-600 dark:text-green-400">{f.subtitle.name}</span>
+                                ) : (
+                                  <span className="text-yellow-600 dark:text-yellow-400">未匹配 ⚠</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 text-center">
+                                <button onClick={() => handleBatchRemove(i)} className="text-red-400 hover:text-red-600">
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  <Button
+                    variant="primary"
+                    className="w-full"
+                    onClick={handleBatchSubmit}
+                    disabled={batchFiles.length === 0 || batchSubmitting}
+                    isLoading={batchSubmitting}
+                  >
+                    <Sparkles className="w-4 h-4 mr-2" />
+                    提交 {batchFiles.length} 个任务
+                  </Button>
+                </div>
+              )}
+
+              {/* ── 批量模式：队列状态面板 ── */}
+              {batchId && batchTasks.length > 0 && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200">
+                      批量处理
+                      <span className="ml-2 text-sm font-normal text-gray-500">
+                        {batchTasks.filter(t => t.status === 'done').length}/{batchTasks.length} 完成
+                      </span>
+                    </h3>
+                    <div className="flex gap-2">
+                      {batchTasks.some(t => t.status === 'done') && (
+                        <a
+                          href={queueAPI.downloadAllUrl(batchId || undefined)}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-white bg-green-600 rounded-lg hover:bg-green-700"
+                        >
+                          <Download className="w-4 h-4" /> 全部下载 ZIP
+                        </a>
+                      )}
+                      {batchTasks.some(t => t.status === 'waiting' || t.status === 'running') && (
+                        <button
+                          onClick={handleBatchCancelAll}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-red-600 border border-red-300 rounded-lg hover:bg-red-50 dark:border-red-700 dark:hover:bg-red-900/20"
+                        >
+                          取消队列
+                        </button>
+                      )}
+                      <button
+                        onClick={() => { setBatchId(null); setBatchTasks([]); setBatchFiles([]); }}
+                        className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400"
+                      >
+                        返回
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 整体进度条 */}
+                  {(() => {
+                    const doneCount = batchTasks.filter(t => t.status === 'done').length;
+                    const pct = Math.round((doneCount / batchTasks.length) * 100);
+                    return (
+                      <div className="w-full bg-gray-200 rounded-full h-2 dark:bg-gray-700">
+                        <div className="bg-primary-500 h-2 rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
+                      </div>
+                    );
+                  })()}
+
+                  {/* 任务列表 */}
+                  <div className="space-y-2">
+                    {batchTasks.map((task) => {
+                      const statusIcon = {
+                        waiting: '○',
+                        running: '⟳',
+                        done: '✓',
+                        failed: '✗',
+                        cancelled: '⊘',
+                      }[task.status] || '?';
+                      const statusColor = {
+                        waiting: 'text-gray-400',
+                        running: 'text-blue-500',
+                        done: 'text-green-500',
+                        failed: 'text-red-500',
+                        cancelled: 'text-gray-400',
+                      }[task.status] || 'text-gray-400';
+
+                      return (
+                        <div key={task.task_id} className="flex items-center gap-3 p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
+                          <span className={`text-lg ${statusColor}`}>{statusIcon}</span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">{task.video_name}</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">{task.message}</p>
+                            {task.status === 'running' && (
+                              <div className="w-full bg-gray-200 rounded-full h-1.5 mt-1 dark:bg-gray-600">
+                                <div className="bg-blue-500 h-1.5 rounded-full transition-all" style={{ width: `${(task.step / 5) * 100}%` }} />
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            {task.status === 'done' && task.result && (
+                              <>
+                                <a
+                                  href={`${API_BASE_URL}${task.result.apkg_url}`}
+                                  className="text-xs text-blue-600 hover:underline dark:text-blue-400"
+                                  download
+                                >
+                                  下载
+                                </a>
+                                <button
+                                  onClick={() => handleBatchSyncToAnki(task)}
+                                  className="text-xs text-green-600 hover:underline dark:text-green-400"
+                                >
+                                  同步 Anki
+                                </button>
+                              </>
+                            )}
+                            {task.status === 'waiting' && (
+                              <button
+                                onClick={() => handleBatchCancelTask(task.task_id)}
+                                className="text-xs text-red-400 hover:text-red-600"
+                              >
+                                取消
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* 单文件模式 UI */}
+              {!batchMode && !batchId && (
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* 左侧：文件上传 */}
                 <div className="lg:col-span-2 space-y-4">
@@ -1484,8 +1845,10 @@ function App() {
                   )}
                 </div>
               </div>
+              )}
 
-              {/* 确认操作行 */}
+              {/* 单文件模式：确认操作行 */}
+              {!batchMode && !batchId && (
               <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
                 <div className="flex items-center gap-3 flex-wrap">
                   {/* 状态指示 */}
@@ -1534,6 +1897,7 @@ function App() {
                   )}
                 </div>
               </div>
+              )}
             </CardContent>
           </Card>
 

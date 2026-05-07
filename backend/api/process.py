@@ -94,13 +94,18 @@ async def upload_and_process(
     上传视频和字幕文件，后台异步处理
     返回 task_id，前端通过 /progress/{task_id} 轮询进度
     """
+    task_id = str(uuid.uuid4())
+
+    # 每个任务使用独立的 output_dir，避免批量处理时互相冲突
     if output_dir is None:
         if getattr(sys, 'frozen', False):
-            output_dir = str(Path(sys.executable).parent / "output")
+            base_output = Path(sys.executable).parent / "output"
         else:
-            output_dir = str(Path(__file__).parent.parent.parent / "output")
+            base_output = Path(__file__).parent.parent.parent / "output"
+    else:
+        base_output = Path(output_dir)
+    output_dir = str(base_output / task_id)
 
-    task_id = str(uuid.uuid4())
     task_dir = TEMP_DIR / task_id
     task_dir.mkdir(exist_ok=True)
 
@@ -142,7 +147,8 @@ async def upload_and_process(
             "details": None,
             "result": None,
             "error": None,
-            "error_code": None
+            "error_code": None,
+            "output_dir": output_dir,
         }
 
     def progress_callback(step, total_steps, message, details=None):
@@ -200,8 +206,11 @@ async def upload_and_process(
                     "result": {
                         "success": True,
                         "message": f"处理完成，生成了 {result['cards_count']} 张卡片",
+                        "task_id": task_id,
                         "cards_count": result["cards_count"],
                         "apkg_path": apkg_filename,
+                        "apkg_url": f"/output/{task_id}/{apkg_filename}",
+                        "video_name": video.filename or "",
                         "cards": [c.model_dump() for c in cards]
                     }
                 })
@@ -266,38 +275,29 @@ async def get_progress(task_id: str):
 
 
 @router.post("/cleanup")
-async def cleanup_output(apkg_filename: str):
+async def cleanup_output(task_id: str):
     """
-    下载后清理 output 目录的文件
+    下载后清理该任务的 output 目录
 
     Args:
-        apkg_filename: apkg 文件名
+        task_id: 任务 ID
     """
-    import shutil
+    with task_store_lock:
+        task = task_store.get(task_id)
 
-    if getattr(sys, 'frozen', False):
-        output_dir = Path(sys.executable).parent / "output"
-    else:
-        output_dir = Path(__file__).parent.parent / "output"
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    task_output_dir = Path(task.get("output_dir", ""))
     cleaned = []
 
-    # 删除 apkg 文件
-    apkg_path = output_dir / apkg_filename
-    if apkg_path.exists():
-        apkg_path.unlink()
-        cleaned.append(str(apkg_path))
+    if task_output_dir.exists():
+        shutil.rmtree(str(task_output_dir), ignore_errors=True)
+        cleaned.append(str(task_output_dir))
 
-    # 删除音频目录
-    audio_dir = output_dir / "audio"
-    if audio_dir.exists():
-        shutil.rmtree(str(audio_dir), ignore_errors=True)
-        cleaned.append(str(audio_dir))
-
-    # 删除截图目录
-    screenshot_dir = output_dir / "screenshots"
-    if screenshot_dir.exists():
-        shutil.rmtree(str(screenshot_dir), ignore_errors=True)
-        cleaned.append(str(screenshot_dir))
+    # 清理 task_store 中的记录
+    with task_store_lock:
+        task_store.pop(task_id, None)
 
     return {"cleaned": cleaned}
 
