@@ -16,20 +16,12 @@ else:
     BASE_DIR = Path(__file__).parent
     INSTALL_DIR = BASE_DIR.parent  # 项目根目录，与 process.py 的输出目录一致
 
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-import uvicorn
-import os
-import json
-import signal
-import logging
-import threading
-import time
-from datetime import datetime
-from dotenv import load_dotenv
+# ---- 日志配置（必须在其他模块导入之前） ----
+LOG_DIR = INSTALL_DIR / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+LOG_FILE = LOG_DIR / "clipplingo.log"
+
+from logging.handlers import RotatingFileHandler
 
 # 静默轮询日志
 class PollingFilter(logging.Filter):
@@ -39,7 +31,43 @@ class PollingFilter(logging.Filter):
         msg = record.getMessage()
         return not any(p in msg for p in self._silent_paths)
 
-logging.getLogger("uvicorn.access").addFilter(PollingFilter())
+# 配置根 logger：同时输出到文件和控制台
+_root_logger = logging.getLogger()
+_root_logger.setLevel(logging.INFO)
+
+_file_handler = RotatingFileHandler(
+    str(LOG_FILE), maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+)
+_file_handler.setFormatter(logging.Formatter(
+    "%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+))
+_root_logger.addHandler(_file_handler)
+
+_console_handler = logging.StreamHandler()
+_console_handler.setFormatter(logging.Formatter("%(asctime)s %(message)s", datefmt="%H:%M:%S"))
+_root_logger.addHandler(_console_handler)
+
+# uvicorn.access 的轮询日志在文件和控制台都静默
+_polling_filter = PollingFilter()
+logging.getLogger("uvicorn.access").addFilter(_polling_filter)
+
+logger = logging.getLogger(__name__)
+logger.info(f"日志文件: {LOG_FILE}")
+
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+import uvicorn
+import os
+import json
+import signal
+import subprocess
+import threading
+import time
+from datetime import datetime
+from dotenv import load_dotenv
 
 from api.subtitles import router as subtitles_router
 from api.process import router as process_router
@@ -81,7 +109,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Anki Card Generator API",
     description="智能提取视频学习内容，生成 Anki 卡片",
-    version="1.2.1",
+    version="1.2.2",
     lifespan=lifespan
 )
 
@@ -141,7 +169,7 @@ async def root():
         return FileResponse(frontend_index)
     return {
         "message": "ClipLingo API",
-        "version": "1.2.1",
+        "version": "1.2.2",
         "docs": "/docs"
     }
 
@@ -203,6 +231,78 @@ async def download_file(filename: str):
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(file_path, filename=filename)
+
+
+@app.post("/api/open-logs")
+async def open_logs_folder():
+    """打开日志文件夹"""
+    try:
+        if sys.platform == "win32":
+            os.startfile(str(LOG_DIR))
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(LOG_DIR)])
+        else:
+            subprocess.Popen(["xdg-open", str(LOG_DIR)])
+        return {"success": True, "path": str(LOG_DIR)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"无法打开文件夹: {e}")
+
+
+@app.get("/api/check-update")
+async def check_update():
+    """检查 GitHub Releases 是否有新版本"""
+    import urllib.request
+    import json as _json
+
+    current = "1.2.2"
+    repo = "qinusui/ClipLingo"
+    api_url = f"https://api.github.com/repos/{repo}/releases/latest"
+
+    try:
+        req = urllib.request.Request(api_url, headers={
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "ClipLingo"
+        })
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = _json.loads(resp.read().decode())
+
+        tag = data.get("tag_name", "").lstrip("v")
+        if not tag:
+            return {"has_update": False, "current_version": current}
+
+        def _ver_tuple(v: str):
+            parts = []
+            for p in v.split("."):
+                try:
+                    parts.append(int(p))
+                except ValueError:
+                    parts.append(0)
+            return tuple(parts)
+
+        if _ver_tuple(tag) > _ver_tuple(current):
+            # 找到 exe 资产的下载链接
+            download_url = None
+            for asset in data.get("assets", []):
+                name = asset.get("name", "").lower()
+                if name.endswith(".exe") or "setup" in name:
+                    download_url = asset.get("browser_download_url")
+                    break
+            if not download_url:
+                download_url = data.get("html_url", "")
+
+            return {
+                "has_update": True,
+                "current_version": current,
+                "latest_version": tag,
+                "download_url": download_url,
+                "release_notes": data.get("body", ""),
+                "release_url": data.get("html_url", ""),
+            }
+
+        return {"has_update": False, "current_version": current}
+    except Exception as e:
+        logger.debug(f"更新检查失败（可忽略）: {e}")
+        return {"has_update": False, "current_version": current, "error": str(e)}
 
 
 def _open_browser():

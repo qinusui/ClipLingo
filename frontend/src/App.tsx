@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Film, Download, Info, Sparkles, ChevronDown, ChevronUp, MessageSquare, Sun, Moon, Monitor, BookOpen, GraduationCap } from 'lucide-react';
+import { Film, Download, Info, Sparkles, ChevronDown, ChevronUp, MessageSquare, Sun, Moon, Monitor, BookOpen, GraduationCap, FolderOpen, X, ExternalLink, RefreshCw } from 'lucide-react';
 import { Button } from './components/Button';
 import { Card, CardContent, CardHeader, CardTitle } from './components/Card';
 import { ProgressBar } from './components/ProgressBar';
@@ -7,8 +7,10 @@ import { FileUpload } from './components/FileUpload';
 import { SubtitleTable } from './components/SubtitleTable';
 import { ProcessingStatus } from './components/ProcessingStatus';
 import { CardPreview } from './components/CardPreview';
+import { AnkiSyncButton } from './components/AnkiSyncButton';
 import { SubtitleItem, ProcessedCard, AIRecommendation, CardStyle, CardTheme, WorkflowPhase, AnnotationPurpose } from './types';
-import { subtitleAPI, processAPI } from './services/api';
+import { subtitleAPI, processAPI, API_BASE_URL } from './services/api';
+import { pingAnki, fetchWordsFromAnki } from './services/ankiConnect';
 import { useTheme } from './hooks/useTheme';
 import { getFriendlyMessage, getApiErrorMessage } from './utils/errors';
 
@@ -168,6 +170,8 @@ function App() {
   const [transcribeMessage, setTranscribeMessage] = useState('');
   const [transcribeAnimProgress, setTranscribeAnimProgress] = useState(0);
   const transcribeAnimRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [whisperText, setWhisperText] = useState('');
+  const whisperHasRealProgress = useRef(false);
   const [recommendBatch, setRecommendBatch] = useState(0);
   const [recommendTotalBatches, setRecommendTotalBatches] = useState(0);
   // 两阶段 AI 工作流
@@ -182,6 +186,16 @@ function App() {
   const [showPromptEditor, setShowPromptEditor] = useState(false);
   const recommendBatchSize = 30;
   const [ffmpegInstalled, setFFmpegInstalled] = useState<boolean | null>(null);
+
+  // 更新检查
+  const [updateInfo, setUpdateInfo] = useState<{
+    hasUpdate: boolean;
+    latestVersion: string;
+    downloadUrl: string;
+    releaseNotes: string;
+    releaseUrl: string;
+  } | null>(null);
+  const [updateDismissed, setUpdateDismissed] = useState(false);
 
   // 已学单词记录
   const [learnedWords, setLearnedWords] = useState<Map<string, string>>(new Map());
@@ -201,20 +215,50 @@ function App() {
     return () => window.removeEventListener('beforeunload', handleUnload);
   }, []);
 
-  // 加载已学单词记录
-  useEffect(() => {
-    fetch('/api/subtitles/learned-words')
-      .then(r => r.json())
-      .then(data => {
-        if (data.words) {
-          const map = new Map<string, string>();
-          for (const [word, def] of Object.entries(data.words)) {
-            map.set(word, def as string);
-          }
-          setLearnedWords(map);
+  // 加载已学单词记录（启动时先从后端加载，再尝试从 Anki 同步）
+  const [syncingFromAnki, setSyncingFromAnki] = useState(false);
+
+  const loadLearnedWords = async () => {
+    try {
+      const resp = await fetch('/api/subtitles/learned-words');
+      const data = await resp.json();
+      if (data.words) {
+        const map = new Map<string, string>();
+        for (const [word, def] of Object.entries(data.words)) {
+          map.set(word, def as string);
         }
-      })
-      .catch(() => {});
+        setLearnedWords(map);
+      }
+    } catch {}
+  };
+
+  const syncFromAnki = async () => {
+    setSyncingFromAnki(true);
+    try {
+      const online = await pingAnki();
+      if (!online) return;
+      const words = await fetchWordsFromAnki();
+      if (words.length === 0) return;
+      // 写入后端数据库
+      await fetch('/api/subtitles/sync-learned-from-anki', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ words }),
+      });
+      // 重新加载
+      await loadLearnedWords();
+    } catch {
+      // 静默失败
+    } finally {
+      setSyncingFromAnki(false);
+    }
+  };
+
+  useEffect(() => {
+    loadLearnedWords().then(() => {
+      // 延迟 5 秒后尝试从 Anki 同步（不阻塞主流程）
+      setTimeout(syncFromAnki, 5000);
+    });
   }, []);
 
   // 检测 ffmpeg 和 Whisper 插件安装状态（延迟 3 秒等后端就绪）
@@ -228,6 +272,28 @@ function App() {
       }
     };
     const timer = setTimeout(checkStatus, 3000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // 启动时检查更新（延迟 5 秒，不阻塞主流程）
+  useEffect(() => {
+    const checkUpdate = async () => {
+      try {
+        const data = await processAPI.checkUpdate();
+        if (data.has_update) {
+          setUpdateInfo({
+            hasUpdate: true,
+            latestVersion: data.latest_version || '',
+            downloadUrl: data.download_url || '',
+            releaseNotes: data.release_notes || '',
+            releaseUrl: data.release_url || '',
+          });
+        }
+      } catch {
+        // 静默失败，不影响正常使用
+      }
+    };
+    const timer = setTimeout(checkUpdate, 5000);
     return () => clearTimeout(timer);
   }, []);
 
@@ -257,6 +323,8 @@ function App() {
 
     if (!isTranscribing) {
       setTranscribeAnimProgress(0);
+      whisperHasRealProgress.current = false;
+      setWhisperText('');
       if (transcribeAnimRef.current) clearInterval(transcribeAnimRef.current);
       return;
     }
@@ -265,8 +333,15 @@ function App() {
     setTranscribeAnimProgress(base);
 
     if (transcribeStep === 2) {
+      // 有真实进度时不启动模拟动画
+      if (whisperHasRealProgress.current) return;
       transcribeAnimRef.current = setInterval(() => {
         setTranscribeAnimProgress(prev => {
+          if (whisperHasRealProgress.current) {
+            // 收到真实进度后停止模拟
+            if (transcribeAnimRef.current) clearInterval(transcribeAnimRef.current);
+            return prev;
+          }
           if (prev < 30) return 30;
           if (prev >= 94) return 94;
           return Math.min(94, prev + 0.3);
@@ -381,7 +456,24 @@ function App() {
 
           setTranscribeStep(progress.step);
           setTranscribeTotalSteps(progress.total_steps);
-          setTranscribeMessage(progress.message);
+
+          // 使用真实的转录进度（如果有）
+          if (progress.whisper_progress) {
+            const wp = progress.whisper_progress;
+            const pct = Math.round(wp.progress * 100);
+            whisperHasRealProgress.current = true;
+            setTranscribeAnimProgress(pct);
+            setWhisperText(wp.text || '');
+            // 格式化时间轴文字
+            const fmtTime = (sec: number) => {
+              const m = Math.floor(sec / 60);
+              const s = Math.floor(sec % 60);
+              return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+            };
+            setTranscribeMessage(`转录中 — ${fmtTime(wp.transcribed_sec)} / ${fmtTime(wp.duration_sec)}  ${pct}%`);
+          } else {
+            setTranscribeMessage(progress.message);
+          }
 
           if (progress.status === 'completed' && progress.result) {
             clearInterval(pollInterval);
@@ -980,6 +1072,38 @@ function App() {
         </div>
       </nav>
 
+      {/* 更新提示横幅 */}
+      {updateInfo?.hasUpdate && !updateDismissed && (
+        <div className="bg-blue-50 border-b border-blue-200 dark:bg-blue-900/30 dark:border-blue-700">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3 min-w-0">
+              <Download className="w-5 h-5 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+              <p className="text-sm text-blue-800 dark:text-blue-200 truncate">
+                发现新版本 <strong>v{updateInfo.latestVersion}</strong>，当前版本 v1.2.2
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <a
+                href={updateInfo.downloadUrl || updateInfo.releaseUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                前往下载
+              </a>
+              <button
+                onClick={() => setUpdateDismissed(true)}
+                className="p-1 text-blue-400 hover:text-blue-600 dark:hover:text-blue-300 transition-colors"
+                title="忽略此更新"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* 使用说明 */}
         {showHelp && (
@@ -1161,6 +1285,11 @@ function App() {
                         />
                       </div>
                       <p className="text-xs text-gray-500 dark:text-gray-400">{transcribeMessage}</p>
+                      {whisperText && (
+                        <p className="text-xs text-gray-400 dark:text-gray-500 truncate">
+                          正在识别：「{whisperText}」
+                        </p>
+                      )}
                     </div>
                   )}
 
@@ -1325,15 +1454,32 @@ function App() {
                       {modelList && modelList.length === 0 && (
                         <p className="text-xs text-red-500">获取模型列表失败，并不影响使用</p>
                       )}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="w-full"
-                        onClick={() => setConfigExpanded(false)}
-                      >
-                        <ChevronUp className="w-4 h-4 mr-1" />
-                        收起配置
-                      </Button>
+                      <div className="flex gap-2 mt-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="flex-1 text-gray-500"
+                          onClick={async () => {
+                            try {
+                              await processAPI.openLogs();
+                            } catch {
+                              alert('无法打开日志文件夹');
+                            }
+                          }}
+                        >
+                          <FolderOpen className="w-3.5 h-3.5 mr-1" />
+                          日志
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => setConfigExpanded(false)}
+                        >
+                          <ChevronUp className="w-4 h-4 mr-1" />
+                          收起配置
+                        </Button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1440,6 +1586,15 @@ function App() {
                       <span className="text-xs text-gray-600 dark:text-gray-400">排除已学</span>
                     </label>
                   )}
+                  <button
+                    onClick={syncFromAnki}
+                    disabled={syncingFromAnki}
+                    className="flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 border border-gray-200 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+                    title="从 Anki 同步已学词汇"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${syncingFromAnki ? 'animate-spin' : ''}`} />
+                    {syncingFromAnki ? '同步中...' : '从 Anki 同步'}
+                  </button>
 
                   <div className="flex items-center gap-1.5 flex-1 min-w-[160px]">
                     <label className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">排除词</label>
@@ -1892,6 +2047,13 @@ function App() {
                       <Download className="w-4 h-4 mr-2" />
                       下载牌组 (.apkg)
                     </Button>
+                    <div className="flex items-center gap-2">
+                      <AnkiSyncButton
+                        cards={result}
+                        deckName={videoFile?.name?.replace(/\.[^.]+$/, '') || 'ClipLingo'}
+                        apiBase={API_BASE_URL}
+                      />
+                    </div>
                   </div>
                 )}
               </CardContent>

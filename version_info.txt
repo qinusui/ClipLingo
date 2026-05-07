@@ -1,8 +1,8 @@
 # UTF-8
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 2, 1, 0),
-    prodvers=(1, 2, 1, 0),
+    filevers=(1, 2, 2, 0),
+    prodvers=(1, 2, 2, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -18,11 +18,11 @@ VSVersionInfo(
           [
             StringStruct(u'CompanyName', u'ClipLingo'),
             StringStruct(u'FileDescription', u'ClipLingo - 视频字幕转 Anki 卡片'),
-            StringStruct(u'FileVersion', u'1.2.1.0'),
+            StringStruct(u'FileVersion', u'1.2.2.0'),
             StringStruct(u'InternalName', u'ClipLingo'),
             StringStruct(u'OriginalFilename', u'ClipLingo.exe'),
             StringStruct(u'ProductName', u'ClipLingo'),
-            StringStruct(u'ProductVersion', u'1.2.1.0'),
+            StringStruct(u'ProductVersion', u'1.2.2.0'),
           ]
         )
       ]

@@ -39,8 +39,8 @@ COPY main.py ./
 # 复制前端构建产物
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 
-# 创建输出目录
-RUN mkdir -p /app/output /app/temp
+# 创建输出目录和日志目录
+RUN mkdir -p /app/output /app/temp /app/logs
 
 # 暴露端口
 EXPOSE 8000

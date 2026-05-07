@@ -823,13 +823,20 @@ def _whisper_subprocess(video_path: str, srt_path: str, model_name: str, languag
 
     from core.whisper_manager import load_model
     from core.whisper_transcribe import save_as_srt
+    from core.media_cut import get_video_duration
 
     progress_pipe.send({"step": "loading", "message": f"加载 {model_name} 模型..."})
     model = load_model(model_name)
     if model is None:
         raise RuntimeError("Whisper 未安装，请先安装 Whisper")
 
-    progress_pipe.send({"step": "transcribing", "message": "转录中..."})
+    # 获取视频总时长，用于计算转录进度百分比
+    try:
+        duration_sec = get_video_duration(video_path)
+    except Exception:
+        duration_sec = 0.0
+
+    progress_pipe.send({"step": "transcribing", "message": "转录中...", "duration_sec": duration_sec})
     segments_iter, info = model.transcribe(
         video_path,
         language=language,
@@ -842,6 +849,15 @@ def _whisper_subprocess(video_path: str, srt_path: str, model_name: str, languag
         text = seg.text.strip()
         if text:
             segments.append({"start": seg.start, "end": seg.end, "text": text})
+            # 逐段上报进度
+            progress = min(seg.end / duration_sec, 1.0) if duration_sec > 0 else 0.0
+            progress_pipe.send({
+                "step": "transcribing",
+                "progress": progress,
+                "transcribed_sec": seg.end,
+                "duration_sec": duration_sec,
+                "text": text,
+            })
 
     save_as_srt(segments, srt_path)
 
@@ -915,7 +931,19 @@ def _run_transcribe_task(task_id: str, video_path_str: str, srt_path_str: str,
                     if step == "loading":
                         update("processing", 1, msg.get("message", "加载模型中..."))
                     elif step == "transcribing":
-                        update("processing", 2, "转录中，请耐心等待...")
+                        if "progress" in msg:
+                            # 逐段进度：存 whisper_progress 供前端读取
+                            with _transcribe_lock:
+                                store = _transcribe_store.get(task_id, {})
+                                store["whisper_progress"] = {
+                                    "progress": msg["progress"],
+                                    "transcribed_sec": msg["transcribed_sec"],
+                                    "duration_sec": msg["duration_sec"],
+                                    "text": msg.get("text", ""),
+                                }
+                                _transcribe_store[task_id] = store
+                        else:
+                            update("processing", 2, "转录中，请耐心等待...")
                     elif step == "done":
                         break
                 except (EOFError, OSError):
@@ -1170,3 +1198,15 @@ async def get_learned_words():
     from services.progress import get_learned_words, get_learned_count
     words = get_learned_words()
     return {"words": words, "count": len(words)}
+
+
+@router.post("/sync-learned-from-anki")
+async def sync_learned_from_anki(body: dict):
+    """从 Anki 同步已学词汇到本地数据库"""
+    from services.progress import mark_words_learned, get_learned_count
+    words = body.get("words", [])
+    if not words:
+        return {"synced": 0, "total": get_learned_count()}
+    word_dicts = [{"word": w, "definition": ""} for w in words if isinstance(w, str) and w.strip()]
+    mark_words_learned(word_dicts, source_video="anki-sync")
+    return {"synced": len(word_dicts), "total": get_learned_count()}

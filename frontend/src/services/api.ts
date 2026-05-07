@@ -1,7 +1,7 @@
 import axios from 'axios';
 import type { SubtitleListResponse, ProcessResult, ProcessedCard, SubtitleItem, AIRecommendResponse, AnnotationPurpose } from '../types';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -63,6 +63,12 @@ export const subtitleAPI = {
       error?: string;
       error_code?: string;
       result?: SubtitleListResponse;
+      whisper_progress?: {
+        progress: number;
+        transcribed_sec: number;
+        duration_sec: number;
+        text: string;
+      };
     };
   },
 
@@ -438,6 +444,26 @@ export const processAPI = {
       { params: { api_key: apiKey, api_base: apiBase } }
     );
     return response.data;
+  },
+
+  // 打开日志文件夹
+  openLogs: async () => {
+    const response = await api.post('/api/open-logs');
+    return response.data as { success: boolean; path: string };
+  },
+
+  // 检查更新
+  checkUpdate: async () => {
+    const response = await api.get('/api/check-update');
+    return response.data as {
+      has_update: boolean;
+      current_version: string;
+      latest_version?: string;
+      download_url?: string;
+      release_notes?: string;
+      release_url?: string;
+      error?: string;
+    };
   },
 };
 

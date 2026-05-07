@@ -2,7 +2,7 @@
 import os
 import sys
 
-VERSION = "1.2.1.0"
+VERSION = "1.2.2.0"
 
 block_cipher = None
 
@@ -94,7 +94,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=True,
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

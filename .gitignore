@@ -17,6 +17,7 @@ build/
 input/
 output/
 temp/
+logs/
 
 # IDE
 .vscode/

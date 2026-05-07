@@ -28,6 +28,7 @@ Name: "{userdesktop}\ClipLingo"; Filename: "{app}\ClipLingo.exe"; IconFilename: 
 Filename: "{app}\ClipLingo.exe"; Description: "立即启动"; Flags: postinstall skipifsilent
 
 [UninstallDelete]
-; 卸载时清理用户生成的 output 目录
+; 卸载时清理用户生成的目录
 Type: filesandordirs; Name: "{app}\output"
 Type: filesandordirs; Name: "{app}\temp"
+Type: filesandordirs; Name: "{app}\logs"
