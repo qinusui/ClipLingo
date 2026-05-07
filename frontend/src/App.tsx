@@ -371,13 +371,18 @@ function App() {
     setBatchFiles(prev => prev.filter((_, i) => i !== index));
   };
 
+  const handleBatchSetSubtitle = (index: number, file: File | null) => {
+    setBatchFiles(prev => prev.map((f, i) => i === index ? { ...f, subtitle: file } : f));
+  };
+
   const handleBatchSubmit = async () => {
     const videoFiles = batchFiles.map(f => f.video);
-    const subtitleFiles = batchFiles.filter(f => f.subtitle).map(f => f.subtitle!);
+    const subtitleFiles = batchFiles.map(f => f.subtitle);
 
-    if (subtitleFiles.length !== videoFiles.length) {
-      alert('部分视频未匹配到字幕文件，请手动指定');
-      return;
+    const noSubCount = subtitleFiles.filter(s => !s).length;
+    if (noSubCount > 0) {
+      const ok = confirm(`${noSubCount} 个视频未匹配字幕，将自动使用 Whisper 转录。继续？`);
+      if (!ok) return;
     }
 
     setBatchSubmitting(true);
@@ -1484,7 +1489,21 @@ function App() {
                                 {f.subtitle ? (
                                   <span className="text-green-600 dark:text-green-400">{f.subtitle.name}</span>
                                 ) : (
-                                  <span className="text-yellow-600 dark:text-yellow-400">未匹配 ⚠</span>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-yellow-600 dark:text-yellow-400 text-xs">Whisper 转录</span>
+                                    <label className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 cursor-pointer">
+                                      选字幕
+                                      <input
+                                        type="file"
+                                        accept=".srt,.ass,.vtt,.ssa,.sub"
+                                        className="hidden"
+                                        onChange={(e) => {
+                                          const file = e.target.files?.[0];
+                                          if (file) handleBatchSetSubtitle(i, file);
+                                        }}
+                                      />
+                                    </label>
+                                  </div>
                                 )}
                               </td>
                               <td className="px-3 py-2 text-center">

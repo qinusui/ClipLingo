@@ -181,7 +181,7 @@ def _get_base_output() -> Path:
 @router.post("/add")
 async def add_to_queue(
     videos: list[UploadFile] = File(...),
-    subtitles: list[UploadFile] = File(...),
+    subtitles: list[UploadFile] = File(default=[]),
     api_key: Optional[str] = Form(None),
     api_base: Optional[str] = Form(None),
     model_name: Optional[str] = Form(None),
@@ -197,8 +197,6 @@ async def add_to_queue(
     """批量添加任务到队列"""
     if not videos:
         raise HTTPException(status_code=400, detail="至少需要一个视频文件")
-    if len(subtitles) != len(videos):
-        raise HTTPException(status_code=400, detail="字幕文件数量必须与视频文件数量一致")
 
     batch_id = str(uuid.uuid4())[:8]
     base_output = _get_base_output()
@@ -229,24 +227,30 @@ async def add_to_queue(
     tasks_info = []
 
     with _queue_lock:
-        for video, subtitle in zip(videos, subtitles):
+        for i, video in enumerate(videos):
             task_id = str(uuid.uuid4())
             task_dir = Path(tempfile.mkdtemp(prefix="cliplingo_q_"))
             output_dir = str(base_output / task_id)
 
-            # 保存文件
+            # 保存视频文件
             v_path = task_dir / video.filename
-            s_path = task_dir / subtitle.filename
             with open(v_path, "wb") as f:
                 shutil.copyfileobj(video.file, f)
-            with open(s_path, "wb") as f:
-                shutil.copyfileobj(subtitle.file, f)
+
+            # 保存字幕文件（可选，无字幕时由 Whisper 自动转录）
+            subtitle_path = ""
+            if i < len(subtitles) and subtitles[i]:
+                subtitle = subtitles[i]
+                s_path = task_dir / subtitle.filename
+                with open(s_path, "wb") as f:
+                    shutil.copyfileobj(subtitle.file, f)
+                subtitle_path = str(s_path)
 
             task = QueueTask(
                 id=task_id,
                 batch_id=batch_id,
                 video_path=str(v_path),
-                subtitle_path=str(s_path),
+                subtitle_path=subtitle_path,
                 video_name=video.filename,
                 output_dir=output_dir,
                 params=params.copy(),

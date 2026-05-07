@@ -477,7 +477,7 @@ export const queueAPI = {
   // 批量添加任务
   add: async (
     videoFiles: File[],
-    subtitleFiles: File[],
+    subtitleFiles: (File | null)[],
     params: {
       apiKey?: string;
       apiBase?: string;
@@ -494,7 +494,7 @@ export const queueAPI = {
   ): Promise<{ batch_id: string; tasks: Array<{ task_id: string; video_name: string; status: string }>; total: number }> => {
     const formData = new FormData();
     videoFiles.forEach(f => formData.append('videos', f));
-    subtitleFiles.forEach(f => formData.append('subtitles', f));
+    subtitleFiles.forEach(f => { if (f) formData.append('subtitles', f); });
     if (params.apiKey) formData.append('api_key', params.apiKey);
     if (params.apiBase) formData.append('api_base', params.apiBase);
     if (params.modelName) formData.append('model_name', params.modelName);
