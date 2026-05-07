@@ -116,9 +116,15 @@ function buildPresetPrompt(template: string, sourceLanguage: string): string {
   return template.replace(/\{source_language\}/g, getLangName(sourceLanguage));
 }
 
+function buildAnnotationPrompt(template: string, sourceLanguage: string, targetLanguage: string): string {
+  return template
+    .replace(/\{source_language\}/g, getLangName(sourceLanguage))
+    .replace(/\{target_language\}/g, getLangName(targetLanguage));
+}
+
 const PRESET_TEMPLATES = {
   grammar: {
-    label: '语法句型',
+    label: '语法句型筛选',
     prompt: `你是{source_language}学习教材编写专家。对输入的字幕列表，每条判断是否值得作为学习材料：
 
 判断标准：
@@ -128,7 +134,7 @@ const PRESET_TEMPLATES = {
 - 有文化背景或情境意义`,
   },
   vocab: {
-    label: '背单词',
+    label: '词汇筛选',
     prompt: `你是{source_language}词汇教学专家。对输入的字幕列表，每条判断是否值得作为单词学习材料：
 
 判断标准：
@@ -143,6 +149,40 @@ const PRESET_TEMPLATES = {
 } as const;
 
 type PresetKey = keyof typeof PRESET_TEMPLATES;
+
+// 注释阶段预设模板
+const ANNOTATION_TEMPLATES = {
+  grammar: {
+    label: '语法句型',
+    prompt: `你是{source_language}学习教材编写专家。为输入的字幕列表（已筛选为值得学习的内容）提供翻译和语法句型注释。
+
+返回格式（严格遵守）：
+{{"items": [{{"index": 数字, "translation": "{target_language}翻译", "notes": "语法知识点和实用表达", "word": "句子中最值得学习的核心单词或词组", "definition": "该单词/词组的{target_language}释义"}}]}}
+
+注意：
+- 必须返回一个 JSON 对象，items 是数组
+- 所有项目必须包含 translation、notes、word、definition
+- notes 应侧重语法结构和实用表达
+- word 为句子中最值得背诵的核心单词或词组
+- 保持原文顺序输出`,
+  },
+  vocab: {
+    label: '背单词',
+    prompt: `你是{target_language}词汇教学专家。为输入的字幕列表（已筛选为值得学习的内容）提供翻译和词汇注释。
+
+返回格式（严格遵守）：
+{{"items": [{{"index": 数字, "translation": "{target_language}翻译", "notes": "重点单词-词性-释义", "word": "句子中最值得学习的核心单词或词组", "definition": "该单词/词组的{target_language}释义"}}]}}
+
+注意：
+- 必须返回一个 JSON 对象，items 是数组
+- 所有项目必须包含 translation、notes、word、definition
+- notes 格式：重点单词-词性-释义；遇词组则整体标注
+- word 为句子中最值得背诵的核心单词或词组
+- 保持原文顺序输出`,
+  },
+} as const;
+
+type AnnotationPresetKey = keyof typeof ANNOTATION_TEMPLATES;
 
 const DEFAULT_RECOMMEND_PROMPT = PRESET_TEMPLATES.grammar.prompt;
 
@@ -259,6 +299,9 @@ function App() {
   const [annotateTotalBatches, setAnnotateTotalBatches] = useState(0);
   const [customPrompt, setCustomPrompt] = useState<string>(buildPresetPrompt(DEFAULT_RECOMMEND_PROMPT, savedConfig?.sourceLanguage || 'en'));
   const [promptPreset, setPromptPreset] = useState<PresetKey>('grammar');
+  const [annotationPrompt, setAnnotationPrompt] = useState<string>(buildAnnotationPrompt(ANNOTATION_TEMPLATES.grammar.prompt, savedConfig?.sourceLanguage || 'en', savedConfig?.targetLanguage || 'zh'));
+  const [annotationPreset, setAnnotationPreset] = useState<AnnotationPresetKey>('grammar');
+  const [showAnnotationPromptEditor, setShowAnnotationPromptEditor] = useState(false);
   const [cardStyles, setCardStyles] = useState<Set<CardStyle>>(new Set(['sentence']));
   const [cardTheme, setCardTheme] = useState<CardTheme>('default');
   const [showPromptEditor, setShowPromptEditor] = useState(false);
@@ -521,16 +564,28 @@ function App() {
   useEffect(() => {
     for (const tmpl of Object.values(PRESET_TEMPLATES)) {
       const built = buildPresetPrompt(tmpl.prompt, sourceLanguage);
-      // 如果当前 prompt 是任意一个预设的模板实例（语言名不同但结构相同），则更新
       for (const lang of LANGUAGES) {
         if (lang.code === sourceLanguage) continue;
         if (customPrompt === buildPresetPrompt(tmpl.prompt, lang.code)) {
           setCustomPrompt(built);
-          return;
+          break;
         }
       }
     }
-  }, [sourceLanguage]);
+    // 同步注释提示词
+    for (const tmpl of Object.values(ANNOTATION_TEMPLATES)) {
+      const built = buildAnnotationPrompt(tmpl.prompt, sourceLanguage, targetLanguage);
+      for (const srcLang of LANGUAGES) {
+        for (const tgtLang of LANGUAGES) {
+          if (srcLang.code === sourceLanguage && tgtLang.code === targetLanguage) continue;
+          if (annotationPrompt === buildAnnotationPrompt(tmpl.prompt, srcLang.code, tgtLang.code)) {
+            setAnnotationPrompt(built);
+            return;
+          }
+        }
+      }
+    }
+  }, [sourceLanguage, targetLanguage]);
 
   // 转录进度动画
   useEffect(() => {
@@ -881,6 +936,7 @@ function App() {
         selectedSubs,
         purpose,
         apiKey,
+        annotationPrompt || undefined,
         recommendBatchSize,
         apiBase || undefined,
         modelName || undefined,
@@ -2218,6 +2274,56 @@ function App() {
 
                 {/* 3a: 选择用途 */}
                 {workflowPhase === 'screened' && (
+                  <>
+                  {/* 注释提示词编辑器 */}
+                  <div className="mb-4">
+                    <button
+                      onClick={() => setShowAnnotationPromptEditor(!showAnnotationPromptEditor)}
+                      className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                    >
+                      {showAnnotationPromptEditor ? (
+                        <ChevronUp className="w-3 h-3" />
+                      ) : (
+                        <ChevronDown className="w-3 h-3" />
+                      )}
+                      注释提示词
+                    </button>
+                    {showAnnotationPromptEditor && (
+                      <div className="mt-2 p-4 bg-gray-50 rounded-lg space-y-3 dark:bg-gray-800">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">提示词预设</label>
+                          <div className="flex gap-2">
+                            {(Object.keys(ANNOTATION_TEMPLATES) as AnnotationPresetKey[]).map((key) => (
+                              <button
+                                key={key}
+                                onClick={() => {
+                                  setAnnotationPreset(key);
+                                  setAnnotationPrompt(buildAnnotationPrompt(ANNOTATION_TEMPLATES[key].prompt, sourceLanguage, targetLanguage));
+                                }}
+                                className={`px-3 py-1.5 rounded text-sm font-medium border transition-colors ${
+                                  annotationPreset === key
+                                    ? 'bg-primary-500 text-white border-primary-500'
+                                    : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-600'
+                                }`}
+                              >
+                                {ANNOTATION_TEMPLATES[key].label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">提示词内容（可自由修改）</label>
+                          <textarea
+                            value={annotationPrompt}
+                            onChange={(e) => setAnnotationPrompt(e.target.value)}
+                            rows={4}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm font-mono dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                            placeholder="输入自定义注释提示词..."
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
                   <div className="grid grid-cols-2 gap-4">
                     <button
                       onClick={() => handleAIAnnotate('grammar')}
@@ -2246,6 +2352,7 @@ function App() {
                       </p>
                     </button>
                   </div>
+                  </>
                 )}
 
                 {/* 3b: 注释进行中 + 主题/结构选择（等待时可配置） */}

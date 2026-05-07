@@ -764,7 +764,7 @@ async def ai_annotate_stream(request: AIAnnotateRequest):
     if not api_key:
         raise HTTPException(status_code=400, detail="需要提供 API Key")
 
-    system_prompt = _build_annotation_prompt(request.purpose, request.source_language, request.target_language)
+    system_prompt = request.custom_prompt if request.custom_prompt else _build_annotation_prompt(request.purpose, request.source_language, request.target_language)
     subtitle_dicts = [
         {"index": s.index, "start_sec": s.start_sec, "end_sec": s.end_sec, "text": s.text}
         for s in request.subtitles

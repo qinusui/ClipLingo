@@ -142,6 +142,7 @@ class AIAnnotateRequest(BaseModel):
     api_key: Optional[str] = None
     api_base: Optional[str] = None
     model_name: Optional[str] = None
+    custom_prompt: Optional[str] = None
     batch_size: int = 30
     source_language: str = Field(default="en", description="源语言代码")
     target_language: str = Field(default="zh", description="目标语言代码")
