@@ -714,24 +714,37 @@ export async function syncToAnki(
       let screenshotField = '';
       let audioField = '';
 
-      if (card.screenshot_path) {
-        const imgUrl = card.screenshot_path.startsWith('http')
-          ? card.screenshot_path
-          : `${apiBase}${card.screenshot_path}`;
-        const imgBase64 = await urlToBase64(imgUrl);
-        const imgName = `cliplingo_${String(i + 1).padStart(4, '0')}.jpg`;
-        await storeMediaFile(imgName, imgBase64);
-        screenshotField = `<img src="${imgName}">`;
+      try {
+        if (card.screenshot_path) {
+          const imgUrl = card.screenshot_path.startsWith('http')
+            ? card.screenshot_path
+            : `${apiBase}${card.screenshot_path}`;
+          const imgBase64 = await urlToBase64(imgUrl);
+          const imgName = `cliplingo_${String(i + 1).padStart(4, '0')}.jpg`;
+          await storeMediaFile(imgName, imgBase64);
+          screenshotField = `<img src="${imgName}">`;
+        }
+      } catch {
+        // 截图获取失败，使用占位符（Screenshot 是排序字段，不能为空）
       }
 
-      if (card.audio_path) {
-        const audioUrl = card.audio_path.startsWith('http')
-          ? card.audio_path
-          : `${apiBase}${card.audio_path}`;
-        const audioBase64 = await urlToBase64(audioUrl);
-        const audioName = `cliplingo_${String(i + 1).padStart(4, '0')}.mp3`;
-        await storeMediaFile(audioName, audioBase64);
-        audioField = `[sound:${audioName}]`;
+      try {
+        if (card.audio_path) {
+          const audioUrl = card.audio_path.startsWith('http')
+            ? card.audio_path
+            : `${apiBase}${card.audio_path}`;
+          const audioBase64 = await urlToBase64(audioUrl);
+          const audioName = `cliplingo_${String(i + 1).padStart(4, '0')}.mp3`;
+          await storeMediaFile(audioName, audioBase64);
+          audioField = `[sound:${audioName}]`;
+        }
+      } catch {
+        // 音频获取失败，跳过
+      }
+
+      // Screenshot 是 Anki 排序字段，不能为空，否则笔记会被拒绝
+      if (!screenshotField) {
+        screenshotField = '&nbsp;';
       }
 
       // 添加笔记
