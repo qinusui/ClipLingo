@@ -16,6 +16,8 @@ import zipfile
 import tempfile
 import sys
 
+from utils.zip_export import generate_csv_with_media_paths
+
 if getattr(sys, 'frozen', False):
     _ROOT = Path(sys._MEIPASS)
     _INSTALL_DIR = Path(sys.executable).parent
@@ -347,6 +349,60 @@ async def download_all(batch_id: Optional[str] = None):
     return FileResponse(
         str(zip_path),
         filename="ClipLingo_Batch.zip",
+        media_type="application/zip",
+        background=None,
+    )
+
+
+@router.get("/export-all-zip")
+async def export_all_with_media(batch_id: Optional[str] = None):
+    """将所有已完成任务的 CSV + 媒体文件打包为 ZIP 下载"""
+    with _queue_lock:
+        tasks = [
+            t for t in _queue
+            if t.status == TaskStatus.DONE
+            and t.result
+            and (not batch_id or t.batch_id == batch_id)
+        ]
+
+    if not tasks:
+        raise HTTPException(status_code=404, detail="没有已完成的任务")
+
+    # 创建临时 ZIP
+    zip_path = Path(tempfile.mktemp(suffix=".zip"))
+    seen_names: dict[str, int] = {}
+
+    with zipfile.ZipFile(str(zip_path), 'w', zipfile.ZIP_DEFLATED) as zf:
+        for t in tasks:
+            # 去重文件夹名称
+            base_name = Path(t.video_name).stem if t.video_name else t.id[:8]
+            if base_name in seen_names:
+                seen_names[base_name] += 1
+                folder_name = f"{base_name}_{seen_names[base_name]}"
+            else:
+                seen_names[base_name] = 0
+                folder_name = base_name
+
+            cards = t.result.get("cards", [])
+            csv_content = generate_csv_with_media_paths(cards)
+            zf.writestr(f"{folder_name}/cards.csv", csv_content)
+
+            output_dir = Path(t.output_dir)
+            audio_dir = output_dir / "audio"
+            if audio_dir.exists():
+                for f in audio_dir.iterdir():
+                    if f.is_file() and f.suffix == '.mp3':
+                        zf.write(str(f), f"{folder_name}/audio/{f.name}")
+
+            screenshot_dir = output_dir / "screenshots"
+            if screenshot_dir.exists():
+                for f in screenshot_dir.iterdir():
+                    if f.is_file() and f.suffix == '.jpg':
+                        zf.write(str(f), f"{folder_name}/screenshots/{f.name}")
+
+    return FileResponse(
+        str(zip_path),
+        filename="ClipLingo_Batch_Media.zip",
         media_type="application/zip",
         background=None,
     )

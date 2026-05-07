@@ -4,6 +4,7 @@ ClipLingo - FastAPI 后端服务
 """
 
 import sys
+import logging
 from pathlib import Path
 
 # 检测是否在 PyInstaller 打包环境中运行

@@ -465,6 +465,11 @@ export const processAPI = {
       error?: string;
     };
   },
+
+  // 导出带媒体的 ZIP
+  exportZipUrl: (taskId: string) => {
+    return `${API_BASE_URL}/api/process/export-zip/${taskId}`;
+  },
 };
 
 // 队列批量处理 API
@@ -568,6 +573,13 @@ export const queueAPI = {
     const base = API_BASE_URL;
     const params = batchId ? `?batch_id=${batchId}` : '';
     return `${base}/api/queue/download-all${params}`;
+  },
+
+  // 导出带媒体的 ZIP（批量）
+  exportAllZipUrl: (batchId?: string) => {
+    const base = API_BASE_URL;
+    const params = batchId ? `?batch_id=${batchId}` : '';
+    return `${base}/api/queue/export-all-zip${params}`;
   },
 };
 

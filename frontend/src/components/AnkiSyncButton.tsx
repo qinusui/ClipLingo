@@ -11,9 +11,11 @@ interface Props {
   cards: ProcessedCard[];
   deckName: string;
   apiBase: string;
+  cardStyles?: string[];
+  theme?: string;
 }
 
-export const AnkiSyncButton = ({ cards, deckName, apiBase }: Props) => {
+export const AnkiSyncButton = ({ cards, deckName, apiBase, cardStyles, theme }: Props) => {
   const [state, setState] = useState<SyncState>('idle');
   const [progress, setProgress] = useState<SyncProgress | null>(null);
   const [result, setResult] = useState<SyncResult | null>(null);
@@ -41,6 +43,8 @@ export const AnkiSyncButton = ({ cards, deckName, apiBase }: Props) => {
         cards,
         deckName,
         apiBase,
+        cardStyles,
+        theme,
         (p) => setProgress(p),
         abortRef.current.signal,
       );
@@ -54,7 +58,7 @@ export const AnkiSyncButton = ({ cards, deckName, apiBase }: Props) => {
         setState('error');
       }
     }
-  }, [cards, deckName, apiBase]);
+  }, [cards, deckName, apiBase, cardStyles, theme]);
 
   const handleCancel = () => {
     abortRef.current?.abort();

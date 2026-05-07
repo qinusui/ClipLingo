@@ -188,6 +188,10 @@ function App() {
     status: string;
     step: number;
     message: string;
+    params?: {
+      card_styles?: string[];
+      theme?: string;
+    };
     result?: {
       success: boolean;
       task_id: string;
@@ -220,6 +224,7 @@ function App() {
 
   const [result, setResult] = useState<ProcessedCard[] | null>(null);
   const [apkgPath, setApkgPath] = useState<string | null>(null);
+  const [taskId, setTaskId] = useState<string | null>(null);
 
   const [previewIndex, setPreviewIndex] = useState(0);
   const [showHelp, setShowHelp] = useState(false);
@@ -449,7 +454,10 @@ function App() {
     }
     try {
       const deckName = task.video_name.replace(/\.[^.]+$/, '');
-      const res = await syncToAnki(task.result.cards, deckName, API_BASE_URL);
+      // 从任务参数中获取样式和主题
+      const taskCardStyles = task.params?.card_styles || Array.from(cardStyles);
+      const taskTheme = task.params?.theme || cardTheme;
+      const res = await syncToAnki(task.result.cards, deckName, API_BASE_URL, taskCardStyles, taskTheme);
       alert(`同步完成：新增 ${res.added}，跳过 ${res.skipped}，失败 ${res.failed}`);
     } catch (err) {
       alert('同步失败: ' + (err instanceof Error ? err.message : String(err)));
@@ -1048,6 +1056,8 @@ function App() {
         cardTheme
       );
 
+      setTaskId(task_id);
+
       // 2. 轮询进度
       const pollInterval = setInterval(async () => {
         try {
@@ -1520,6 +1530,12 @@ function App() {
                             className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-white bg-green-600 rounded-lg hover:bg-green-700"
                           >
                             <Download className="w-4 h-4" /> 全部下载 ZIP
+                          </a>
+                          <a
+                            href={queueAPI.exportAllZipUrl(batchId || undefined)}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-emerald-700 border border-emerald-300 rounded-lg hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
+                          >
+                            <FolderOpen className="w-4 h-4" /> 带媒体 ZIP
                           </a>
                           <button
                             onClick={() => {
@@ -2400,7 +2416,7 @@ function App() {
           )}
 
           {/* Step 4 · 预览、生成与下载 */}
-          {(workflowPhase === 'annotated' || isProcessing || (result && result.length > 0)) && (
+          {((selectedIndices.size > 0 && !['screening', 'annotating'].includes(workflowPhase)) || isProcessing || (result && result.length > 0)) && (
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -2410,30 +2426,37 @@ function App() {
               </CardHeader>
               <CardContent>
                 {/* 注释后预览 + 处理按钮 */}
-                {workflowPhase === 'annotated' && !isProcessing && !(result && result.length > 0) && recommendations && (
+                {(workflowPhase === 'annotated' || (workflowPhase === 'idle' && !recommendations)) && !isProcessing && !(result && result.length > 0) && (
                   <div className="space-y-4">
-                    <CardPreview
-                      cards={Array.from(recommendations.values())
-                        .filter(r => r.include && r.translation && selectedIndices.has(r.index))
-                        .map(r => ({
-                          sentence: subtitles.find(s => s.index === r.index)?.text || '',
-                          translation: r.translation || '',
-                          notes: r.notes || '',
-                          word: r.word,
-                          definition: r.definition,
-                          start_sec: subtitles.find(s => s.index === r.index)?.start_sec || 0,
-                          end_sec: subtitles.find(s => s.index === r.index)?.end_sec || 0,
-                        }))}
-                      cardStyles={Array.from(cardStyles)}
-                      theme={cardTheme}
-                      currentIndex={previewIndex}
-                      onPrevious={() => setPreviewIndex(Math.max(0, previewIndex - 1))}
-                      onNext={() => {
-                        const maxIndex = Array.from(recommendations.values())
-                          .filter(r => r.include && r.translation && selectedIndices.has(r.index)).length - 1;
-                        setPreviewIndex(Math.min(maxIndex, previewIndex + 1));
-                      }}
-                    />
+                    {recommendations && (
+                      <CardPreview
+                        cards={Array.from(recommendations.values())
+                          .filter(r => r.include && r.translation && selectedIndices.has(r.index))
+                          .map(r => ({
+                            sentence: subtitles.find(s => s.index === r.index)?.text || '',
+                            translation: r.translation || '',
+                            notes: r.notes || '',
+                            word: r.word,
+                            definition: r.definition,
+                            start_sec: subtitles.find(s => s.index === r.index)?.start_sec || 0,
+                            end_sec: subtitles.find(s => s.index === r.index)?.end_sec || 0,
+                          }))}
+                        cardStyles={Array.from(cardStyles)}
+                        theme={cardTheme}
+                        currentIndex={previewIndex}
+                        onPrevious={() => setPreviewIndex(Math.max(0, previewIndex - 1))}
+                        onNext={() => {
+                          const maxIndex = Array.from(recommendations.values())
+                            .filter(r => r.include && r.translation && selectedIndices.has(r.index)).length - 1;
+                          setPreviewIndex(Math.min(maxIndex, previewIndex + 1));
+                        }}
+                      />
+                    )}
+                    {!recommendations && (
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        未使用 AI 标注，将生成基础卡片（含原文、音频、截图，无翻译/注释）
+                      </p>
+                    )}
                     <Button
                       variant="primary"
                       className="w-full"
@@ -2477,6 +2500,19 @@ function App() {
                       <Download className="w-4 h-4 mr-2" />
                       下载牌组 (.apkg)
                     </Button>
+                    {taskId && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full"
+                        onClick={() => {
+                          window.open(processAPI.exportZipUrl(taskId), '_blank');
+                        }}
+                      >
+                        <FolderOpen className="w-4 h-4 mr-1" />
+                        导出带媒体 ZIP
+                      </Button>
+                    )}
                     <div className="flex gap-2">
                       <Button
                         variant="outline"
@@ -2508,6 +2544,8 @@ function App() {
                         cards={result}
                         deckName={videoFile?.name?.replace(/\.[^.]+$/, '') || 'ClipLingo'}
                         apiBase={API_BASE_URL}
+                        cardStyles={Array.from(cardStyles)}
+                        theme={cardTheme}
                       />
                     </div>
                   </div>

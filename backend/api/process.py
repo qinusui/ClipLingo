@@ -3,7 +3,7 @@
 """
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from pathlib import Path
 from typing import List, Optional
 import asyncio
@@ -13,6 +13,8 @@ import shutil
 import threading
 import uuid
 import asyncio
+import zipfile
+import tempfile
 from datetime import datetime
 
 from models.schemas import ProcessRequest, ProcessResult, ProcessedCard, ProcessProgress
@@ -28,6 +30,7 @@ else:
 from main import run as process_cards
 
 from errors import translate_error, get_message, ErrorCode, ClipLingoError
+from utils.zip_export import generate_csv_with_media_paths
 
 router = APIRouter()
 
@@ -300,6 +303,47 @@ async def cleanup_output(task_id: str):
         task_store.pop(task_id, None)
 
     return {"cleaned": cleaned}
+
+
+@router.get("/export-zip/{task_id}")
+async def export_zip_with_media(task_id: str):
+    """导出带媒体文件的 ZIP 包"""
+    with task_store_lock:
+        task = task_store.get(task_id)
+
+    if not task or task.get("status") != "completed" or not task.get("result"):
+        raise HTTPException(status_code=404, detail="任务不存在或未完成")
+
+    output_dir = Path(task["output_dir"])
+    cards = task["result"].get("cards", [])
+    video_name = task["result"].get("video_name", "export")
+
+    # 生成 CSV
+    csv_content = generate_csv_with_media_paths(cards)
+
+    # 创建 ZIP
+    zip_path = Path(tempfile.mktemp(suffix=".zip"))
+    with zipfile.ZipFile(str(zip_path), 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("cards.csv", csv_content)
+
+        audio_dir = output_dir / "audio"
+        if audio_dir.exists():
+            for f in audio_dir.iterdir():
+                if f.is_file() and f.suffix == '.mp3':
+                    zf.write(str(f), f"audio/{f.name}")
+
+        screenshot_dir = output_dir / "screenshots"
+        if screenshot_dir.exists():
+            for f in screenshot_dir.iterdir():
+                if f.is_file() and f.suffix == '.jpg':
+                    zf.write(str(f), f"screenshots/{f.name}")
+
+    return FileResponse(
+        str(zip_path),
+        filename=f"ClipLingo_{Path(video_name).stem}.zip",
+        media_type="application/zip",
+        background=None,
+    )
 
 
 @router.post("/start", response_model=ProcessResult)
