@@ -12,6 +12,9 @@ import os
 import sys
 import subprocess
 import asyncio
+
+# Windows 下防止子进程弹出终端窗口
+_NO_WINDOW = {"creationflags": 0x08000000} if sys.platform == "win32" else {}
 import logging
 from typing import List, Optional
 
@@ -160,7 +163,7 @@ async def extract_embedded_subtitles(
             "-show_entries", "stream=index,codec_name:stream_tags=language,title",
             "-of", "json",
             str(video_path)
-        ], capture_output=True, text=True, timeout=30)
+        ], capture_output=True, text=True, timeout=30, **_NO_WINDOW)
 
         if probe_result.returncode != 0:
             logger.error(f"ffprobe failed: {probe_result.stderr}")
@@ -210,7 +213,7 @@ async def extract_embedded_subtitles(
             "-f", "srt",
             str(srt_path)
         ]
-        subprocess.run(extract_cmd, capture_output=True, text=True, timeout=60)
+        subprocess.run(extract_cmd, capture_output=True, text=True, timeout=60, **_NO_WINDOW)
 
         if not srt_path.exists() or srt_path.stat().st_size == 0:
             return {
@@ -1025,14 +1028,14 @@ def _run_transcribe_task(task_id: str, video_path_str: str, srt_path_str: str,
 
 def _check_ffmpeg_installed() -> dict:
     """检测 ffmpeg 是否已安装"""
-    import subprocess
     ffmpeg_path = _get_bin_path("ffmpeg.exe" if os.name == 'nt' else "ffmpeg")
     try:
         result = subprocess.run(
             [ffmpeg_path, "-version"],
             capture_output=True,
             text=True,
-            timeout=5
+            timeout=5,
+            **_NO_WINDOW
         )
         if result.returncode == 0:
             version_line = result.stdout.split('\n')[0] if result.stdout else ""

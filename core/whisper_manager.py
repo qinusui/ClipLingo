@@ -6,6 +6,9 @@ import os
 import sys
 import subprocess
 import logging
+
+# Windows 下防止子进程弹出终端窗口
+_NO_WINDOW = {"creationflags": 0x08000000} if sys.platform == "win32" else {}
 from pathlib import Path
 from typing import Optional, Any
 
@@ -57,6 +60,7 @@ def install_whisper() -> tuple[bool, str]:
                  "--trusted-host", host,
                  "--timeout", "30"],
                 capture_output=True, text=True, timeout=600,
+                **_NO_WINDOW
             )
             if result.returncode == 0:
                 return True, ""

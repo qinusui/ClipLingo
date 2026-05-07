@@ -6,6 +6,9 @@ import subprocess
 import sys
 import os
 import logging
+
+# Windows 下防止子进程弹出终端窗口
+_NO_WINDOW = {"creationflags": 0x08000000} if sys.platform == "win32" else {}
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from dataclasses import dataclass
@@ -70,7 +73,7 @@ def get_video_duration(video_path: str) -> float:
         video_path
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, **_NO_WINDOW)
     except FileNotFoundError:
         raise ClipLingoError(ErrorCode.FFMPEG_NOT_FOUND, "ffprobe 未找到")
     except subprocess.TimeoutExpired:
@@ -134,7 +137,7 @@ def extract_full_audio(video_path: str, output_path: str, quality: int = 2) -> t
         output_path
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600, **_NO_WINDOW)
         if result.returncode == 0:
             return True, ""
         return False, result.stderr[:300] if result.stderr else "ffmpeg 返回非零退出码"
@@ -173,7 +176,7 @@ def cut_audio(
     try:
         result = subprocess.run(
             cmd, capture_output=True, text=True,
-            timeout=max(30, duration * 2)
+            timeout=max(30, duration * 2), **_NO_WINDOW
         )
         return result.returncode == 0
     except FileNotFoundError:
@@ -216,7 +219,8 @@ def capture_screenshot(
             cmd,
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=30,
+            **_NO_WINDOW
         )
         return result.returncode == 0
     except FileNotFoundError:
