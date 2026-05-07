@@ -79,11 +79,15 @@ load_dotenv()
 
 # ---- 自动关闭机制 ----
 _server_start_time = time.time()
-_SHUTDOWN_COOLDOWN = 30  # 启动后 30 秒内的 shutdown 请求忽略（避免 HMR 重载误触）
+_SHUTDOWN_COOLDOWN = 10  # 启动后 10 秒内的 shutdown 请求忽略（避免 HMR 重载误触）
+_last_heartbeat = time.time()
+_HEARTBEAT_TIMEOUT = 120  # 2 分钟无心跳自动关闭（仅打包模式）
+
+is_frozen = getattr(sys, 'frozen', False)
 
 
 def _kill_processes():
-    """读取 PID 文件并关闭前后端进程"""
+    """读取 PID 文件并关闭前后端进程（仅 dev 模式 start-all.py 启动时使用）"""
     pid_file = Path(__file__).parent / 'pids.json'
     if not pid_file.exists():
         return
@@ -101,6 +105,18 @@ def _kill_processes():
                 pass
 
     pid_file.unlink(missing_ok=True)
+
+
+def _heartbeat_monitor():
+    """后台线程：心跳超时自动关闭（仅打包模式）"""
+    global _last_heartbeat
+    if not is_frozen:
+        return
+    while True:
+        time.sleep(30)
+        if time.time() - _last_heartbeat > _HEARTBEAT_TIMEOUT:
+            logger.info(f"心跳超时 {_HEARTBEAT_TIMEOUT}s，自动关闭")
+            os._exit(0)
 
 
 @asynccontextmanager
@@ -152,14 +168,20 @@ app.include_router(queue_router, prefix="/api/queue", tags=["queue"])
 
 @app.post("/api/shutdown")
 async def shutdown():
-    """关闭所有服务（仅打包模式生效，启动冷却期内忽略）"""
-    pid_file = BASE_DIR / 'pids.json'
-    if not pid_file.exists():
-        return {"message": "Ignored (dev mode)"}
+    """关闭所有服务（启动冷却期内忽略）"""
     if time.time() - _server_start_time < _SHUTDOWN_COOLDOWN:
         return {"message": "Ignored (cooldown)"}
+    logger.info("收到 shutdown 请求，正在关闭...")
     _kill_processes()
     os._exit(0)
+
+
+@app.post("/api/heartbeat")
+async def heartbeat():
+    """浏览器心跳，用于检测浏览器是否存活"""
+    global _last_heartbeat
+    _last_heartbeat = time.time()
+    return {"status": "ok"}
 
 
 # ---- 业务路由 ----
@@ -321,12 +343,13 @@ if __name__ == "__main__":
 
     # Docker 或 PyInstaller 中禁用 reload
     is_docker = os.environ.get('DOCKER_CONTAINER') == '1'
-    is_frozen = getattr(sys, 'frozen', False)
 
     if is_docker or is_frozen:
         # 打包模式下自动打开浏览器
         if is_frozen:
             threading.Thread(target=_open_browser, daemon=True).start()
+        # 启动心跳监控线程
+        threading.Thread(target=_heartbeat_monitor, daemon=True).start()
         uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
     else:
         uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=True, log_level="info")

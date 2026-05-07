@@ -334,7 +334,16 @@ function App() {
       navigator.sendBeacon('/api/shutdown');
     };
     window.addEventListener('beforeunload', handleUnload);
-    return () => window.removeEventListener('beforeunload', handleUnload);
+
+    // 心跳：每 30 秒 ping 一次，后端超时 2 分钟无心跳自动关闭
+    const heartbeatInterval = setInterval(() => {
+      fetch('/api/heartbeat', { method: 'POST' }).catch(() => {});
+    }, 30000);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleUnload);
+      clearInterval(heartbeatInterval);
+    };
   }, []);
 
   // 加载已学单词记录（启动时先从后端加载，再尝试从 Anki 同步）
