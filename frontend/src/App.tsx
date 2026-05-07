@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Film, Download, Info, Sparkles, ChevronDown, ChevronUp, MessageSquare, Sun, Moon, Monitor, BookOpen, GraduationCap, FolderOpen, X, ExternalLink, RefreshCw } from 'lucide-react';
+import { Film, Download, Info, Sparkles, ChevronDown, ChevronUp, MessageSquare, Sun, Moon, Monitor, BookOpen, GraduationCap, FolderOpen, X, ExternalLink, RefreshCw, FileSpreadsheet, FileJson } from 'lucide-react';
 import { Button } from './components/Button';
 import { Card, CardContent, CardHeader, CardTitle } from './components/Card';
 import { ProgressBar } from './components/ProgressBar';
@@ -35,6 +35,46 @@ function generateSRTContent(subtitles: SubtitleItem[], selectedIndices: Set<numb
   });
 
   return content;
+}
+
+// 生成 CSV 内容（utf-8-sig 编码，Excel 兼容）
+function generateCSVContent(cards: ProcessedCard[]): string {
+  const headers = ['sentence', 'translation', 'notes', 'word', 'definition'];
+  const escapeCSV = (val: string | undefined) => {
+    const s = val ?? '';
+    if (s.includes('"') || s.includes(',') || s.includes('\n')) {
+      return `"${s.replace(/"/g, '""')}"`;
+    }
+    return s;
+  };
+  const rows = cards.map(c => [
+    escapeCSV(c.sentence),
+    escapeCSV(c.translation),
+    escapeCSV(c.notes),
+    escapeCSV(c.word),
+    escapeCSV(c.definition),
+  ].join(','));
+  return [headers.join(','), ...rows].join('\r\n');
+}
+
+// 生成 JSON 内容（完整数据）
+function generateJSONContent(cards: ProcessedCard[]): string {
+  return JSON.stringify(cards, null, 2);
+}
+
+// 触发浏览器下载
+function downloadString(content: string, filename: string, mimeType: string) {
+  const blob = mimeType.includes('csv')
+    ? new Blob(['﻿' + content], { type: mimeType + ';charset=utf-8;' })
+    : new Blob([content], { type: mimeType + ';charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  URL.revokeObjectURL(url);
+  a.remove();
 }
 
 type StepStatus = 'pending' | 'processing' | 'completed' | 'error';
@@ -1474,12 +1514,38 @@ function App() {
                     </h3>
                     <div className="flex gap-2">
                       {batchTasks.some(t => t.status === 'done') && (
-                        <a
-                          href={queueAPI.downloadAllUrl(batchId || undefined)}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-white bg-green-600 rounded-lg hover:bg-green-700"
-                        >
-                          <Download className="w-4 h-4" /> 全部下载 ZIP
-                        </a>
+                        <>
+                          <a
+                            href={queueAPI.downloadAllUrl(batchId || undefined)}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-white bg-green-600 rounded-lg hover:bg-green-700"
+                          >
+                            <Download className="w-4 h-4" /> 全部下载 ZIP
+                          </a>
+                          <button
+                            onClick={() => {
+                              const allCards = batchTasks
+                                .filter(t => t.status === 'done' && t.result?.cards)
+                                .flatMap(t => t.result!.cards);
+                              if (allCards.length === 0) return;
+                              downloadString(generateCSVContent(allCards), 'ClipLingo_batch.csv', 'text/csv');
+                            }}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-blue-600 border border-blue-300 rounded-lg hover:bg-blue-50 dark:border-blue-700 dark:hover:bg-blue-900/20"
+                          >
+                            <FileSpreadsheet className="w-4 h-4" /> CSV
+                          </button>
+                          <button
+                            onClick={() => {
+                              const allCards = batchTasks
+                                .filter(t => t.status === 'done' && t.result?.cards)
+                                .flatMap(t => t.result!.cards);
+                              if (allCards.length === 0) return;
+                              downloadString(generateJSONContent(allCards), 'ClipLingo_batch.json', 'application/json');
+                            }}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-purple-600 border border-purple-300 rounded-lg hover:bg-purple-50 dark:border-purple-700 dark:hover:bg-purple-900/20"
+                          >
+                            <FileJson className="w-4 h-4" /> JSON
+                          </button>
+                        </>
                       )}
                       {batchTasks.some(t => t.status === 'waiting' || t.status === 'running') && (
                         <button
@@ -2411,6 +2477,32 @@ function App() {
                       <Download className="w-4 h-4 mr-2" />
                       下载牌组 (.apkg)
                     </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="flex-1"
+                        onClick={() => {
+                          const filename = videoFile?.name?.replace(/\.[^.]+$/, '') || 'ClipLingo';
+                          downloadString(generateCSVContent(result), `${filename}.csv`, 'text/csv');
+                        }}
+                      >
+                        <FileSpreadsheet className="w-4 h-4 mr-1" />
+                        导出 CSV
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="flex-1"
+                        onClick={() => {
+                          const filename = videoFile?.name?.replace(/\.[^.]+$/, '') || 'ClipLingo';
+                          downloadString(generateJSONContent(result), `${filename}.json`, 'application/json');
+                        }}
+                      >
+                        <FileJson className="w-4 h-4 mr-1" />
+                        导出 JSON
+                      </Button>
+                    </div>
                     <div className="flex items-center gap-2">
                       <AnkiSyncButton
                         cards={result}
