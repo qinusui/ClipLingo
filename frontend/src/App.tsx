@@ -2453,9 +2453,72 @@ function App() {
                       />
                     )}
                     {!recommendations && (
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
-                        未使用 AI 标注，将生成基础卡片（含原文、音频、截图，无翻译/注释）
-                      </p>
+                      <>
+                        <div className="p-3 bg-gray-50 rounded-lg dark:bg-gray-800">
+                          <label className="block text-xs font-medium text-gray-600 mb-1.5 dark:text-gray-400">卡片结构</label>
+                          <div className="flex gap-2">
+                            {([
+                              { key: 'sentence' as CardStyle, label: '句型卡', desc: '正面：截图+音频 → 背面：原文+翻译+注释' },
+                              { key: 'vocab' as CardStyle, label: '词汇卡', desc: '正面：单词 → 背面：释义+例句（含截图音频）' },
+                            ]).map(({ key, label, desc }) => (
+                              <label
+                                key={key}
+                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border cursor-pointer transition-colors ${
+                                  cardStyles.has(key)
+                                    ? 'bg-primary-500 text-white border-primary-500'
+                                    : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-600'
+                                }`}
+                                title={desc}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={cardStyles.has(key)}
+                                  onChange={() => {
+                                    setCardStyles(prev => {
+                                      const next = new Set(prev);
+                                      if (next.has(key)) {
+                                        if (next.size > 1) next.delete(key);
+                                      } else {
+                                        next.add(key);
+                                      }
+                                      return next;
+                                    });
+                                  }}
+                                  className="sr-only"
+                                />
+                                {label}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="p-3 bg-gray-50 rounded-lg dark:bg-gray-800">
+                          <label className="block text-xs font-medium text-gray-600 mb-1.5 dark:text-gray-400">视觉主题</label>
+                          <div className="grid grid-cols-4 gap-1.5">
+                            {([
+                              { key: 'default' as CardTheme, label: '经典', desc: '清爽简洁，适合日常学习' },
+                              { key: 'minimal' as CardTheme, label: '极简沉浸', desc: '衬线字体，纸质书质感' },
+                              { key: 'netflix' as CardTheme, label: 'Netflix', desc: '暗色剧照风，沉浸观影感' },
+                              { key: 'dictionary' as CardTheme, label: '硬核词典', desc: '信息密集，专业词典排版' },
+                            ]).map(({ key, label, desc }) => (
+                              <button
+                                key={key}
+                                onClick={() => setCardTheme(key)}
+                                title={desc}
+                                className={`px-2 py-1.5 rounded text-xs font-medium border transition-colors ${
+                                  cardTheme === key
+                                    ? 'bg-primary-500 text-white border-primary-500'
+                                    : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-600'
+                                }`}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <p className="text-xs text-gray-400 dark:text-gray-500">
+                          未使用 AI 标注，将生成基础卡片（含原文、音频、截图，无翻译/注释）
+                        </p>
+                      </>
                     )}
                     <Button
                       variant="primary"
