@@ -101,6 +101,9 @@ const THEMES: Record<string, ThemeConfig> = {
       front: `<div class="container">
   <div class="image-box">{{Screenshot}}</div>
   <div class="audio-box">{{Audio}}</div>
+  {{^Screenshot}}
+  <div class="original">{{Sentence}}</div>
+  {{/Screenshot}}
 </div>`,
       back: `<div class="container">
   <div class="image-box">{{Screenshot}}</div>
@@ -118,8 +121,13 @@ const THEMES: Record<string, ThemeConfig> = {
     },
     vocab: {
       front: `<div class="container">
+  {{#Word}}
   <div class="target-word">{{Word}}</div>
   <div class="hint">试着回想这个词在视频里的意思</div>
+  {{/Word}}
+  {{^Word}}
+  <div class="original">{{Sentence}}</div>
+  {{/Word}}
 </div>`,
       back: `<div class="container">
   <div class="target-word">{{Word}}</div>
@@ -252,6 +260,9 @@ const THEMES: Record<string, ThemeConfig> = {
 <div class="container">
   <div class="image-box">{{Screenshot}}</div>
   <div class="audio-box">{{Audio}}</div>
+  {{^Screenshot}}
+  <div class="original">{{Sentence}}</div>
+  {{/Screenshot}}
 </div>`,
       back: `<div class="bg-image" style="background-image: url({{Screenshot}})"></div>
 <div class="container">
@@ -268,8 +279,13 @@ const THEMES: Record<string, ThemeConfig> = {
     },
     vocab: {
       front: `<div class="container">
+  {{#Word}}
   <div class="target-word">{{Word}}</div>
   <div class="hint">recall the meaning from context</div>
+  {{/Word}}
+  {{^Word}}
+  <div class="original">{{Sentence}}</div>
+  {{/Word}}
 </div>`,
       back: `<div class="container">
   <div class="target-word">{{Word}}</div>
@@ -387,6 +403,9 @@ const THEMES: Record<string, ThemeConfig> = {
       front: `<div class="container">
   <div class="image-box">{{Screenshot}}</div>
   <div class="audio-box">{{Audio}}</div>
+  {{^Screenshot}}
+  <div class="original">{{Sentence}}</div>
+  {{/Screenshot}}
 </div>`,
       back: `<div class="container">
   <div class="image-box">{{Screenshot}}</div>
@@ -402,8 +421,13 @@ const THEMES: Record<string, ThemeConfig> = {
     },
     vocab: {
       front: `<div class="container">
+  {{#Word}}
   <div class="target-word">{{Word}}</div>
   <div class="hint">recall from the scene</div>
+  {{/Word}}
+  {{^Word}}
+  <div class="original">{{Sentence}}</div>
+  {{/Word}}
 </div>`,
       back: `<div class="container">
   <div class="target-word">{{Word}}</div>
@@ -555,7 +579,12 @@ const THEMES: Record<string, ThemeConfig> = {
   <div class="image-box">{{Screenshot}}</div>
   <div class="audio-box">{{Audio}}</div>
   <div class="section-label">Sentence</div>
+  {{#Screenshot}}
   <div class="original" style="text-align: center;">聆听音频，回忆句子</div>
+  {{/Screenshot}}
+  {{^Screenshot}}
+  <div class="original" style="text-align: center;">{{Sentence}}</div>
+  {{/Screenshot}}
 </div>`,
       back: `<div class="container clearfix">
   <div class="section-label">Sentence</div>
@@ -580,9 +609,14 @@ const THEMES: Record<string, ThemeConfig> = {
     },
     vocab: {
       front: `<div class="container">
+  {{#Word}}
   <div class="target-word">{{Word}}</div>
   <div class="phonetic">listen & recall</div>
   <div class="hint">回忆该词在视频语境中的含义</div>
+  {{/Word}}
+  {{^Word}}
+  <div class="original" style="text-align: center;">{{Sentence}}</div>
+  {{/Word}}
 </div>`,
       back: `<div class="container">
   <div class="target-word">{{Word}}</div>

@@ -120,6 +120,9 @@ _SENTENCE_FRONT = """\
 <div class="container">
   <div class="image-box">{{Screenshot}}</div>
   <div class="audio-box">{{Audio}}</div>
+  {{^Screenshot}}
+  <div class="original">{{Sentence}}</div>
+  {{/Screenshot}}
 </div>"""
 
 _SENTENCE_BACK = """\
@@ -140,8 +143,13 @@ _SENTENCE_BACK = """\
 # ── 词汇卡模板 ──────────────────────────────────────────
 _VOCAB_FRONT = """\
 <div class="container">
+  {{#Word}}
   <div class="target-word">{{Word}}</div>
   <div class="hint">试着回想这个词在视频里的意思</div>
+  {{/Word}}
+  {{^Word}}
+  <div class="original">{{Sentence}}</div>
+  {{/Word}}
 </div>"""
 
 _VOCAB_BACK = """\
@@ -315,6 +323,9 @@ _MINIMAL_SENTENCE_FRONT = """\
 <div class="container">
   <div class="image-box">{{Screenshot}}</div>
   <div class="audio-box">{{Audio}}</div>
+  {{^Screenshot}}
+  <div class="original">{{Sentence}}</div>
+  {{/Screenshot}}
 </div>"""
 
 _MINIMAL_SENTENCE_BACK = """\
@@ -333,8 +344,13 @@ _MINIMAL_SENTENCE_BACK = """\
 
 _MINIMAL_VOCAB_FRONT = """\
 <div class="container">
+  {{#Word}}
   <div class="target-word">{{Word}}</div>
   <div class="hint">recall the meaning from context</div>
+  {{/Word}}
+  {{^Word}}
+  <div class="original">{{Sentence}}</div>
+  {{/Word}}
 </div>"""
 
 _MINIMAL_VOCAB_BACK = """\
@@ -478,6 +494,9 @@ _NETFLIX_SENTENCE_FRONT = """\
 <div class="container">
   <div class="image-box">{{Screenshot}}</div>
   <div class="audio-box">{{Audio}}</div>
+  {{^Screenshot}}
+  <div class="original">{{Sentence}}</div>
+  {{/Screenshot}}
 </div>"""
 
 _NETFLIX_SENTENCE_BACK = """\
@@ -495,8 +514,13 @@ _NETFLIX_SENTENCE_BACK = """\
 
 _NETFLIX_VOCAB_FRONT = """\
 <div class="container">
+  {{#Word}}
   <div class="target-word">{{Word}}</div>
   <div class="hint">recall from the scene</div>
+  {{/Word}}
+  {{^Word}}
+  <div class="original">{{Sentence}}</div>
+  {{/Word}}
 </div>"""
 
 _NETFLIX_VOCAB_BACK = """\
@@ -677,7 +701,12 @@ _DICT_SENTENCE_FRONT = """\
   <div class="image-box">{{Screenshot}}</div>
   <div class="audio-box">{{Audio}}</div>
   <div class="section-label">Sentence</div>
+  {{#Screenshot}}
   <div class="original" style="text-align: center;">聆听音频，回忆句子</div>
+  {{/Screenshot}}
+  {{^Screenshot}}
+  <div class="original" style="text-align: center;">{{Sentence}}</div>
+  {{/Screenshot}}
 </div>"""
 
 _DICT_SENTENCE_BACK = """\
@@ -704,11 +733,16 @@ _DICT_SENTENCE_BACK = """\
 
 _DICT_VOCAB_FRONT = """\
 <div class="container">
+  {{#Word}}
   <div class="section-label">Entry</div>
   <div>
     <span class="headword">{{Word}}</span>
   </div>
   <div class="hint">try to recall the definition</div>
+  {{/Word}}
+  {{^Word}}
+  <div class="original" style="text-align: center;">{{Sentence}}</div>
+  {{/Word}}
 </div>"""
 
 _DICT_VOCAB_BACK = """\
