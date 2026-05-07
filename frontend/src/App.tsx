@@ -264,6 +264,7 @@ function App() {
 
   const [result, setResult] = useState<ProcessedCard[] | null>(null);
   const [apkgPath, setApkgPath] = useState<string | null>(null);
+  const [apkgUrl, setApkgUrl] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
 
   const [previewIndex, setPreviewIndex] = useState(0);
@@ -1148,6 +1149,7 @@ function App() {
 
             const r = progress.result;
             setApkgPath(r.apkg_path);
+            setApkgUrl(r.apkg_url || null);
 
             if (r.cards && r.cards.length > 0) {
               setResult(r.cards);
@@ -1199,8 +1201,11 @@ function App() {
     if (!apkgPath) return;
 
     try {
-      // 创建一个临时链接下载
-      const response = await fetch(`/download/${encodeURIComponent(apkgPath)}`);
+      // 使用后端返回的 apkg_url（包含 task_id 子目录）
+      const downloadUrl = apkgUrl
+        ? `${API_BASE_URL}${apkgUrl}`
+        : `/download/${encodeURIComponent(apkgPath)}`;
+      const response = await fetch(downloadUrl);
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.detail || `下载失败 (HTTP ${response.status})`);
@@ -1217,10 +1222,12 @@ function App() {
       a.remove();
 
       // 下载后清理服务端文件
-      try {
-        await processAPI.cleanup(apkgPath);
-      } catch (e) {
-        console.error('清理文件失败:', e);
+      if (taskId) {
+        try {
+          await processAPI.cleanup(taskId);
+        } catch (e) {
+          console.error('清理文件失败:', e);
+        }
       }
 
       // 清理界面状态，方便继续处理下一个视频
@@ -1230,6 +1237,7 @@ function App() {
       setSelectedIndices(new Set());
       setResult(null);
       setApkgPath(null);
+      setApkgUrl(null);
       setRecommendations(null);
       setFailedIndices(new Set());
       setProcessingSteps(PROCESSING_STEPS);
@@ -1242,7 +1250,7 @@ function App() {
 
     } catch (error) {
       console.error('下载失败:', error);
-      alert('下载失败，请手动访问: /download/' + encodeURIComponent(apkgPath));
+      alert('下载失败，请手动访问: ' + (apkgUrl || '/download/' + encodeURIComponent(apkgPath)));
     }
   };
 

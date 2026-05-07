@@ -19,6 +19,8 @@ export interface ProcessResult {
   message: string;
   cards_count: number;
   apkg_path: string | null;
+  apkg_url?: string;
+  task_id?: string;
   cards: ProcessedCard[];
 }
 
