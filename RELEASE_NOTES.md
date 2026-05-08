@@ -1,6 +1,120 @@
 # ClipLingo Release Notes
 
+## v1.3.0 (2026-05-08)
+
+**English**
+
+### English UI Internationalization
+
+- Full Chinese/English UI switching powered by react-i18next
+- Language toggle button in the header, preference persisted to localStorage
+- Covers all components: alerts, prompt editors, card templates, batch queue, all four workflow steps
+
+### Batch Processing Queue
+
+- New batch queue supporting multiple videos at once
+- Each video gets its own subtitle file; unmatched videos show a "Whisper Transcribe" indicator
+- Videos without subtitles automatically trigger Whisper transcription
+- Per-row subtitle file picker for flexible assignment
+
+### Multi-Format Export
+
+- **CSV Export**: utf-8-sig encoding, Excel-ready, 5 fields: sentence, translation, notes, word, definition
+- **JSON Export**: complete card data with all fields including timestamps
+- **ZIP Export**: bundles CSV + audio + screenshots into a single download
+- Basic processing now works without an API key (translations and notes are left empty)
+
+### Independent Prompt Customization
+
+- Screening and annotation prompts are now independently editable
+- New "Grammar & Sentence Patterns" and "Vocabulary" presets for annotation
+- Backend `AIAnnotateRequest` accepts a `custom_prompt` parameter
+
+### AnkiConnect Sync Improvements
+
+- New `/api/anki-connect` proxy endpoint — the frontend no longer contacts AnkiConnect directly, eliminating CORS issues
+- Non-breaking space placeholder for empty screenshots prevents Anki from rejecting notes
+- Media upload failures no longer block the entire note; a single file failure only skips that item
+- Card front fallback: shows original sentence text when Screenshot/Audio/Word fields are empty
+
+### Bug Fixes
+
+- Fixed port 8000 not released after browser close: heartbeat pings every 30s, backend auto-exits after 2 min of silence
+- Fixed incorrect apkg download path in packaged builds: now uses `apkg_url` from the backend (includes `task_id` subdirectory)
+- Fixed ffmpeg/ffprobe/Whisper spawning terminal windows in packaged builds: added `CREATE_NO_WINDOW` to all subprocess calls
+- Fixed card style/theme selector not appearing when no API key is set
+
+**中文**
+
+### English UI 国际化
+
+- 使用 react-i18next 实现完整的中英文界面切换
+- 顶部导航栏新增语言切换按钮，偏好持久化到 localStorage
+- 覆盖所有组件：提示框、prompt 编辑器、卡片模板、批处理队列、全部四个步骤
+
+### 批量处理队列
+
+- 新增批量处理队列，支持同时导入多个视频
+- 每个视频可独立分配字幕文件，未匹配的视频显示「Whisper 转录」标识
+- 无字幕的视频自动触发 Whisper 转录
+- 每行单独的字幕文件选择器，灵活分配
+
+### 多格式导出
+
+- **CSV 导出**：utf-8-sig 编码，Excel 直接打开无乱码，包含句子/翻译/笔记/单词/释义五个文本字段
+- **JSON 导出**：完整卡片数据，包含时间戳等全部字段
+- **ZIP 导出**：打包 CSV + 音频 + 截图，一键下载全部素材
+- 无需配置 AI API Key 也能完成基础处理（翻译和笔记留空）
+
+### 独立 Prompt 自定义
+
+- 筛选（Screening）和注释（Annotation）两个阶段的 prompt 现在独立可编辑
+- 注释阶段新增「语法与句型」「词汇」预设模板
+- 后端 `AIAnnotateRequest` 支持 `custom_prompt` 参数
+
+### AnkiConnect 同步优化
+
+- 后端新增 `/api/anki-connect` 代理端点，前端不再直连 AnkiConnect，彻底解决 CORS 跨域问题
+- 截图为空时使用非断行空格占位，防止 Anki 拒绝添加笔记
+- 媒体文件上传失败不影响整张卡片写入，单文件失败仅跳过该媒体
+- 卡片正面空白回退：当截图/音频/单词字段为空时自动显示原文句子
+
+### Bug 修复
+
+- 修复关闭浏览器后端口 8000 仍被占用的问题：新增心跳机制，前端每 30 秒 ping 后端，2 分钟无心跳自动退出
+- 修复打包版 apkg 下载路径错误：使用后端返回的 `apkg_url`（含 task_id 子目录）
+- 修复打包版运行时 ffmpeg/ffprobe/Whisper 弹出命令行窗口：为所有 subprocess 调用添加 `CREATE_NO_WINDOW` 标志
+- 修复未设置 API Key 时不显示卡片样式/主题选择器的问题
+
+---
+
 ## v1.2.2 (2026-05-07)
+
+**English**
+
+### Update Check
+
+- Auto-checks GitHub for the latest version on startup
+- Shows an update banner at the top of the UI when a new version is found
+- Supports manual update check
+
+### Transcription Progress
+
+- Real-time Whisper transcription progress display
+- Transcription progress is included in the overall processing progress
+
+### AnkiConnect Sync
+
+- Send cards directly to Anki via AnkiConnect
+- No need to manually import .apkg files
+- Auto-detects AnkiConnect connection status
+
+### Learned Words Sync
+
+- Sync learned words from Anki back to ClipLingo
+- Auto-skip already-learned words to avoid duplicates
+
+**中文**
 
 ### 更新检查
 
@@ -24,7 +138,141 @@
 - 支持从 Anki 同步已学词汇到 ClipLingo
 - 自动跳过已学过的单词，避免重复学习
 
+---
+
+## v1.2.1 (2026-05-06)
+
+**English**
+
+### Two-Phase AI Workflow
+
+- AI recommendation split into **Screening** and **Annotation** phases
+- Screening: quickly assesses each subtitle's learning value, returns `include`/`skip` with reasons
+- Annotation: generates translations and grammar/vocab notes based on learning purpose
+- Both phase prompts are independently customizable
+
+### 4 Card Themes
+
+- **Classic**: traditional Anki card style with complete information
+- **Minimal Immersive**: clean design with minimal visual distraction
+- **Netflix Stills**: Netflix screenshot-inspired style
+- **Dictionary**: dictionary-style layout, ideal for vocab cards
+- Each theme has unique CSS + HTML templates, with live preview before generation
+
+### UX Flow Overhaul
+
+- Step 1: bottom confirmation bar shows readiness status
+- Step 2: rule filtering placed above the AI screening button for better workflow
+- Step 3 split into sub-stages: 3a choose purpose → 3b wait for annotation & configure style → 3c done
+- Original Steps 4+5 merged into new Step 4: preview + generate + download in one place
+- Card theme/structure selection moved to the annotation waiting period to reduce idle time
+
+### Whisper Transcription Enhancements
+
+- New 30-minute watchdog timeout — auto-terminates subprocess on timeout
+- New `POST /transcribe/cancel/{task_id}` endpoint for manual cancellation
+- Subprocess resources cleaned up in `finally` block
+
+### Checkpoint Fixes
+
+- Checkpoint now saves all output-affecting params (model name, API base, language, card styles, theme)
+- All params compared on resume; any change invalidates the checkpoint
+- Fixed missing `theme` parameter during checkpoint restore
+
+### License Change
+
+- License changed from GNU GPL v3.0 to MIT License
+
+**中文**
+
+### 两阶段 AI 工作流
+
+- AI 推荐拆分为**筛选（Screening）**和**注释（Annotation）**两个独立阶段
+- 筛选阶段：快速评估每条字幕的学习价值，返回 `include`/`skip` 判断及理由
+- 注释阶段：根据学习目的生成翻译和语法/词汇笔记
+- 两个阶段的 prompt 均可独立自定义
+
+### 4 种卡片主题
+
+- **经典（Classic）**：传统 Anki 卡片风格，信息完整
+- **极简沉浸（Minimal Immersive）**：简洁设计，减少视觉干扰
+- **Netflix 剧照（Netflix Stills）**：模仿 Netflix 截图风格
+- **词典（Dictionary）**：词典式排版，适合词汇卡
+- 每种主题拥有独立的 CSS + HTML 模板，生成前可实时预览
+
+### 界面流程重构
+
+- 步骤 1：底部确认栏显示就绪状态
+- 步骤 2：规则筛选置于 AI 筛选按钮上方，操作更直观
+- 步骤 3 拆分为子阶段：3a 选择目的 → 3b 等待注释并配置样式 → 3c 完成
+- 原步骤 4+5 合并为新步骤 4：预览 + 生成 + 下载一体化
+- 卡片主题/结构选择移至注释等待阶段，减少空等时间
+
+### Whisper 转录增强
+
+- 新增 30 分钟看门狗超时保护，超时自动终止子进程
+- 新增 `POST /transcribe/cancel/{task_id}` 端点支持用户手动取消
+- 子进程资源在 `finally` 块中确保清理
+
+### 检查点修复
+
+- 检查点现在保存所有影响输出的参数（模型名、API 地址、语言、卡片样式、主题）
+- 恢复时逐参数对比，任一变更则检查点失效
+- 修复检查点恢复时缺少 theme 参数的问题
+
+### 许可证变更
+
+- 许可证从 GNU GPL v3.0 更换为 MIT License
+
+---
+
 ## v1.1.0 (2026-05-05)
+
+**English**
+
+### Built-in Whisper — Out of the Box
+
+- Whisper transcription engine (faster-whisper) now built into the main app — no separate plugin needed
+- Removed `ClipLingo_Whisper_Setup.exe`; installers merged from two into one
+- Installer ~170MB (compressed), ~670MB after installation
+
+### AI Recommendation Performance
+
+- Fully async concurrent processing: AsyncOpenAI + asyncio.Semaphore for concurrency control
+- Dynamic batching: auto-batch by character count (max_chars=1500) to avoid oversized batches timing out
+- Results returned in completion order: faster batches shown first, no more waiting for slow ones
+- Timeout extended to 90s, with support for aborting in-progress recommendations
+- Estimated 2–2.5× speed improvement
+
+### Learning Progress Tracking
+
+- Local SQLite database records learned words (`~/.cliplingo/progress.db`)
+- Auto-marks words as learned after generating Anki cards
+- AI recommendation auto-skips learned words to avoid duplicates
+- "Learned" badge displayed in the subtitle table
+
+### Subtitle Rule Filtering
+
+- New client-side real-time filter supporting:
+  - Duration range filtering (min/max)
+  - Learned word exclusion
+  - Keyword blacklist
+- No more manual per-row checkboxes — much better experience for long videos
+
+### Card Styles
+
+- Multiple card style options (sentence cards + vocab cards)
+- Card preview uses built-in Anki CSS for WYSIWYG
+- Single-card flip effect, no more extra pages generated
+
+### Other Improvements
+
+- Replaced heartbeat polling with sendBeacon shutdown signal for better reliability
+- sendBeacon ignored in dev mode to prevent HMR from triggering shutdown
+- Removed redundant "Min Duration" input and "Batch Size" custom option
+- Source and target language configurable (EN→ZH, JA→ZH, etc.)
+
+**中文**
 
 ### Whisper 内置 — 开箱即用
 

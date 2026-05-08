@@ -1389,15 +1389,16 @@ function App() {
                   <li>{t('app.help.basic1')}</li>
                   <li>{t('app.help.basic2')}</li>
                   <li>{t('app.help.basic3')}</li>
+                  <li>{t('app.help.basic4')}</li>
                 </ol>
               ) : (
                 <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
                   <div>
-                    <h4 className="font-semibold text-gray-900 mb-1 dark:text-gray-100">{t('app.help.advancedBasicTitle')}</h4>
+                    <h4 className="font-semibold text-gray-900 mb-1 dark:text-gray-100">{t('app.help.advancedBatchTitle')}</h4>
                     <ul className="list-disc list-inside space-y-1 ml-2">
-                      <li>{t('app.help.advancedBasic1')}</li>
-                      <li>{t('app.help.advancedBasic2')}</li>
-                      <li>{t('app.help.advancedBasic3')}</li>
+                      <li>{t('app.help.advancedBatch1')}</li>
+                      <li>{t('app.help.advancedBatch2')}</li>
+                      <li>{t('app.help.advancedBatch3')}</li>
                     </ul>
                   </div>
                   <div>
@@ -1407,6 +1408,23 @@ function App() {
                       <li>{t('app.help.advancedAi2')}</li>
                       <li>{t('app.help.advancedAi3')}</li>
                       <li>{t('app.help.advancedAi4')}</li>
+                    </ul>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-gray-900 mb-1 dark:text-gray-100">{t('app.help.advancedThemeTitle')}</h4>
+                    <ul className="list-disc list-inside space-y-1 ml-2">
+                      <li>{t('app.help.advancedTheme1')}</li>
+                      <li>{t('app.help.advancedTheme2')}</li>
+                      <li>{t('app.help.advancedTheme3')}</li>
+                    </ul>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-gray-900 mb-1 dark:text-gray-100">{t('app.help.advancedExportTitle')}</h4>
+                    <ul className="list-disc list-inside space-y-1 ml-2">
+                      <li>{t('app.help.advancedExport1')}</li>
+                      <li>{t('app.help.advancedExport2')}</li>
+                      <li>{t('app.help.advancedExport3')}</li>
+                      <li>{t('app.help.advancedExport4')}</li>
                     </ul>
                   </div>
                   <div>
@@ -1422,6 +1440,7 @@ function App() {
                     <ul className="list-disc list-inside space-y-1 ml-2">
                       <li>{t('app.help.advancedCard1')}</li>
                       <li>{t('app.help.advancedCard2')}</li>
+                      <li>{t('app.help.advancedCard3')}</li>
                     </ul>
                   </div>
                 </div>
