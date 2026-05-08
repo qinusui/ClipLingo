@@ -155,26 +155,28 @@ def run(
 
     if need_transcribe:
         print("[0/5] Whisper 自动转录...")
-        from core.whisper_manager import is_whisper_installed, get_whisper
+        from core.whisper_manager import is_whisper_installed, load_model
 
         if not is_whisper_installed():
             raise RuntimeError(
                 "Whisper 未安装。请运行以下命令安装：\n"
-                "pip install openai-whisper --index-url https://download.pytorch.org/whl/cpu"
+                "pip install faster-whisper"
             )
 
-        whisper = get_whisper()
         from core.whisper_transcribe import save_as_srt
 
-        model = whisper.load_model(whisper_model)
-        result = model.transcribe(
+        model = load_model(whisper_model)
+        if model is None:
+            raise RuntimeError("Whisper 模型加载失败")
+
+        segments_iter, info = model.transcribe(
             str(video_path),
             language=language,
             word_timestamps=True,
-            verbose=False
+            vad_filter=True,
         )
-        segments = [{"start": s["start"], "end": s["end"], "text": s["text"].strip()}
-                     for s in result.get("segments", [])]
+        segments = [{"start": seg.start, "end": seg.end, "text": seg.text.strip()}
+                     for seg in segments_iter if seg.text.strip()]
         print(f"  转录完成，共 {len(segments)} 段")
 
         # 保存为 SRT 供后续使用
