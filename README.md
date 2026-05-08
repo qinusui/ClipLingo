@@ -4,163 +4,165 @@
 
 <h1 align="center">ClipLingo</h1>
 
-将视频 + 字幕文件自动转换为可导入 Anki 的牌组。
+[中文](README_zh.md) | English
 
-**定位：通过视频字幕学习外语的工具** — 支持任意语言对，无需 AI 即可使用基础功能，配置 AI 后可智能筛选有学习价值的句子。
+Automatically convert video + subtitle files into Anki decks.
 
-## 为什么选择 ClipLingo
+**A tool for learning foreign languages through video subtitles** — supports any language pair, works without AI for basic use, and can intelligently select sentences worth learning when AI is configured.
+
+## Why ClipLingo
 
 |           | ClipLingo                                         | subs2srs           | LanguageReactor |
 | --------- | ------------------------------------------------- | ------------------ | --------------- |
-| **运行方式**  | 本地运行，数据不离开你的电脑                                    | 本地运行，但依赖 Anki 插件生态 | 浏览器插件，在线服务      |
-| **隐私**    | 所有文件和 API Key 仅在本地处理                              | 本地                 | 视频观看数据上传至服务器    |
-| **AI 功能** | 可选，支持任意 OpenAI 兼容接口（DeepSeek / OpenAI / Ollama 等） | 无内置 AI             | 内置，但绑定其在线服务     |
-| **语言对**   | 任意语言对，自由切换                                        | 英语为主               | 英语为主            |
-| **上手难度**  | 下载即用，图形界面                                         | 需要熟悉 Anki + 命令行工具  | 浏览器插件，简单        |
-| **输出格式**  | AnkiConnect 直接同步 + .apkg 导出                        | 需要配合 Anki 导入       | 仅支持在线复习         |
-| **字幕来源**  | 外挂 SRT + 内嵌软字幕 + Whisper 转录                       | 外挂 ASS/SRT         | 仅在线视频字幕         |
+| **Runtime**  | Local, data never leaves your machine                    | Local, but relies on Anki ecosystem | Browser extension, always online      |
+| **Privacy**    | All files and API keys processed locally                       | Local                 | Video watch data uploaded to servers    |
+| **AI** | Optional, supports any OpenAI-compatible API (DeepSeek / OpenAI / Ollama, etc.) | No built-in AI             | Built-in, but tied to their online service     |
+| **Language Pair**   | Any pair, freely switchable                                        | Mainly English              | Mainly English           |
+| **Learning Curve**  | Download and use, full GUI                                          | Requires familiarity with Anki + CLI  | Browser extension, easy       |
+| **Output**  | AnkiConnect direct sync + .apkg export                         | Requires Anki import       | Online review only         |
+| **Subtitle Sources**  | External SRT + embedded soft subs + Whisper transcription                       | External ASS/SRT         | Online video subtitles only         |
 
-简而言之：**subs2srs 功能强大但上手门槛高，LanguageReactor 方便但数据不在自己手里。ClipLingo 兼顾易用性和隐私，AI 功能完全可选。**
+In short: **subs2srs is powerful but has a steep learning curve; LanguageReactor is convenient but your data isn't yours. ClipLingo balances ease of use and privacy, with AI features entirely optional.**
 
-## 下载与安装
+## Download & Install
 
-**安装版（推荐）：**
+**Installer (Recommended):**
 
-- `ClipLingo_Setup.exe` — 主程序安装包，内置 Whisper 转录（~700MB）
+- `ClipLingo_Setup.exe` — Full installer with built-in Whisper transcription (~700MB)
 
-安装后启动 `ClipLingo.exe`，浏览器访问 `http://localhost:8000`。
+After installation, run `ClipLingo.exe` and open `http://localhost:8000` in your browser.
 
-**免安装版：**
+**Portable:**
 
-- `ClipLingo_portable.zip` — 解压即用（~700MB）
+- `ClipLingo_portable.zip` — Extract and run (~700MB)
 
-运行 `ClipLingo.exe`，浏览器访问 `http://localhost:8000`。
+Run `ClipLingo.exe` and open `http://localhost:8000` in your browser.
 
-**Docker：**
+**Docker:**
 
 ```bash
 git clone https://github.com/qinusui/ClipLingo.git
 cd ClipLingo
 docker-compose up -d
-# 浏览器访问 http://localhost:8000
+# Open http://localhost:8000 in your browser
 ```
 
-> 需要先安装 [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+> Requires [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 
-**开发环境：**
+**Development:**
 
 ```bash
 pip install -r requirements.txt && cd backend && pip install -r requirements.txt && cd ../frontend && npm install && cd ..
 scripts\start.bat  # Windows
-# 或
+# or
 ./scripts/start.sh  # Linux/Mac
 ```
 
-需要 Python 3.10+、ffmpeg（PATH 中）、Node.js 18+。
+Requires Python 3.10+, ffmpeg (in PATH), and Node.js 18+.
 
-## 核心功能
+## Features
 
-- **AnkiConnect 同步**：无需导出 .apkg，直接将卡片发送到 Anki（需安装 [AnkiConnect](https://ankiweb.net/shared/info/2055492159) 插件），自动上传截图和音频，自动跳过重复卡片
-- **已学词汇双向同步**：从 Anki 的 ClipLingo 牌组中提取已学单词，AI 筛选时自动跳过；也支持本地 SQLite 记录
-- **Whisper 转录**：内置 faster-whisper，支持视频直接转录为字幕（英/日/韩等多语言），可取消、有超时保护
-- **两阶段 AI 工作流**：先筛选（快速判断学习价值）→ 再注释（根据用途生成翻译和注释），筛选和注释提示词均可自定义
-- **4 种卡片主题**：经典、极简沉浸、Netflix 剧照、硬核词典，风格迥异，预览即所得
-- **2 种卡片结构**：句型卡（截图+音频 → 原文+翻译+注释）和词汇卡（单词 → 释义+例句）
-- **批量处理**：多视频批量导入，支持每个视频单独指定字幕文件，未匹配字幕的视频自动 Whisper 转录
-- **规则筛选**：时长范围、已学排除、关键词黑名单，快速过滤大量字幕
-- **内嵌字幕提取**：自动检测视频内嵌软字幕，无需手动准备 SRT 文件
+- **AnkiConnect Sync**: Send cards directly to Anki without exporting .apkg files (requires [AnkiConnect](https://ankiweb.net/shared/info/2055492159) add-on), auto-uploads screenshots and audio, automatically skips duplicates
+- **Bidirectional Learned Words Sync**: Extracts learned words from ClipLingo decks in Anki, auto-skip during AI screening; also supports local SQLite tracking
+- **Whisper Transcription**: Built-in faster-whisper, transcribe video directly to subtitles (English/Japanese/Korean and more), cancellable, with timeout protection
+- **Two-Phase AI Workflow**: Screen first (quick learning value assessment) → then annotate (generate translations and notes based on purpose), both prompts fully customizable
+- **4 Card Themes**: Classic, Minimal Immersive, Netflix Stills, Dictionary — distinct visual styles, preview before generation
+- **2 Card Structures**: Sentence cards (screenshot + audio → original text + translation + notes) and Vocab cards (word → definition + example)
+- **Batch Processing**: Import multiple videos at once, assign subtitle files per video, auto-transcribe videos without subtitles
+- **Rule-Based Filtering**: Duration range, learned word exclusion, keyword blacklist — quickly filter large subtitle sets
+- **Embedded Subtitle Extraction**: Auto-detect embedded soft subtitles in video files, no need to manually prepare SRT files
 
-## 配置
+## Configuration
 
-### AI 配置（可选）
+### AI Configuration (Optional)
 
-如需使用 AI 翻译和智能筛选功能，在界面右侧「AI 配置」栏填写：
+To use AI translation and smart screening, fill in the "AI Config" panel on the right:
 
-- **源语言 / 目标语言**：选择字幕语言和翻译目标语言，支持中、英、日、韩、法、德、西等 19 种语言
-- **API 地址**：支持 OpenAI 兼容接口（DeepSeek / OpenAI / Ollama 等）
-- **模型名称**：自定义模型
-- **API Key**：自动持久化到 localStorage
-- **测试连接** / **获取模型列表**：一键验证配置
-- **提示词自定义**：筛选和注释提示词均可独立编辑，预设「语法句型」和「背单词」两种模板，支持自由修改
+- **Source / Target Language**: Select subtitle language and translation target language, supports 19 languages including Chinese, English, Japanese, Korean, French, German, Spanish
+- **API Base URL**: Supports any OpenAI-compatible API (DeepSeek / OpenAI / Ollama, etc.)
+- **Model Name**: Custom model name
+- **API Key**: Automatically persisted to localStorage
+- **Test Connection** / **List Models**: One-click configuration verification
+- **Custom Prompts**: Both screening and annotation prompts can be independently edited, with "Grammar & Sentence Pattern" and "Vocabulary" presets
 
-> **隐私安全**：API Key 仅存储在浏览器本地（localStorage），不会上传到任何服务器，仅在本机与 localhost 后端通信时使用。电脑共用时注意清理浏览器数据。
+> **Privacy & Security**: API keys are stored only in your browser's localStorage. They are never uploaded to any server and are only used locally when communicating with the localhost backend. Clear your browser data when sharing a computer.
 
-### 字幕处理配置
+### Subtitle Processing
 
-左侧「字幕处理配置」栏可调整：
+Adjust in the left "Subtitle Processing Config" panel:
 
-- **最短时长**：过滤过短的字幕（默认 1.0 秒）
-- **开头提前**：音频切割时的头部 padding（默认 200ms）
-- **结尾延后**：音频切割时的尾部 padding（默认 200ms）
+- **Min Duration**: Filter out subtitles that are too short (default 1.0s)
+- **Padding Start**: Audio clipping head padding (default 200ms)
+- **Padding End**: Audio clipping tail padding (default 200ms)
 
-### 批量处理
+### Batch Processing
 
-支持多视频批量导入，每个视频可单独指定字幕文件。未匹配字幕的视频会自动使用 Whisper 转录。批量任务支持全部下载 ZIP、逐个同步到 Anki、取消等操作。
+Supports importing multiple videos at once. Each video can have its own subtitle file assigned. Videos without subtitles will automatically trigger Whisper transcription. Batch tasks support downloading all as ZIP, syncing to Anki individually, cancellation, and more.
 
-## 使用流程
+## Workflow
 
-界面采用四步纵向布局：
+The interface uses a four-step vertical layout:
 
-1. **准备素材**：上传视频和字幕文件（或自动生成字幕），底部确认行显示就绪状态
-2. **AI 筛选**：先设过滤规则（时长/排除词），再点「AI 筛选」，表格实时更新推荐/跳过徽章
-3. **AI 注释**：选择用途（语法句型 / 背单词），等待注释完成；等待期间可提前选择卡片结构和视觉主题
-4. **预览与生成**：预览卡片效果，满意后点击「开始处理」，完成后同步到 Anki 或下载 .apkg 牌组
+1. **Prepare**: Upload video and subtitle files (or auto-generate subtitles), the bottom confirmation bar shows readiness status
+2. **AI Screen**: Set filter rules (duration/exclusion words), then click "AI Screen" — the table shows real-time recommendation/skip badges
+3. **AI Annotate**: Choose purpose (Grammar / Vocabulary), wait for annotation to complete; card structure and visual theme can be selected during this step
+4. **Preview & Generate**: Preview card effects, click "Generate" when satisfied, then sync to Anki or download .apkg deck
 
-**两种使用模式：**
+**Two usage modes:**
 
-- **基础模式**（无需 AI）：上传视频 → 自动提取/转录字幕 → 规则筛选或手动勾选 → 生成卡片
-- **AI 模式**（可选）：配置 AI → AI 筛选 → 选择用途 & 注释 → 预览主题 → 生成卡片
+- **Basic Mode** (no AI): Upload video → auto-extract/transcribe subtitles → rule filter or manual selection → generate cards
+- **AI Mode** (optional): Configure AI → AI Screen → choose purpose & annotate → preview theme → generate cards
 
-> 已学会的单词自动记录到本地 SQLite，下次运行时 AI 筛选和规则过滤会自动跳过已学词汇。
+> Learned words are automatically recorded to local SQLite, and both AI screening and rule-based filtering will automatically skip them on subsequent runs.
 
-### AnkiConnect 同步
+### AnkiConnect Sync
 
-无需手动导入 .apkg 文件，卡片可直接同步到 Anki：
+No need to manually import .apkg files — cards can be synced directly to Anki:
 
-1. 安装 [Anki](https://apps.ankiweb.net/) 并保持运行
-2. 安装 AnkiConnect 插件：Anki → 工具 → 插件 → 获取插件 → 输入代码 `2055492159` → 重启 Anki
-3. 在 ClipLingo 处理完卡片后，点击 **「同步到 Anki」** 按钮
-4. 首次使用时 Anki 会弹出权限确认窗口，点击「允许」即可
+1. Install [Anki](https://apps.ankiweb.net/) and keep it running
+2. Install the AnkiConnect add-on: Anki → Tools → Add-ons → Get Add-ons → enter code `2055492159` → restart Anki
+3. After processing cards in ClipLingo, click the **"Sync to Anki"** button
+4. On first use, Anki will show a permission confirmation dialog — click "Allow"
 
-同步过程会自动创建牌组（`ClipLingo::视频名`）、上传截图和音频媒体文件、跳过重复卡片。也可以在字幕筛选区域点击 **「从 Anki 同步」** 将 Anki 中已学词汇同步回 ClipLingo。
+The sync process auto-creates decks (`ClipLingo::videoName`), uploads screenshot and audio media files, and skips duplicate cards. You can also click **"Sync from Anki"** in the subtitle filter area to import learned words from Anki back into ClipLingo.
 
-### AI 两阶段工作流
+### AI Two-Phase Workflow
 
 ```
-AI 筛选（快速，只返回推荐/跳过 + 原因）
-    ↓ 用户确认选择
-选择用途：语法句型 or 背单词
-    ↓ AI 根据用途生成翻译和注释
-选择卡片结构 + 视觉主题
-    ↓ 实时预览
-开始处理 → 同步到 Anki / 下载 .apkg
+AI Screen (fast, returns only include/skip + reason)
+    ↓ User confirms selection
+Choose purpose: Grammar or Vocabulary
+    ↓ AI generates translations and annotations based on purpose
+Choose card structure + visual theme
+    ↓ Real-time preview
+Generate → Sync to Anki / Download .apkg
 ```
 
-## 卡片格式
+## Card Formats
 
-### 卡片结构
+### Card Structures
 
-| 结构 | 正面 | 背面 |
+| Structure | Front | Back |
 |---|---|---|
-| **句型卡** | 截图 + 音频（考察听力） | 原文 + 翻译 + 注释 |
-| **词汇卡** | 单词（大字展示） | 释义 + 例句（含截图和音频） |
+| **Sentence Card** | Screenshot + Audio (tests listening) | Original text + Translation + Notes |
+| **Vocab Card** | Word (large display) | Definition + Example (with screenshot and audio) |
 
-两种结构可同时选中，一次生成两套卡片。
+Both structures can be selected simultaneously to generate two sets of cards at once.
 
-### 视觉主题
+### Visual Themes
 
-| 主题 | 风格 |
+| Theme | Style |
 |---|---|
-| **经典** | 清爽简洁，蓝色调，适合日常学习 |
-| **极简沉浸** | 衬线字体，纸质书质感，暖色调 |
-| **Netflix** | 暗色背景，红色点缀，电影剧照感 |
-| **硬核词典** | 羊皮纸底色，金色装饰，专业词典排版 |
+| **Classic** | Clean and simple, blue tones, suitable for daily study |
+| **Minimal Immersive** | Serif fonts, paper texture, warm tones |
+| **Netflix** | Dark background, red accents, cinematic feel |
+| **Dictionary** | Parchment background, gold accents, professional dictionary layout |
 
-主题和结构自由组合（2×4 = 8 种搭配），处理前可实时预览。
+Themes and structures can be freely combined (2×4 = 8 combinations), with real-time preview before generation.
 
-## 卡片示例
+## Example
 
-![卡片格式示例](docs/example.png)
+![Card Format Example](docs/example.png)
 
 
 ## License
