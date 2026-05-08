@@ -719,10 +719,10 @@ export async function syncToAnki(
     });
   }
 
-  // 3. 创建模型（幂等）
+  // 3. 创建模型（幂等）—— Sentence 放首位作为排序字段（始终有内容）
   await createModel({
     modelName: MODEL_NAME,
-    inOrderFields: ['Screenshot', 'Audio', 'Sentence', 'Translation', 'Notes', 'Word', 'Definition'],
+    inOrderFields: ['Sentence', 'Screenshot', 'Audio', 'Translation', 'Notes', 'Word', 'Definition'],
     css: themeConfig.css,
     cardTemplates,
   });
@@ -775,11 +775,6 @@ export async function syncToAnki(
         }
       } catch {
         // 音频获取失败，跳过
-      }
-
-      // Screenshot 是 Anki 排序字段，不能为空，否则笔记会被拒绝
-      if (!screenshotField) {
-        screenshotField = '&nbsp;';
       }
 
       // 添加笔记

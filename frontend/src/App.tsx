@@ -64,7 +64,7 @@ function generateJSONContent(cards: ProcessedCard[]): string {
   return JSON.stringify(cards, null, 2);
 }
 
-// 触发浏览器下载
+// 触发浏览器下载（字符串内容）
 function downloadString(content: string, filename: string, mimeType: string) {
   const blob = mimeType.includes('csv')
     ? new Blob(['﻿' + content], { type: mimeType + ';charset=utf-8;' })
@@ -76,6 +76,24 @@ function downloadString(content: string, filename: string, mimeType: string) {
   document.body.appendChild(a);
   a.click();
   URL.revokeObjectURL(url);
+  a.remove();
+}
+
+// 通过 fetch 下载 URL 文件（避免页面导航触发 beforeunload → shutdown）
+async function downloadUrl(url: string, filename: string) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `下载失败 (HTTP ${response.status})`);
+  }
+  const blob = await response.blob();
+  const objectUrl = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = objectUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  window.URL.revokeObjectURL(objectUrl);
   a.remove();
 }
 
@@ -1595,18 +1613,18 @@ function App() {
                     <div className="flex gap-2">
                       {batchTasks.some(t => t.status === 'done') && (
                         <>
-                          <a
-                            href={queueAPI.downloadAllUrl(batchId || undefined)}
+                          <button
+                            onClick={() => downloadUrl(queueAPI.downloadAllUrl(batchId || undefined), 'ClipLingo_Batch.zip')}
                             className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-white bg-green-600 rounded-lg hover:bg-green-700"
                           >
                             <Download className="w-4 h-4" /> {t('app.batch.downloadAllZip')}
-                          </a>
-                          <a
-                            href={queueAPI.exportAllZipUrl(batchId || undefined)}
+                          </button>
+                          <button
+                            onClick={() => downloadUrl(queueAPI.exportAllZipUrl(batchId || undefined), 'ClipLingo_Batch_Media.zip')}
                             className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-emerald-700 border border-emerald-300 rounded-lg hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
                           >
                             <FolderOpen className="w-4 h-4" /> {t('app.batch.downloadAllMediaZip')}
-                          </a>
+                          </button>
                           <button
                             onClick={() => {
                               const allCards = batchTasks
@@ -1694,13 +1712,16 @@ function App() {
                           <div className="flex items-center gap-2 flex-shrink-0">
                             {task.status === 'done' && task.result && (
                               <>
-                                <a
-                                  href={`${API_BASE_URL}${task.result.apkg_url}`}
+                                <button
+                                  onClick={() => {
+                                    const result = task.result!;
+                                    const apkgName = result.apkg_url?.split('/').pop() || 'deck.apkg';
+                                    downloadUrl(`${API_BASE_URL}${result.apkg_url}`, apkgName);
+                                  }}
                                   className="text-xs text-blue-600 hover:underline dark:text-blue-400"
-                                  download
                                 >
                                   {t('app.batch.download')}
-                                </a>
+                                </button>
                                 <button
                                   onClick={() => handleBatchSyncToAnki(task)}
                                   className="text-xs text-green-600 hover:underline dark:text-green-400"
@@ -2693,9 +2714,7 @@ function App() {
                         variant="outline"
                         size="sm"
                         className="w-full"
-                        onClick={() => {
-                          window.open(processAPI.exportZipUrl(taskId), '_blank');
-                        }}
+                        onClick={() => downloadUrl(processAPI.exportZipUrl(taskId), `ClipLingo_${taskId}_Media.zip`)}
                       >
                         <FolderOpen className="w-4 h-4 mr-1" />
                         {t('app.step4.exportMediaZip')}

@@ -178,9 +178,9 @@ def _create_model(model_id: int, name: str, templates: list[dict], css: str = No
         model_id=model_id,
         name=name,
         fields=[
+            {'name': 'Sentence'},
             {'name': 'Screenshot'},
             {'name': 'Audio'},
-            {'name': 'Sentence'},
             {'name': 'Translation'},
             {'name': 'Notes'},
             {'name': 'Word'},
@@ -871,9 +871,9 @@ def create_deck(
         note = genanki.Note(
             model=model,
             fields=[
+                card.sentence,      # Sentence（排序字段）
                 screenshot_field,   # Screenshot
                 audio_field,        # Audio
-                card.sentence,      # Sentence
                 card.translation,   # Translation
                 card.notes,         # Notes
                 word,               # Word
