@@ -1,7 +1,7 @@
 ; installer.iss - Inno Setup 安装包配置
 [Setup]
 AppName=ClipLingo
-AppVersion=1.2.2
+AppVersion=1.3.1
 AppPublisher=ClipLingo
 DefaultDirName={autopf}\ClipLingo
 DefaultGroupName=ClipLingo
