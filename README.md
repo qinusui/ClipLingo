@@ -72,6 +72,10 @@ Requires Python 3.10+, ffmpeg (in PATH), and Node.js 18+.
 - **Rule-Based Filtering**: Duration range, learned word exclusion, keyword blacklist — quickly filter large subtitle sets
 - **Embedded Subtitle Extraction**: Auto-detect embedded soft subtitles in video files, no need to manually prepare SRT files
 
+## Interface
+
+![ClipLingo Interface](docs/Interface.png)
+
 ## Configuration
 
 ### AI Configuration (Optional)
