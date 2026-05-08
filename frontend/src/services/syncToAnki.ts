@@ -3,6 +3,7 @@
  * 将 ProcessedCard 逐张同步到 Anki
  */
 
+import i18n from '../i18n';
 import type { ProcessedCard } from '../types';
 import {
   createDeck,
@@ -123,7 +124,7 @@ const THEMES: Record<string, ThemeConfig> = {
       front: `<div class="container">
   {{#Word}}
   <div class="target-word">{{Word}}</div>
-  <div class="hint">试着回想这个词在视频里的意思</div>
+  <div class="hint">${i18n.t('ankiCard.vocabHintDefault')}</div>
   {{/Word}}
   {{^Word}}
   <div class="original">{{Sentence}}</div>
@@ -136,7 +137,7 @@ const THEMES: Record<string, ThemeConfig> = {
   {{/Definition}}
   <hr id="answer">
   <div class="example-box">
-    <div class="tag">CONTEXT / 例句</div>
+    <div class="tag">${i18n.t('ankiCard.exampleTagDefault')}</div>
     {{#Screenshot}}
     <div class="image-box">{{Screenshot}}</div>
     {{/Screenshot}}
@@ -281,7 +282,7 @@ const THEMES: Record<string, ThemeConfig> = {
       front: `<div class="container">
   {{#Word}}
   <div class="target-word">{{Word}}</div>
-  <div class="hint">recall the meaning from context</div>
+  <div class="hint">${i18n.t('ankiCard.vocabHintMinimal')}</div>
   {{/Word}}
   {{^Word}}
   <div class="original">{{Sentence}}</div>
@@ -294,7 +295,7 @@ const THEMES: Record<string, ThemeConfig> = {
   {{/Definition}}
   <div class="divider"></div>
   <div class="example-box">
-    <div class="tag">CONTEXT</div>
+    <div class="tag">${i18n.t('ankiCard.exampleTagMinimal')}</div>
     {{#Screenshot}}
     <div class="image-box">{{Screenshot}}</div>
     {{/Screenshot}}
@@ -423,7 +424,7 @@ const THEMES: Record<string, ThemeConfig> = {
       front: `<div class="container">
   {{#Word}}
   <div class="target-word">{{Word}}</div>
-  <div class="hint">recall from the scene</div>
+  <div class="hint">${i18n.t('ankiCard.vocabHintNetflix')}</div>
   {{/Word}}
   {{^Word}}
   <div class="original">{{Sentence}}</div>
@@ -435,7 +436,7 @@ const THEMES: Record<string, ThemeConfig> = {
   <div class="word-meaning">{{Definition}}</div>
   {{/Definition}}
   <div class="example-box">
-    <div class="tag">SCENE CONTEXT</div>
+    <div class="tag">${i18n.t('ankiCard.exampleTagNetflix')}</div>
     {{#Screenshot}}
     <div class="image-box">{{Screenshot}}</div>
     {{/Screenshot}}
@@ -580,7 +581,7 @@ const THEMES: Record<string, ThemeConfig> = {
   <div class="audio-box">{{Audio}}</div>
   <div class="section-label">Sentence</div>
   {{#Screenshot}}
-  <div class="original" style="text-align: center;">聆听音频，回忆句子</div>
+  <div class="original" style="text-align: center;">${i18n.t('ankiCard.listenAndRecall')}</div>
   {{/Screenshot}}
   {{^Screenshot}}
   <div class="original" style="text-align: center;">{{Sentence}}</div>
@@ -612,7 +613,7 @@ const THEMES: Record<string, ThemeConfig> = {
   {{#Word}}
   <div class="target-word">{{Word}}</div>
   <div class="phonetic">listen & recall</div>
-  <div class="hint">回忆该词在视频语境中的含义</div>
+  <div class="hint">${i18n.t('ankiCard.vocabHintDictionary')}</div>
   {{/Word}}
   {{^Word}}
   <div class="original" style="text-align: center;">{{Sentence}}</div>
@@ -628,7 +629,7 @@ const THEMES: Record<string, ThemeConfig> = {
 
   <div class="section-label">Context</div>
   <div class="example-box">
-    <div class="tag">VIDEO CONTEXT</div>
+    <div class="tag">${i18n.t('ankiCard.videoContext')}</div>
     {{#Screenshot}}
     <div class="image-box">{{Screenshot}}</div>
     {{/Screenshot}}
@@ -729,7 +730,7 @@ export async function syncToAnki(
   // 3. 逐张同步
   for (let i = 0; i < cards.length; i++) {
     if (signal?.aborted) {
-      throw new DOMException('同步已取消', 'AbortError');
+      throw new DOMException(i18n.t('ankiSync.stop'), 'AbortError');
     }
 
     const card = cards[i];

@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Upload, X, FileVideo, FileText } from 'lucide-react';
 import { cn } from '../utils/cn';
 
@@ -19,6 +20,7 @@ export const FileUpload = ({
   label,
   icon = 'text',
 }: FileUploadProps) => {
+  const { t } = useTranslation();
   const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -95,7 +97,7 @@ export const FileUpload = ({
           />
           <Upload className="w-8 h-8 text-gray-400 mx-auto mb-2 dark:text-gray-500" />
           <p className="text-sm text-gray-600 dark:text-gray-400">
-            点击上传或拖拽文件到此处
+            {t('fileUpload.dropPrompt')}
           </p>
           <p className="text-xs text-gray-400 mt-1 dark:text-gray-500">
             {accept.replace(/,/g, ', ').toUpperCase()}

@@ -1,4 +1,6 @@
 import { useState, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { ProcessedCard, CardTheme } from '../types';
 import { ChevronLeft, ChevronRight, Play, Pause, Image as ImageIcon } from 'lucide-react';
 
@@ -130,7 +132,7 @@ const DefaultSentenceFront = ({ card }: { card: ProcessedCard }) => (
   <div className="anki-card">
     <div className="container">
       <div className="image-box">
-        {card.screenshot_path ? <img src={card.screenshot_path} alt="截图" /> : <Placeholder />}
+        {card.screenshot_path ? <img src={card.screenshot_path} alt={i18n.t('cardPreview.screenshot')} /> : <Placeholder />}
       </div>
     </div>
   </div>
@@ -139,7 +141,7 @@ const DefaultSentenceFront = ({ card }: { card: ProcessedCard }) => (
 const DefaultSentenceBack = ({ card }: { card: ProcessedCard }) => (
   <div className="anki-card">
     <div className="container">
-      <div className="image-box">{card.screenshot_path && <img src={card.screenshot_path} alt="截图" />}</div>
+      <div className="image-box">{card.screenshot_path && <img src={card.screenshot_path} alt={i18n.t('cardPreview.screenshot')} />}</div>
       <hr id="answer" />
       <div className="text-content">
         <div className="original">{card.sentence}</div>
@@ -154,7 +156,7 @@ const DefaultVocabFront = ({ card }: { card: ProcessedCard }) => (
   <div className="anki-card">
     <div className="container">
       <div className="target-word">{card.word || card.sentence}</div>
-      <div className="hint">试着回想这个词在视频里的意思</div>
+      <div className="hint">{i18n.t('ankiCard.vocabHintDefault')}</div>
     </div>
   </div>
 );
@@ -166,8 +168,8 @@ const DefaultVocabBack = ({ card }: { card: ProcessedCard }) => (
       {card.definition && <div className="word-meaning">{card.definition}</div>}
       <hr id="answer" />
       <div className="example-box">
-        <div className="tag">CONTEXT / 例句</div>
-        {card.screenshot_path && <div className="image-box"><img src={card.screenshot_path} alt="截图" /></div>}
+        <div className="tag">{i18n.t('ankiCard.exampleTagDefault')}</div>
+        {card.screenshot_path && <div className="image-box"><img src={card.screenshot_path} alt={i18n.t('cardPreview.screenshot')} /></div>}
         <div className="original">{card.sentence}</div>
       </div>
     </div>
@@ -203,7 +205,7 @@ const MinimalVocabFront = ({ card }: { card: ProcessedCard }) => (
   <div className="anki-card">
     <div className="container">
       <div className="target-word">{card.word || card.sentence}</div>
-      <div className="hint">recall the meaning from context</div>
+      <div className="hint">{i18n.t('ankiCard.vocabHintMinimal')}</div>
     </div>
   </div>
 );
@@ -215,7 +217,7 @@ const MinimalVocabBack = ({ card }: { card: ProcessedCard }) => (
       {card.definition && <div className="word-meaning">{card.definition}</div>}
       <div className="divider" />
       <div className="example-box">
-        <div className="tag">Context</div>
+        <div className="tag">{i18n.t('ankiCard.exampleTagMinimal')}</div>
         <div className="original">{card.sentence}</div>
       </div>
     </div>
@@ -230,7 +232,7 @@ const NetflixSentenceFront = ({ card }: { card: ProcessedCard }) => (
   <div className="anki-card">
     <div className="container">
       <div className="image-box">
-        {card.screenshot_path ? <img src={card.screenshot_path} alt="截图" /> : <Placeholder dark />}
+        {card.screenshot_path ? <img src={card.screenshot_path} alt={i18n.t('cardPreview.screenshot')} /> : <Placeholder dark />}
       </div>
     </div>
   </div>
@@ -239,7 +241,7 @@ const NetflixSentenceFront = ({ card }: { card: ProcessedCard }) => (
 const NetflixSentenceBack = ({ card }: { card: ProcessedCard }) => (
   <div className="anki-card">
     <div className="container">
-      <div className="image-box">{card.screenshot_path && <img src={card.screenshot_path} alt="截图" />}</div>
+      <div className="image-box">{card.screenshot_path && <img src={card.screenshot_path} alt={i18n.t('cardPreview.screenshot')} />}</div>
       <div className="original">{card.sentence}</div>
       {card.translation && <div className="translation">{card.translation}</div>}
       {card.notes && <div className="notes">{card.notes}</div>}
@@ -252,7 +254,7 @@ const NetflixVocabFront = ({ card }: { card: ProcessedCard }) => (
   <div className="anki-card">
     <div className="container">
       <div className="target-word">{card.word || card.sentence}</div>
-      <div className="hint">recall from the scene</div>
+      <div className="hint">{i18n.t('ankiCard.vocabHintNetflix')}</div>
     </div>
   </div>
 );
@@ -263,8 +265,8 @@ const NetflixVocabBack = ({ card }: { card: ProcessedCard }) => (
       <div className="target-word">{card.word || card.sentence}</div>
       {card.definition && <div className="word-meaning">{card.definition}</div>}
       <div className="example-box">
-        <div className="tag">SCENE</div>
-        {card.screenshot_path && <div className="image-box"><img src={card.screenshot_path} alt="截图" /></div>}
+        <div className="tag">{i18n.t('ankiCard.exampleTagNetflix')}</div>
+        {card.screenshot_path && <div className="image-box"><img src={card.screenshot_path} alt={i18n.t('cardPreview.screenshot')} /></div>}
         <div className="original">{card.sentence}</div>
       </div>
       <div className="progress-bar" />
@@ -279,8 +281,8 @@ const NetflixVocabBack = ({ card }: { card: ProcessedCard }) => (
 const DictSentenceFront = ({ card: _card }: { card: ProcessedCard }) => (
   <div className="anki-card">
     <div className="container">
-      <div className="section-label">Sentence</div>
-      <div className="original" style={{ textAlign: 'center' }}>聆听音频，回忆句子</div>
+      <div className="section-label">{i18n.t('ankiCard.sentenceLabel')}</div>
+      <div className="original" style={{ textAlign: 'center' }}>{i18n.t('ankiCard.listenAndRecall')}</div>
     </div>
   </div>
 );
@@ -288,11 +290,11 @@ const DictSentenceFront = ({ card: _card }: { card: ProcessedCard }) => (
 const DictSentenceBack = ({ card }: { card: ProcessedCard }) => (
   <div className="anki-card">
     <div className="container clearfix">
-      <div className="section-label">Sentence</div>
-      {card.screenshot_path && <div className="thumb"><img src={card.screenshot_path} alt="截图" /></div>}
+      <div className="section-label">{i18n.t('ankiCard.sentenceLabel')}</div>
+      {card.screenshot_path && <div className="thumb"><img src={card.screenshot_path} alt={i18n.t('cardPreview.screenshot')} /></div>}
       <div className="original">{card.sentence}</div>
-      {card.translation && <><div className="section-label">Translation</div><div className="translation">{card.translation}</div></>}
-      {card.notes && <><div className="section-label">Notes</div><div className="notes">{card.notes}</div></>}
+      {card.translation && <><div className="section-label">{i18n.t('ankiCard.translationLabel')}</div><div className="translation">{card.translation}</div></>}
+      {card.notes && <><div className="section-label">{i18n.t('ankiCard.notesLabel')}</div><div className="notes">{card.notes}</div></>}
       <hr className="dict-divider" />
     </div>
   </div>
@@ -301,9 +303,9 @@ const DictSentenceBack = ({ card }: { card: ProcessedCard }) => (
 const DictVocabFront = ({ card }: { card: ProcessedCard }) => (
   <div className="anki-card">
     <div className="container">
-      <div className="section-label">Entry</div>
+      <div className="section-label">{i18n.t('ankiCard.entryLabel')}</div>
       <div><span className="headword">{card.word || card.sentence}</span></div>
-      <div className="hint">try to recall the definition</div>
+      <div className="hint">{i18n.t('ankiCard.vocabHintDictionary')}</div>
     </div>
   </div>
 );
@@ -311,18 +313,18 @@ const DictVocabFront = ({ card }: { card: ProcessedCard }) => (
 const DictVocabBack = ({ card }: { card: ProcessedCard }) => (
   <div className="anki-card">
     <div className="container clearfix">
-      <div className="section-label">Entry</div>
-      {card.screenshot_path && <div className="thumb"><img src={card.screenshot_path} alt="截图" /></div>}
+      <div className="section-label">{i18n.t('ankiCard.entryLabel')}</div>
+      {card.screenshot_path && <div className="thumb"><img src={card.screenshot_path} alt={i18n.t('cardPreview.screenshot')} /></div>}
       <div><span className="headword">{card.word || card.sentence}</span></div>
       {card.definition && <div className="word-meaning">{card.definition}</div>}
       <hr className="dict-divider" />
-      <div className="section-label">Example</div>
+      <div className="section-label">{i18n.t('ankiCard.exampleLabel')}</div>
       <div className="example-box">
-        <div className="tag">Usage</div>
+        <div className="tag">{i18n.t('ankiCard.usageTag')}</div>
         <div className="original">{card.sentence}</div>
       </div>
-      {card.translation && <><div className="section-label">Translation</div><div className="translation">{card.translation}</div></>}
-      {card.notes && <><div className="section-label">Notes</div><div className="notes">{card.notes}</div></>}
+      {card.translation && <><div className="section-label">{i18n.t('ankiCard.translationLabel')}</div><div className="translation">{card.translation}</div></>}
+      {card.notes && <><div className="section-label">{i18n.t('ankiCard.notesLabel')}</div><div className="notes">{card.notes}</div></>}
     </div>
   </div>
 );
@@ -368,6 +370,7 @@ const Placeholder = ({ dark }: { dark?: boolean }) => (
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export const CardPreview = ({ cards, cardStyles, currentIndex, onPrevious, onNext, theme = 'default' }: CardPreviewProps) => {
+  const { t } = useTranslation();
   const [isPlaying, setIsPlaying] = useState(false);
   const [previewStyle, setPreviewStyle] = useState<string>(cardStyles[0] || 'sentence');
   const [showAnswer, setShowAnswer] = useState(false);
@@ -376,7 +379,7 @@ export const CardPreview = ({ cards, cardStyles, currentIndex, onPrevious, onNex
   if (cards.length === 0) {
     return (
       <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-        暂无卡片数据
+        {t('cardPreview.noCards')}
       </div>
     );
   }
@@ -429,7 +432,7 @@ export const CardPreview = ({ cards, cardStyles, currentIndex, onPrevious, onNex
 
         <div className="flex items-center gap-3">
           <span className="text-sm font-medium text-gray-600 dark:text-gray-400">
-            卡片 {currentIndex + 1} / {cards.length}
+            {t('cardPreview.cardCount', { current: currentIndex + 1, total: cards.length })}
           </span>
           {cardStyles.length > 1 && (
             <div className="flex bg-gray-200 dark:bg-gray-700 rounded-lg p-0.5">
@@ -442,7 +445,7 @@ export const CardPreview = ({ cards, cardStyles, currentIndex, onPrevious, onNex
                       : 'text-gray-600 dark:text-gray-400'
                   }`}
                 >
-                  句型卡
+                  {t('cardPreview.sentenceCard')}
                 </button>
               )}
               {cardStyles.includes('vocab') && (
@@ -454,7 +457,7 @@ export const CardPreview = ({ cards, cardStyles, currentIndex, onPrevious, onNex
                       : 'text-gray-600 dark:text-gray-400'
                   }`}
                 >
-                  词汇卡
+                  {t('cardPreview.vocabCard')}
                 </button>
               )}
             </div>
@@ -483,7 +486,7 @@ export const CardPreview = ({ cards, cardStyles, currentIndex, onPrevious, onNex
         onClick={() => setShowAnswer(!showAnswer)}
         className="w-full py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors text-sm"
       >
-        {showAnswer ? '回到正面' : '显示答案'}
+        {showAnswer ? t('cardPreview.showFront') : t('cardPreview.showAnswer')}
       </button>
 
       {/* 音频控制 */}
@@ -496,11 +499,11 @@ export const CardPreview = ({ cards, cardStyles, currentIndex, onPrevious, onNex
               className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600 text-sm"
             >
               {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-              {isPlaying ? '暂停' : '播放音频'}
+              {isPlaying ? t('cardPreview.pause') : t('cardPreview.playAudio')}
             </button>
           </>
         ) : (
-          <span className="text-sm text-gray-400">无音频</span>
+          <span className="text-sm text-gray-400">{t('cardPreview.noAudio')}</span>
         )}
       </div>
     </div>

@@ -4,6 +4,7 @@
  */
 
 import { API_BASE_URL } from './api';
+import i18n from '../i18n';
 
 interface AnkiConnectRequest {
   action: string;
@@ -76,7 +77,7 @@ export async function createModel(model: {
 /** 将 URL 转为 base64 */
 export async function urlToBase64(url: string): Promise<string> {
   const resp = await fetch(url);
-  if (!resp.ok) throw new Error(`获取文件失败: ${resp.status}`);
+  if (!resp.ok) throw new Error(i18n.t('ankiConnect.fileFetchFailed', { status: resp.status }));
   const blob = await resp.blob();
   return new Promise((resolve, reject) => {
     const reader = new FileReader();

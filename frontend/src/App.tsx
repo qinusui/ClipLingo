@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from './i18n';
 import { Film, Download, Info, Sparkles, ChevronDown, ChevronUp, MessageSquare, Sun, Moon, Monitor, BookOpen, GraduationCap, FolderOpen, X, ExternalLink, RefreshCw, FileSpreadsheet, FileJson } from 'lucide-react';
 import { Button } from './components/Button';
 import { Card, CardContent, CardHeader, CardTitle } from './components/Card';
@@ -81,35 +83,15 @@ type StepStatus = 'pending' | 'processing' | 'completed' | 'error';
 type ProcessingStep = { id: string; label: string; status: StepStatus; error?: string };
 
 const PROCESSING_STEPS: ProcessingStep[] = [
-  { id: 'parse', label: '解析字幕', status: 'pending' },
-  { id: 'media', label: '切割音频与截图', status: 'pending' },
-  { id: 'pack', label: '打包 Anki 牌组', status: 'pending' },
+  { id: 'parse', label: i18n.t('app.processing.parseSubtitles'), status: 'pending' },
+  { id: 'media', label: i18n.t('app.processing.cutAudioScreenshots'), status: 'pending' },
+  { id: 'pack', label: i18n.t('app.processing.packAnkiDeck'), status: 'pending' },
 ];
 
-const LANGUAGES = [
-  { code: 'zh', name: '中文' },
-  { code: 'en', name: '英语' },
-  { code: 'ja', name: '日语' },
-  { code: 'ko', name: '韩语' },
-  { code: 'fr', name: '法语' },
-  { code: 'de', name: '德语' },
-  { code: 'es', name: '西班牙语' },
-  { code: 'it', name: '意大利语' },
-  { code: 'pt', name: '葡萄牙语' },
-  { code: 'ru', name: '俄语' },
-  { code: 'ar', name: '阿拉伯语' },
-  { code: 'th', name: '泰语' },
-  { code: 'vi', name: '越南语' },
-  { code: 'nl', name: '荷兰语' },
-  { code: 'sv', name: '瑞典语' },
-  { code: 'pl', name: '波兰语' },
-  { code: 'tr', name: '土耳其语' },
-  { code: 'hi', name: '印地语' },
-  { code: 'id', name: '印尼语' },
-] as const;
+const LANGUAGE_CODES = ['zh', 'en', 'ja', 'ko', 'fr', 'de', 'es', 'it', 'pt', 'ru', 'ar', 'th', 'vi', 'nl', 'sv', 'pl', 'tr', 'hi', 'id'] as const;
 
 function getLangName(code: string): string {
-  return LANGUAGES.find(l => l.code === code)?.name ?? code;
+  return i18n.t(`app.lang.${code}`);
 }
 
 function buildPresetPrompt(template: string, sourceLanguage: string): string {
@@ -124,27 +106,12 @@ function buildAnnotationPrompt(template: string, sourceLanguage: string, targetL
 
 const PRESET_TEMPLATES = {
   grammar: {
-    label: '语法句型筛选',
-    prompt: `你是{source_language}学习教材编写专家。对输入的字幕列表，每条判断是否值得作为学习材料：
-
-判断标准：
-- 有明确的语法知识点（如时态、从句、虚拟语气等）
-- 有实用表达或固定搭配
-- 对话内容有意义（非简单寒暄如'okay', 'yeah', 'uh-huh'等）
-- 有文化背景或情境意义`,
+    label: i18n.t('app.promptPreset.grammarScreen'),
+    prompt: i18n.t('app.prompt.grammarScreenBody'),
   },
   vocab: {
-    label: '词汇筛选',
-    prompt: `你是{source_language}词汇教学专家。对输入的字幕列表，每条判断是否值得作为单词学习材料：
-
-判断标准：
-- 句子中包含高频核心词汇或学术词汇
-- 包含值得掌握的动词短语、介词搭配或习语
-- 包含一词多义、熟词僻义的实际用例
-- 单词在语境中有助于理解和记忆
-- 对话内容有意义（非简单寒暄如'okay', 'yeah', 'uh-huh'等）
-
-对于 include=true 的句子，notes 字段需标注：重点单词-词性-释义，如遇词组则整体标注`,
+    label: i18n.t('app.promptPreset.vocabScreen'),
+    prompt: i18n.t('app.prompt.vocabScreenBody'),
   },
 } as const;
 
@@ -153,32 +120,12 @@ type PresetKey = keyof typeof PRESET_TEMPLATES;
 // 注释阶段预设模板
 const ANNOTATION_TEMPLATES = {
   grammar: {
-    label: '语法句型',
-    prompt: `你是{source_language}学习教材编写专家。为输入的字幕列表（已筛选为值得学习的内容）提供翻译和语法句型注释。
-
-返回格式（严格遵守）：
-{{"items": [{{"index": 数字, "translation": "{target_language}翻译", "notes": "语法知识点和实用表达", "word": "句子中最值得学习的核心单词或词组", "definition": "该单词/词组的{target_language}释义"}}]}}
-
-注意：
-- 必须返回一个 JSON 对象，items 是数组
-- 所有项目必须包含 translation、notes、word、definition
-- notes 应侧重语法结构和实用表达
-- word 为句子中最值得背诵的核心单词或词组
-- 保持原文顺序输出`,
+    label: i18n.t('app.promptPreset.grammarAnnotate'),
+    prompt: i18n.t('app.prompt.grammarAnnotateBody'),
   },
   vocab: {
-    label: '背单词',
-    prompt: `你是{target_language}词汇教学专家。为输入的字幕列表（已筛选为值得学习的内容）提供翻译和词汇注释。
-
-返回格式（严格遵守）：
-{{"items": [{{"index": 数字, "translation": "{target_language}翻译", "notes": "重点单词-词性-释义", "word": "句子中最值得学习的核心单词或词组", "definition": "该单词/词组的{target_language}释义"}}]}}
-
-注意：
-- 必须返回一个 JSON 对象，items 是数组
-- 所有项目必须包含 translation、notes、word、definition
-- notes 格式：重点单词-词性-释义；遇词组则整体标注
-- word 为句子中最值得背诵的核心单词或词组
-- 保持原文顺序输出`,
+    label: i18n.t('app.promptPreset.vocabAnnotate'),
+    prompt: i18n.t('app.prompt.vocabAnnotateBody'),
   },
 } as const;
 
@@ -196,6 +143,7 @@ function loadAIConfig() {
 }
 
 function App() {
+  const { t, i18n } = useTranslation();
   const { theme, toggleTheme } = useTheme();
   const savedConfig = loadAIConfig();
   const [apiBase, setApiBase] = useState(savedConfig?.apiBase || 'https://api.deepseek.com');
@@ -434,7 +382,7 @@ function App() {
 
     const noSubCount = subtitleFiles.filter(s => !s).length;
     if (noSubCount > 0) {
-      const ok = confirm(`${noSubCount} 个视频未匹配字幕，将自动使用 Whisper 转录。继续？`);
+      const ok = confirm(t('app.error.batchConfirmWhisper', { count: noSubCount }));
       if (!ok) return;
     }
 
@@ -456,13 +404,13 @@ function App() {
       setBatchTasks(result.tasks.map(t => ({
         ...t,
         step: 0,
-        message: '等待中',
+        message: i18n.t('app.batch.pendingStatus'),
       })));
 
       // 启动轮询
       startBatchPolling(result.batch_id);
     } catch (err) {
-      alert('提交失败: ' + getApiErrorMessage(err));
+      alert(t('app.error.submitFailed') + getApiErrorMessage(err));
     } finally {
       setBatchSubmitting(false);
     }
@@ -507,7 +455,7 @@ function App() {
     const { pingAnki } = await import('./services/ankiConnect');
     const online = await pingAnki();
     if (!online) {
-      alert('未检测到 Anki，请确保 Anki 已安装并运行');
+      alert(t('app.error.ankiNotRunning'));
       return;
     }
     try {
@@ -516,9 +464,9 @@ function App() {
       const taskCardStyles = task.params?.card_styles || Array.from(cardStyles);
       const taskTheme = task.params?.theme || cardTheme;
       const res = await syncToAnki(task.result.cards, deckName, API_BASE_URL, taskCardStyles, taskTheme);
-      alert(`同步完成：新增 ${res.added}，跳过 ${res.skipped}，失败 ${res.failed}`);
+      alert(t('app.error.syncDone', { added: res.added, skipped: res.skipped, failed: res.failed }));
     } catch (err) {
-      alert('同步失败: ' + (err instanceof Error ? err.message : String(err)));
+      alert(t('app.error.syncFailed') + (err instanceof Error ? err.message : String(err)));
     }
   };
 
@@ -574,9 +522,9 @@ function App() {
   useEffect(() => {
     for (const tmpl of Object.values(PRESET_TEMPLATES)) {
       const built = buildPresetPrompt(tmpl.prompt, sourceLanguage);
-      for (const lang of LANGUAGES) {
-        if (lang.code === sourceLanguage) continue;
-        if (customPrompt === buildPresetPrompt(tmpl.prompt, lang.code)) {
+      for (const code of LANGUAGE_CODES) {
+        if (code === sourceLanguage) continue;
+        if (customPrompt === buildPresetPrompt(tmpl.prompt, code)) {
           setCustomPrompt(built);
           break;
         }
@@ -585,10 +533,10 @@ function App() {
     // 同步注释提示词
     for (const tmpl of Object.values(ANNOTATION_TEMPLATES)) {
       const built = buildAnnotationPrompt(tmpl.prompt, sourceLanguage, targetLanguage);
-      for (const srcLang of LANGUAGES) {
-        for (const tgtLang of LANGUAGES) {
-          if (srcLang.code === sourceLanguage && tgtLang.code === targetLanguage) continue;
-          if (annotationPrompt === buildAnnotationPrompt(tmpl.prompt, srcLang.code, tgtLang.code)) {
+      for (const srcCode of LANGUAGE_CODES) {
+        for (const tgtCode of LANGUAGE_CODES) {
+          if (srcCode === sourceLanguage && tgtCode === targetLanguage) continue;
+          if (annotationPrompt === buildAnnotationPrompt(tmpl.prompt, srcCode, tgtCode)) {
             setAnnotationPrompt(built);
             return;
           }
@@ -662,11 +610,11 @@ function App() {
   };
 
   const WHISPER_MODELS = [
-    { key: 'tiny',  label: 'tiny',   size: '~75 MB',  speed: '最快，精度最低' },
-    { key: 'base',  label: 'base',   size: '~145 MB', speed: '较快，日常够用' },
-    { key: 'small', label: 'small',  size: '~488 MB', speed: '中等，精度较好' },
-    { key: 'medium',label: 'medium', size: '~1.5 GB', speed: '较慢，精度高' },
-    { key: 'large', label: 'large',  size: '~2.9 GB', speed: '最慢，精度最高' },
+    { key: 'tiny',  label: 'tiny',   size: '~75 MB',  speed: t('app.whisper.tiny') },
+    { key: 'base',  label: 'base',   size: '~145 MB', speed: t('app.whisper.base') },
+    { key: 'small', label: 'small',  size: '~488 MB', speed: t('app.whisper.small') },
+    { key: 'medium',label: 'medium', size: '~1.5 GB', speed: t('app.whisper.medium') },
+    { key: 'large', label: 'large',  size: '~2.9 GB', speed: t('app.whisper.large') },
   ];
 
   // 生成字幕 — 方案链：软字幕 > Whisper 转录
@@ -686,7 +634,7 @@ function App() {
         setSelectedIndices(new Set(result.extracted.subtitles.map((s: SubtitleItem) => s.index)));
         setRecommendations(null);
         transcribedVideoName.current = videoFile.name;
-        setExtractedSource(`从视频提取（${result.extracted.codec} / ${result.extracted.language}，${result.extracted.total} 条）`);
+        setExtractedSource(t('app.subtitleSource.extractedFromVideo', { codec: result.extracted.codec, language: result.extracted.language, total: result.extracted.total }));
         setCheckingEmbedded(false);
         scrollToStep2();
         return;
@@ -713,7 +661,7 @@ function App() {
     try {
       const whisperStatus = await subtitleAPI.getWhisperStatus();
       if (!whisperStatus.installed) {
-        alert('Whisper 未安装。\n\n开发环境请运行: pip install faster-whisper');
+        alert(t('app.error.whisperNotInstalled'));
         return;
       }
     } catch (e) {
@@ -725,7 +673,7 @@ function App() {
     setIsTranscribing(true);
     setTranscribeStep(0);
     setTranscribeTotalSteps(4);
-    setTranscribeMessage('准备转录...');
+    setTranscribeMessage(t('app.error.transcribePreparing'));
 
     try {
       const { task_id } = await subtitleAPI.startTranscribe(videoFile, minDuration, undefined, whisperModel);
@@ -750,7 +698,7 @@ function App() {
               const s = Math.floor(sec % 60);
               return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
             };
-            setTranscribeMessage(`转录中 — ${fmtTime(wp.transcribed_sec)} / ${fmtTime(wp.duration_sec)}  ${pct}%`);
+            setTranscribeMessage(t('app.error.transcribing', { transcribed: fmtTime(wp.transcribed_sec), duration: fmtTime(wp.duration_sec), pct: `${pct}%` }));
           } else {
             setTranscribeMessage(progress.message);
           }
@@ -782,7 +730,7 @@ function App() {
 
     } catch (error) {
       console.error('转录失败:', error);
-      alert('转录失败: ' + getApiErrorMessage(error));
+      alert(t('app.error.transcribeFailed') + getApiErrorMessage(error));
       setIsTranscribing(false);
       transcribingRef.current = false;
     }
@@ -824,15 +772,15 @@ function App() {
   // AI 筛选字幕（第一阶段：只返回 include/reason）
   const handleAIScreen = async () => {
     if (!apiKey) {
-      alert('请先在配置中填写 API Key');
+      alert(t('app.error.needApiKey'));
       return;
     }
     if (subtitles.length === 0) {
-      alert('请先加载字幕');
+      alert(t('app.error.needSubtitles'));
       return;
     }
     if (selectedIndices.size === 0) {
-      alert('请先勾选需要分析的句子');
+      alert(t('app.error.needSelectSentences'));
       return;
     }
 
@@ -881,14 +829,14 @@ function App() {
         if (!prev || prev.size === 0) return prev;
         const failed = new Set<number>();
         for (const [index, rec] of prev) {
-          if (rec.reason?.startsWith('处理失败:')) {
+          if (rec.reason?.startsWith(t('app.error.processingFailed'))) {
             failed.add(index);
           }
         }
         setFailedIndices(failed);
 
         const recommendedIndices = Array.from(prev.values())
-          .filter(r => r.include && !r.reason?.startsWith('处理失败:'))
+          .filter(r => r.include && !r.reason?.startsWith(t('app.error.processingFailed')))
           .map(r => r.index);
         setSelectedIndices(new Set(recommendedIndices));
         return prev;
@@ -901,7 +849,7 @@ function App() {
         console.log('AI 筛选已中止');
       } else {
         console.error('AI 筛选失败:', error);
-        alert('AI 筛选失败: ' + getApiErrorMessage(error));
+        alert(t('app.error.aiScreenFailed') + getApiErrorMessage(error));
       }
       setIsRecommending(false);
       // 保留已有部分结果，回到 screened 状态（而非 idle）
@@ -919,7 +867,7 @@ function App() {
   // AI 注释字幕（第二阶段：根据用途生成翻译和注释）
   const handleAIAnnotate = async (purpose: AnnotationPurpose) => {
     if (!apiKey) {
-      alert('请先配置 API Key');
+      alert(t('app.error.needApiKey'));
       return;
     }
 
@@ -929,7 +877,7 @@ function App() {
     });
 
     if (selectedSubs.length === 0) {
-      alert('请先选择需要注释的句子');
+      alert(t('app.error.needSelectSentencesForAnnotation'));
       return;
     }
 
@@ -985,7 +933,7 @@ function App() {
         console.log('AI 注释已中止');
       } else {
         console.error('AI 注释失败:', error);
-        alert('AI 注释失败: ' + getApiErrorMessage(error));
+        alert(t('app.error.aiAnnotateFailed') + getApiErrorMessage(error));
       }
       setWorkflowPhase('screened');
     }
@@ -995,7 +943,7 @@ function App() {
   const selectRecommended = () => {
     if (!recommendations) return;
     const recommendedIndices = Array.from(recommendations.values())
-      .filter(r => r.include && !r.reason?.startsWith('处理失败:'))
+      .filter(r => r.include && !r.reason?.startsWith(t('app.error.processingFailed')))
       .map(r => r.index);
     setSelectedIndices(new Set(recommendedIndices));
   };
@@ -1050,7 +998,7 @@ function App() {
         if (!prev || prev.size === 0) return prev;
         const failed = new Set<number>();
         for (const [index, rec] of prev) {
-          if (rec.reason?.startsWith('处理失败:')) {
+          if (rec.reason?.startsWith(t('app.error.processingFailed'))) {
             failed.add(index);
           }
         }
@@ -1063,7 +1011,7 @@ function App() {
         console.log('重试已中止');
       } else {
         console.error('重试失败:', error);
-        alert('重试失败: ' + getApiErrorMessage(error));
+        alert(t('app.error.retryFailed') + getApiErrorMessage(error));
       }
       setIsRecommending(false);
     }
@@ -1072,16 +1020,16 @@ function App() {
   // 处理选中的字幕
   const handleProcess = async () => {
     if (!videoFile) {
-      alert('请先上传视频文件');
+      alert(t('app.error.needUploadVideo'));
       return;
     }
     if (subtitles.length === 0) {
-      alert('请先加载或生成字幕');
+      alert(t('app.error.needLoadSubtitles'));
       return;
     }
 
     if (selectedIndices.size === 0) {
-      alert('请至少选择一条字幕');
+      alert(t('app.error.needSelectOne'));
       return;
     }
 
@@ -1164,7 +1112,7 @@ function App() {
               setResult(r.cards);
               setPreviewIndex(0);
             } else {
-              alert(`处理完成！生成了 ${r.cards_count} 张卡片。`);
+              alert(t('app.error.processingDone', { count: r.cards_count }));
             }
           }
 
@@ -1172,7 +1120,7 @@ function App() {
             clearInterval(pollInterval);
             setIsProcessing(false);
             const errMsg = getFriendlyMessage(progress.error_code, progress.error || undefined);
-            alert(`处理失败: ${errMsg}`);
+            alert(t('app.error.processingFailedPoll', { error: errMsg }));
             setProcessingSteps(s =>
               s.map((step) =>
                 step.status === 'processing'
@@ -1192,7 +1140,7 @@ function App() {
     } catch (error) {
       console.error('处理失败:', error);
       const errorMessage = getApiErrorMessage(error);
-      alert(`处理失败: ${errorMessage}`);
+      alert(t('app.error.processingFailedPoll', { error: errorMessage }));
 
       setProcessingSteps(s =>
         s.map((step) =>
@@ -1259,7 +1207,7 @@ function App() {
 
     } catch (error) {
       console.error('下载失败:', error);
-      alert('下载失败，请手动访问: ' + (apkgUrl || '/download/' + encodeURIComponent(apkgPath)));
+      alert(t('app.error.downloadFailed') + (apkgUrl || '/download/' + encodeURIComponent(apkgPath)));
     }
   };
 
@@ -1339,7 +1287,7 @@ function App() {
                 onClick={() => setShowHelp(!showHelp)}
               >
                 <Info className="w-4 h-4 mr-2" />
-                使用说明
+                {t('app.header.help')}
               </Button>
               <Button
                 variant="ghost"
@@ -1347,13 +1295,24 @@ function App() {
                 onClick={() => window.open('https://github.com/qinusui/ClipLingo/issues', '_blank')}
               >
                 <MessageSquare className="w-4 h-4 mr-2" />
-                反馈
+                {t('app.header.feedback')}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  const next = i18n.language === 'zh' ? 'en' : 'zh';
+                  i18n.changeLanguage(next);
+                  localStorage.setItem('ui_language', next);
+                }}
+              >
+                {i18n.language === 'zh' ? 'EN' : t('app.lang.zh')}
               </Button>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={toggleTheme}
-                title={theme === 'system' ? '跟随系统' : theme === 'light' ? '浅色模式' : '深色模式'}
+                title={theme === 'system' ? t('app.header.followSystem') : theme === 'light' ? t('app.header.lightMode') : t('app.header.darkMode')}
               >
                 {theme === 'system' ? <Monitor className="w-4 h-4" /> : theme === 'light' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
               </Button>
@@ -1369,7 +1328,7 @@ function App() {
             <div className="flex items-center gap-3 min-w-0">
               <Download className="w-5 h-5 text-blue-600 dark:text-blue-400 flex-shrink-0" />
               <p className="text-sm text-blue-800 dark:text-blue-200 truncate">
-                发现新版本 <strong>v{updateInfo.latestVersion}</strong>，当前版本 v1.2.2
+                {t('app.update.found', { version: updateInfo.latestVersion, current: '1.2.2' })}
               </p>
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
@@ -1380,12 +1339,12 @@ function App() {
                 className="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors"
               >
                 <ExternalLink className="w-3.5 h-3.5" />
-                前往下载
+                {t('app.update.download')}
               </a>
               <button
                 onClick={() => setUpdateDismissed(true)}
                 className="p-1 text-blue-400 hover:text-blue-600 dark:hover:text-blue-300 transition-colors"
-                title="忽略此更新"
+                title={t('app.update.dismiss')}
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1400,7 +1359,7 @@ function App() {
           <Card className="mb-6">
             <CardContent>
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-lg font-semibold">使用说明</h3>
+                <h3 className="text-lg font-semibold">{t('app.help.title')}</h3>
                 <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5 dark:bg-gray-700">
                   <button
                     onClick={() => setHelpTab('basic')}
@@ -1410,7 +1369,7 @@ function App() {
                         : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
                     }`}
                   >
-                    基础
+                    {t('app.help.tabBasic')}
                   </button>
                   <button
                     onClick={() => setHelpTab('advanced')}
@@ -1420,49 +1379,49 @@ function App() {
                         : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
                     }`}
                   >
-                    进阶
+                    {t('app.help.tabAdvanced')}
                   </button>
                 </div>
               </div>
 
               {helpTab === 'basic' ? (
                 <ol className="list-decimal list-inside space-y-2 text-gray-700 dark:text-gray-300">
-                  <li>上传视频文件（.mp4 / .mkv / .avi）和字幕文件（.srt），或点击「生成字幕」自动转录</li>
-                  <li>勾选目标句子，点击「开始处理」等待生成卡片</li>
-                  <li>预览卡片，下载 .apkg 文件导入 Anki</li>
+                  <li>{t('app.help.basic1')}</li>
+                  <li>{t('app.help.basic2')}</li>
+                  <li>{t('app.help.basic3')}</li>
                 </ol>
               ) : (
                 <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
                   <div>
-                    <h4 className="font-semibold text-gray-900 mb-1 dark:text-gray-100">基础功能（无需 AI）</h4>
+                    <h4 className="font-semibold text-gray-900 mb-1 dark:text-gray-100">{t('app.help.advancedBasicTitle')}</h4>
                     <ul className="list-disc list-inside space-y-1 ml-2">
-                      <li>上传视频和字幕，手动勾选句子即可生成卡片</li>
-                      <li>卡片包含：原文、对应音频片段和视频截图</li>
-                      <li>可调整最短时长、音频头尾 padding 等参数</li>
+                      <li>{t('app.help.advancedBasic1')}</li>
+                      <li>{t('app.help.advancedBasic2')}</li>
+                      <li>{t('app.help.advancedBasic3')}</li>
                     </ul>
                   </div>
                   <div>
-                    <h4 className="font-semibold text-gray-900 mb-1 dark:text-gray-100">AI 进阶功能（可选）</h4>
+                    <h4 className="font-semibold text-gray-900 mb-1 dark:text-gray-100">{t('app.help.advancedAiTitle')}</h4>
                     <ul className="list-disc list-inside space-y-1 ml-2">
-                      <li>配置 AI 后可使用「AI 推荐」智能筛选有学习价值的句子</li>
-                      <li>AI 自动翻译并生成词汇注释，卡片额外包含翻译和知识点</li>
-                      <li>支持 OpenAI / DeepSeek / Ollama 等兼容接口</li>
-                      <li>配置自动保存到浏览器，刷新无需重新填写</li>
+                      <li>{t('app.help.advancedAi1')}</li>
+                      <li>{t('app.help.advancedAi2')}</li>
+                      <li>{t('app.help.advancedAi3')}</li>
+                      <li>{t('app.help.advancedAi4')}</li>
                     </ul>
                   </div>
                   <div>
-                    <h4 className="font-semibold text-gray-900 mb-1 dark:text-gray-100">字幕获取</h4>
+                    <h4 className="font-semibold text-gray-900 mb-1 dark:text-gray-100">{t('app.help.advancedSubtitleTitle')}</h4>
                     <ul className="list-disc list-inside space-y-1 ml-2">
-                      <li>上传 .srt 字幕文件，或仅上传视频点击「生成字幕」使用 Whisper 转录</li>
-                      <li>Whisper 模型可选 tiny / base / small / medium / large，越大越准但越慢</li>
-                      <li>转录支持中/英/日等多语言，默认自动检测</li>
+                      <li>{t('app.help.advancedSubtitle1')}</li>
+                      <li>{t('app.help.advancedSubtitle2')}</li>
+                      <li>{t('app.help.advancedSubtitle3')}</li>
                     </ul>
                   </div>
                   <div>
-                    <h4 className="font-semibold text-gray-900 mb-1 dark:text-gray-100">卡片生成</h4>
+                    <h4 className="font-semibold text-gray-900 mb-1 dark:text-gray-100">{t('app.help.advancedCardTitle')}</h4>
                     <ul className="list-disc list-inside space-y-1 ml-2">
-                      <li>音频切割有 ±0.2s padding，先整体提取音轨再切片，高效不突兀</li>
-                      <li>支持预览前后翻页，下载 .apkg 后导入 Anki 即可背诵</li>
+                      <li>{t('app.help.advancedCard1')}</li>
+                      <li>{t('app.help.advancedCard2')}</li>
                     </ul>
                   </div>
                 </div>
@@ -1477,7 +1436,7 @@ function App() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <span className="bg-primary-100 text-primary-700 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold dark:bg-primary-900/40 dark:text-primary-300">1</span>
-                准备素材
+                {t('app.step1.title')}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -1487,9 +1446,9 @@ function App() {
                   <div className="flex items-start gap-2">
                     <span className="text-yellow-600 dark:text-yellow-400">⚠️</span>
                     <div className="text-sm">
-                      <p className="font-medium text-yellow-800 dark:text-yellow-300">ffmpeg 未安装</p>
+                      <p className="font-medium text-yellow-800 dark:text-yellow-300">{t('app.step1.ffmpegMissing')}</p>
                       <p className="text-yellow-700 dark:text-yellow-400 mt-1">
-                        视频处理需要 ffmpeg 支持。请安装 ffmpeg 并添加到系统 PATH。
+                        {t('app.step1.ffmpegHelp')}
                       </p>
                       <a
                         href="https://ffmpeg.org/download.html"
@@ -1497,7 +1456,7 @@ function App() {
                         rel="noopener noreferrer"
                         className="text-yellow-800 underline hover:text-yellow-900 dark:text-yellow-300 dark:hover:text-yellow-200"
                       >
-                        下载 ffmpeg →
+                        {t('app.step1.ffmpegDownload')}
                       </a>
                     </div>
                   </div>
@@ -1511,13 +1470,13 @@ function App() {
                     onClick={() => setBatchMode(false)}
                     className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${!batchMode ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'}`}
                   >
-                    单文件处理
+                    {t('app.step1.modeSingle')}
                   </button>
                   <button
                     onClick={() => setBatchMode(true)}
                     className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${batchMode ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'}`}
                   >
-                    批量处理
+                    {t('app.step1.modeBatch')}
                   </button>
                 </div>
               )}
@@ -1536,8 +1495,8 @@ function App() {
                     />
                     <label htmlFor="batch-files" className="cursor-pointer">
                       <div className="text-gray-500 dark:text-gray-400">
-                        <p className="text-sm font-medium">点击或拖拽添加视频和字幕文件</p>
-                        <p className="text-xs mt-1">支持同时选择多个文件，按文件名自动匹配字幕</p>
+                        <p className="text-sm font-medium">{t('app.step1.batchDropPrompt')}</p>
+                        <p className="text-xs mt-1">{t('app.step1.batchDropHint')}</p>
                       </div>
                     </label>
                   </div>
@@ -1548,9 +1507,9 @@ function App() {
                         <thead className="bg-gray-50 dark:bg-gray-800">
                           <tr>
                             <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 w-8">#</th>
-                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">视频文件</th>
-                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">字幕文件</th>
-                            <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 w-12">操作</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t('app.step1.batchColVideo')}</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t('app.step1.batchColSubtitle')}</th>
+                            <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 w-12">{t('app.step1.batchColAction')}</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -1563,9 +1522,9 @@ function App() {
                                   <span className="text-green-600 dark:text-green-400">{f.subtitle.name}</span>
                                 ) : (
                                   <div className="flex items-center gap-2">
-                                    <span className="text-yellow-600 dark:text-yellow-400 text-xs">Whisper 转录</span>
+                                    <span className="text-yellow-600 dark:text-yellow-400 text-xs">{t('app.step1.batchWhisperFallback')}</span>
                                     <label className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 cursor-pointer">
-                                      选字幕
+                                      {t('app.step1.batchSelectSubtitle')}
                                       <input
                                         type="file"
                                         accept=".srt,.ass,.vtt,.ssa,.sub"
@@ -1599,7 +1558,7 @@ function App() {
                     isLoading={batchSubmitting}
                   >
                     <Sparkles className="w-4 h-4 mr-2" />
-                    提交 {batchFiles.length} 个任务
+                    {t('app.step1.batchSubmit', { count: batchFiles.length })}
                   </Button>
                 </div>
               )}
@@ -1609,9 +1568,9 @@ function App() {
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200">
-                      批量处理
+                      {t('app.batch.title')}
                       <span className="ml-2 text-sm font-normal text-gray-500">
-                        {batchTasks.filter(t => t.status === 'done').length}/{batchTasks.length} 完成
+                        {t('app.batch.progress', { done: batchTasks.filter(t => t.status === 'done').length, total: batchTasks.length })}
                       </span>
                     </h3>
                     <div className="flex gap-2">
@@ -1621,13 +1580,13 @@ function App() {
                             href={queueAPI.downloadAllUrl(batchId || undefined)}
                             className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-white bg-green-600 rounded-lg hover:bg-green-700"
                           >
-                            <Download className="w-4 h-4" /> 全部下载 ZIP
+                            <Download className="w-4 h-4" /> {t('app.batch.downloadAllZip')}
                           </a>
                           <a
                             href={queueAPI.exportAllZipUrl(batchId || undefined)}
                             className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-emerald-700 border border-emerald-300 rounded-lg hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
                           >
-                            <FolderOpen className="w-4 h-4" /> 带媒体 ZIP
+                            <FolderOpen className="w-4 h-4" /> {t('app.batch.downloadAllMediaZip')}
                           </a>
                           <button
                             onClick={() => {
@@ -1660,14 +1619,14 @@ function App() {
                           onClick={handleBatchCancelAll}
                           className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-red-600 border border-red-300 rounded-lg hover:bg-red-50 dark:border-red-700 dark:hover:bg-red-900/20"
                         >
-                          取消队列
+                          {t('app.batch.cancelQueue')}
                         </button>
                       )}
                       <button
                         onClick={() => { setBatchId(null); setBatchTasks([]); setBatchFiles([]); }}
                         className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400"
                       >
-                        返回
+                        {t('app.batch.back')}
                       </button>
                     </div>
                   </div>
@@ -1721,13 +1680,13 @@ function App() {
                                   className="text-xs text-blue-600 hover:underline dark:text-blue-400"
                                   download
                                 >
-                                  下载
+                                  {t('app.batch.download')}
                                 </a>
                                 <button
                                   onClick={() => handleBatchSyncToAnki(task)}
                                   className="text-xs text-green-600 hover:underline dark:text-green-400"
                                 >
-                                  同步 Anki
+                                  {t('app.batch.syncAnki')}
                                 </button>
                               </>
                             )}
@@ -1736,7 +1695,7 @@ function App() {
                                 onClick={() => handleBatchCancelTask(task.task_id)}
                                 className="text-xs text-red-400 hover:text-red-600"
                               >
-                                取消
+                                {t('app.batch.cancel')}
                               </button>
                             )}
                           </div>
@@ -1757,7 +1716,7 @@ function App() {
                     onFileSelect={(f) => { setVideoFile(f); transcribedVideoName.current = null; setExtractedSource(''); setSubtitles([]); setSelectedIndices(new Set()); setRecommendations(null); }}
                     selectedFile={videoFile}
                     onClear={() => { setVideoFile(null); transcribedVideoName.current = null; setExtractedSource(''); setSubtitles([]); setSelectedIndices(new Set()); setRecommendations(null); }}
-                    label="视频文件"
+                    label={t('app.step1.videoFile')}
                     icon="video"
                   />
                   <FileUpload
@@ -1765,14 +1724,14 @@ function App() {
                     onFileSelect={setSubtitleFile}
                     selectedFile={subtitleFile}
                     onClear={() => setSubtitleFile(null)}
-                    label="字幕文件（可选）"
+                    label={t('app.step1.subtitleFileOptional')}
                     icon="text"
                   />
 
                   {/* Whisper 模型选择器 */}
                   {showModelPicker && !isTranscribing && (
                     <div className="border border-gray-200 rounded-lg p-4 bg-gray-50 space-y-3 dark:border-gray-600 dark:bg-gray-800">
-                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">选择 Whisper 模型（首次使用会自动下载模型）</p>
+                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('app.step1.whisperModelHint')}</p>
                       <div className="space-y-2">
                         {WHISPER_MODELS.map(m => (
                           <label
@@ -1801,10 +1760,10 @@ function App() {
                       </div>
                       <div className="flex gap-2">
                         <Button variant="primary" size="sm" onClick={startTranscribe}>
-                          开始转录
+                          {t('app.step1.startTranscribe')}
                         </Button>
                         <Button variant="ghost" size="sm" onClick={() => setShowModelPicker(false)}>
-                          取消
+                          {t('app.step1.cancel')}
                         </Button>
                       </div>
                     </div>
@@ -1822,7 +1781,7 @@ function App() {
                       <p className="text-xs text-gray-500 dark:text-gray-400">{transcribeMessage}</p>
                       {whisperText && (
                         <p className="text-xs text-gray-400 dark:text-gray-500 truncate">
-                          正在识别：「{whisperText}」
+                          {t('app.step1.transcribing', { text: whisperText })}
                         </p>
                       )}
                     </div>
@@ -1836,17 +1795,17 @@ function App() {
                         className="text-xs text-gray-500 underline hover:text-gray-700 shrink-0 dark:text-gray-400 dark:hover:text-gray-200"
                         onClick={() => { setExtractedSource(''); setShowModelPicker(true); }}
                       >
-                        改用 Whisper 转录
+                        {t('app.step1.useWhisperInstead')}
                       </button>
                     </div>
                   )}
 
                   {/* 字幕处理配置 */}
                   <div className="p-4 bg-gray-50 rounded-lg space-y-3 dark:bg-gray-800">
-                    <div className="text-xs font-medium text-gray-600 dark:text-gray-400">字幕处理配置</div>
+                    <div className="text-xs font-medium text-gray-600 dark:text-gray-400">{t('app.step1.subtitleConfigTitle')}</div>
                     <div className="grid grid-cols-2 gap-2">
                       <div>
-                        <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">开头提前(ms)</label>
+                        <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">{t('app.step1.paddingStart')}</label>
                         <input
                           type="number"
                           step="100"
@@ -1858,7 +1817,7 @@ function App() {
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">结尾延后(ms)</label>
+                        <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">{t('app.step1.paddingEnd')}</label>
                         <input
                           type="number"
                           step="100"
@@ -1875,7 +1834,7 @@ function App() {
 
                 {/* 右侧：AI 配置 */}
                 <div className="space-y-4">
-                  <div className="text-sm font-medium text-gray-700 dark:text-gray-300">AI 配置</div>
+                  <div className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('app.step1.aiConfigTitle')}</div>
                   {/* 折叠时显示摘要 */}
                   {!configExpanded && (
                     <div
@@ -1884,7 +1843,7 @@ function App() {
                     >
                       <span className="text-sm text-gray-600 truncate dark:text-gray-400">
                         {getLangName(sourceLanguage)} → {getLangName(targetLanguage)} / {modelName}
-                        {apiKey ? ` / ***${apiKey.slice(-4)}` : ' / 未设置 Key'}
+                        {apiKey ? ` / ***${apiKey.slice(-4)}` : ` / ${t('app.step1.noApiKey')}`}
                       </span>
                       <ChevronDown className="w-4 h-4 text-gray-400 shrink-0 dark:text-gray-500" />
                     </div>
@@ -1893,7 +1852,7 @@ function App() {
                   {configExpanded && (
                     <div className="space-y-3 p-4 bg-gray-50 rounded-lg dark:bg-gray-800">
                       <div>
-                        <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">API 地址</label>
+                        <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">{t('app.step1.apiBase')}</label>
                         <input
                           type="text"
                           value={apiBase}
@@ -1903,7 +1862,7 @@ function App() {
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">模型名称</label>
+                        <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">{t('app.step1.modelName')}</label>
                         <input
                           type="text"
                           value={modelName}
@@ -1913,37 +1872,37 @@ function App() {
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">API Key</label>
+                        <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">{t('app.step1.apiKey')}</label>
                         <input
                           type="password"
                           value={apiKey}
                           onChange={(e) => { setApiKey(e.target.value); setTestResult(null); }}
-                          placeholder="输入你的 API Key"
+                          placeholder={t('app.step1.apiKeyPlaceholder')}
                           className="w-full px-2 py-1.5 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                         />
                       </div>
                       <div className="grid grid-cols-2 gap-2">
                         <div>
-                          <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">源语言</label>
+                          <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">{t('app.step1.sourceLanguage')}</label>
                           <select
                             value={sourceLanguage}
                             onChange={(e) => setSourceLanguage(e.target.value)}
                             className="w-full px-2 py-1.5 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                           >
-                            {LANGUAGES.map(l => (
-                              <option key={l.code} value={l.code}>{l.name}</option>
+                            {LANGUAGE_CODES.map(code => (
+                              <option key={code} value={code}>{t(`app.lang.${code}`)}</option>
                             ))}
                           </select>
                         </div>
                         <div>
-                          <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">目标语言</label>
+                          <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">{t('app.step1.targetLanguage')}</label>
                           <select
                             value={targetLanguage}
                             onChange={(e) => setTargetLanguage(e.target.value)}
                             className="w-full px-2 py-1.5 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                           >
-                            {LANGUAGES.map(l => (
-                              <option key={l.code} value={l.code}>{l.name}</option>
+                            {LANGUAGE_CODES.map(code => (
+                              <option key={code} value={code}>{t(`app.lang.${code}`)}</option>
                             ))}
                           </select>
                         </div>
@@ -1955,7 +1914,7 @@ function App() {
                           onClick={handleTestConnection}
                           disabled={isTesting || !apiKey}
                         >
-                          {isTesting ? '测试中...' : '测试连接'}
+                          {isTesting ? t('app.step1.testing') : t('app.step1.testConnection')}
                         </Button>
                         <Button
                           variant="secondary"
@@ -1963,7 +1922,7 @@ function App() {
                           onClick={handleListModels}
                           disabled={!apiKey}
                         >
-                          模型列表
+                          {t('app.step1.modelList')}
                         </Button>
                       </div>
                       {testResult && (
@@ -1987,7 +1946,7 @@ function App() {
                         </div>
                       )}
                       {modelList && modelList.length === 0 && (
-                        <p className="text-xs text-red-500">获取模型列表失败，并不影响使用</p>
+                        <p className="text-xs text-red-500">{t('app.step1.modelListFailed')}</p>
                       )}
                       <div className="flex gap-2 mt-1">
                         <Button
@@ -1998,12 +1957,12 @@ function App() {
                             try {
                               await processAPI.openLogs();
                             } catch {
-                              alert('无法打开日志文件夹');
+                              alert(t('app.step1.cantOpenLogFolder'));
                             }
                           }}
                         >
                           <FolderOpen className="w-3.5 h-3.5 mr-1" />
-                          日志
+                          {t('app.step1.logs')}
                         </Button>
                         <Button
                           variant="ghost"
@@ -2012,7 +1971,7 @@ function App() {
                           onClick={() => setConfigExpanded(false)}
                         >
                           <ChevronUp className="w-4 h-4 mr-1" />
-                          收起配置
+                          {t('app.step1.collapseConfig')}
                         </Button>
                       </div>
                     </div>
@@ -2031,7 +1990,7 @@ function App() {
                       ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
                       : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500'
                   }`}>
-                    {videoFile ? '✓' : '○'} 视频
+                    {videoFile ? '✓' : '○'} {t('app.step1.videoReady')}
                   </span>
                   <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
                     subtitles.length > 0
@@ -2040,14 +1999,14 @@ function App() {
                         ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
                         : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500'
                   }`}>
-                    {subtitles.length > 0 ? `✓ 字幕 (${subtitles.length} 条)` : subtitleFile ? '○ 字幕待加载' : '○ 字幕'}
+                    {subtitles.length > 0 ? `✓ ${t('app.step1.subtitlesReady', { count: subtitles.length })}` : subtitleFile ? `○ ${t('app.step1.subtitlesPending')}` : `○ ${t('app.step1.subtitleLabel')}`}
                   </span>
 
                   <div className="flex-1" />
 
                   {/* 操作按钮 */}
                   {subtitles.length > 0 ? (
-                    <span className="text-sm text-green-600 dark:text-green-400 font-medium">字幕已就绪，进入下一步</span>
+                    <span className="text-sm text-green-600 dark:text-green-400 font-medium">{t('app.step1.subtitlesReadyGoNext')}</span>
                   ) : subtitleFile ? (
                     <Button
                       variant="primary"
@@ -2055,7 +2014,7 @@ function App() {
                       onClick={handleLoadSubtitles}
                       disabled={isProcessing}
                     >
-                      加载字幕
+                      {t('app.step1.loadSubtitles')}
                     </Button>
                   ) : videoFile ? (
                     <Button
@@ -2064,10 +2023,10 @@ function App() {
                       onClick={handleTranscribe}
                       disabled={isProcessing || isTranscribing || checkingEmbedded}
                     >
-                      {checkingEmbedded ? '检测字幕中...' : isTranscribing ? '转录中...' : '生成字幕'}
+                      {checkingEmbedded ? t('app.step1.checkingEmbedded') : isTranscribing ? t('app.step1.transcribingStatus') : t('app.step1.generateSubtitles')}
                     </Button>
                   ) : (
-                    <span className="text-sm text-gray-400 dark:text-gray-500">请先上传视频</span>
+                    <span className="text-sm text-gray-400 dark:text-gray-500">{t('app.step1.uploadVideoFirst')}</span>
                   )}
                 </div>
               </div>
@@ -2082,9 +2041,9 @@ function App() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <span className="bg-primary-100 text-primary-700 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold dark:bg-primary-900/40 dark:text-primary-300">2</span>
-                  AI 筛选
+                  {t('app.step2.title')}
                   <span className="text-sm font-normal text-gray-500 ml-2 dark:text-gray-400">
-                    (已选 {selectedIndices.size} / {filteredSubtitles.length}{filteredSubtitles.length !== subtitles.length ? `，共 ${subtitles.length} 条` : ''})
+                    ({t('app.step2.countInfo', { selected: selectedIndices.size, total: filteredSubtitles.length, grandTotal: subtitles.length })})
                   </span>
                 </CardTitle>
               </CardHeader>
@@ -2092,7 +2051,7 @@ function App() {
                 {/* 规则筛选（前置） */}
                 <div className="flex flex-wrap items-end gap-3 mb-4 p-3 bg-gray-50 rounded-lg dark:bg-gray-800/50">
                   <div className="flex items-center gap-1.5">
-                    <label className="text-xs text-gray-500 dark:text-gray-400">时长</label>
+                    <label className="text-xs text-gray-500 dark:text-gray-400">{t('app.step2.duration')}</label>
                     <input
                       type="number"
                       value={filterMinDuration}
@@ -2110,7 +2069,7 @@ function App() {
                       min={0}
                       step={0.5}
                     />
-                    <span className="text-xs text-gray-400">秒</span>
+                    <span className="text-xs text-gray-400">{t('app.step2.secondsUnit')}</span>
                   </div>
 
                   {recommendations && learnedWords.size > 0 && (
@@ -2121,32 +2080,32 @@ function App() {
                         onChange={e => setFilterExcludeLearned(e.target.checked)}
                         className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                       />
-                      <span className="text-xs text-gray-600 dark:text-gray-400">排除已学</span>
+                      <span className="text-xs text-gray-600 dark:text-gray-400">{t('app.step2.excludeLearned')}</span>
                     </label>
                   )}
                   <button
                     onClick={syncFromAnki}
                     disabled={syncingFromAnki}
                     className="flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 border border-gray-200 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
-                    title="从 Anki 同步已学词汇"
+                    title={t('app.step2.syncFromAnkiHelp')}
                   >
                     <RefreshCw className={`w-3 h-3 ${syncingFromAnki ? 'animate-spin' : ''}`} />
-                    {syncingFromAnki ? '同步中...' : '从 Anki 同步'}
+                    {syncingFromAnki ? t('app.step2.syncingFromAnki') : t('app.step2.syncFromAnki')}
                   </button>
 
                   <div className="flex items-center gap-1.5 flex-1 min-w-[160px]">
-                    <label className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">排除词</label>
+                    <label className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">{t('app.step2.excludeWords')}</label>
                     <input
                       type="text"
                       value={filterBlacklist}
                       onChange={e => setFilterBlacklist(e.target.value)}
                       className="flex-1 px-2 py-1 border border-gray-300 rounded text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                      placeholder="逗号分隔，如: oh, well, yeah"
+                      placeholder={t('app.step2.excludeWordsPlaceholder')}
                     />
                   </div>
 
                   <span className="text-xs text-gray-400 dark:text-gray-500">
-                    显示 {filteredSubtitles.length} / {subtitles.length}
+                    {t('app.step2.showFiltered', { filtered: filteredSubtitles.length, total: subtitles.length })}
                   </span>
                 </div>
 
@@ -2161,9 +2120,9 @@ function App() {
                     <Sparkles className="w-4 h-4 mr-2" />
                     {workflowPhase === 'screening'
                       ? recommendTotalBatches > 0
-                        ? `筛选中 ${recommendBatch}/${recommendTotalBatches}`
-                        : 'AI 筛选中...'
-                      : 'AI 筛选'}
+                        ? t('app.step2.aiScreeningBatch', { batch: recommendBatch, total: recommendTotalBatches })
+                        : t('app.step2.aiScreening')
+                      : t('app.step2.aiScreenButton')}
                   </Button>
                   {workflowPhase === 'screening' && (
                     <Button
@@ -2171,7 +2130,7 @@ function App() {
                       size="sm"
                       onClick={() => abortControllerRef.current?.abort()}
                     >
-                      停止
+                      {t('app.step2.stop')}
                     </Button>
                   )}
                   {recommendations && workflowPhase !== 'idle' && (
@@ -2180,7 +2139,7 @@ function App() {
                       size="sm"
                       onClick={selectRecommended}
                     >
-                      仅选推荐
+                      {t('app.step2.selectRecommendedOnly')}
                     </Button>
                   )}
                   {failedIndices.size > 0 && workflowPhase !== 'screening' && (
@@ -2191,7 +2150,7 @@ function App() {
                       disabled={isRecommending}
                       className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
                     >
-                      重试失败 ({failedIndices.size})
+                      {t('app.step2.retryFailed', { count: failedIndices.size })}
                     </Button>
                   )}
                   <Button
@@ -2204,7 +2163,7 @@ function App() {
                     ) : (
                       <ChevronDown className="w-4 h-4 mr-1" />
                     )}
-                    提示词
+                    {t('app.step2.promptToggle')}
                   </Button>
                 </div>
 
@@ -2212,7 +2171,7 @@ function App() {
                 {showPromptEditor && (
                   <div className="mb-4 p-4 bg-gray-50 rounded-lg space-y-3 dark:bg-gray-800">
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">提示词预设</label>
+                      <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">{t('app.step2.promptPreset')}</label>
                       <div className="flex gap-2">
                         {(Object.keys(PRESET_TEMPLATES) as PresetKey[]).map((key) => (
                           <button
@@ -2234,13 +2193,13 @@ function App() {
                       </div>
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">提示词内容（可自由修改）</label>
+                      <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">{t('app.step2.promptContentLabel')}</label>
                       <textarea
                         value={customPrompt}
                         onChange={(e) => setCustomPrompt(e.target.value)}
                         rows={4}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm font-mono dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                        placeholder="输入自定义提示词..."
+                        placeholder={t('app.step2.promptPlaceholder')}
                         disabled={isRecommending}
                       />
                     </div>
@@ -2265,8 +2224,7 @@ function App() {
                 {workflowPhase === 'screened' && recommendations && (
                   <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg dark:bg-green-900/20 dark:border-green-800">
                     <p className="text-sm text-green-700 dark:text-green-300">
-                      筛选完成 — {Array.from(recommendations.values()).filter(r => r.include).length} 条推荐。
-                      确认选择后，进入下一步进行注释翻译。
+                      {t('app.step2.screeningDone', { count: Array.from(recommendations.values()).filter(r => r.include).length })}
                     </p>
                   </div>
                 )}
@@ -2281,9 +2239,9 @@ function App() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <span className="bg-primary-100 text-primary-700 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold dark:bg-primary-900/40 dark:text-primary-300">3</span>
-                  AI 注释
+                  {t('app.step3.title')}
                   <span className="text-sm font-normal text-gray-500 ml-2 dark:text-gray-400">
-                    (已选 {selectedIndices.size} 条)
+                    ({t('app.step3.countInfo', { count: selectedIndices.size })})
                   </span>
                 </CardTitle>
               </CardHeader>
@@ -2303,12 +2261,12 @@ function App() {
                       ) : (
                         <ChevronDown className="w-3 h-3" />
                       )}
-                      注释提示词
+                      {t('app.step3.annotationPrompt')}
                     </button>
                     {showAnnotationPromptEditor && (
                       <div className="mt-2 p-4 bg-gray-50 rounded-lg space-y-3 dark:bg-gray-800">
                         <div>
-                          <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">提示词预设</label>
+                          <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">{t('app.step3.promptPreset')}</label>
                           <div className="flex gap-2">
                             {(Object.keys(ANNOTATION_TEMPLATES) as AnnotationPresetKey[]).map((key) => (
                               <button
@@ -2329,13 +2287,13 @@ function App() {
                           </div>
                         </div>
                         <div>
-                          <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">提示词内容（可自由修改）</label>
+                          <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">{t('app.step3.promptContentLabel')}</label>
                           <textarea
                             value={annotationPrompt}
                             onChange={(e) => setAnnotationPrompt(e.target.value)}
                             rows={4}
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm font-mono dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                            placeholder="输入自定义注释提示词..."
+                            placeholder={t('app.step3.promptPlaceholder')}
                           />
                         </div>
                       </div>
@@ -2349,10 +2307,10 @@ function App() {
                     >
                       <div className="flex items-center gap-2 mb-1">
                         <BookOpen className="w-5 h-5 text-primary-600 dark:text-primary-400" />
-                        <span className="font-medium text-gray-900 dark:text-gray-100">语法句型</span>
+                        <span className="font-medium text-gray-900 dark:text-gray-100">{t('app.step3.modeGrammar')}</span>
                       </div>
                       <p className="text-xs text-gray-500 dark:text-gray-400">
-                        侧重语法结构、句型分析、实用表达
+                        {t('app.step3.modeGrammarDesc')}
                       </p>
                     </button>
                     <button
@@ -2362,10 +2320,10 @@ function App() {
                     >
                       <div className="flex items-center gap-2 mb-1">
                         <GraduationCap className="w-5 h-5 text-primary-600 dark:text-primary-400" />
-                        <span className="font-medium text-gray-900 dark:text-gray-100">背单词</span>
+                        <span className="font-medium text-gray-900 dark:text-gray-100">{t('app.step3.modeVocab')}</span>
                       </div>
                       <p className="text-xs text-gray-500 dark:text-gray-400">
-                        侧重生词提取、词性释义、语境记忆
+                        {t('app.step3.modeVocabDesc')}
                       </p>
                     </button>
                   </div>
@@ -2380,32 +2338,35 @@ function App() {
                       <div className="flex items-center gap-2 mb-3">
                         <div className="animate-spin w-4 h-4 border-2 border-primary-500 border-t-transparent rounded-full" />
                         <span className="text-sm text-gray-600 dark:text-gray-400">
-                          {annotationPurpose === 'grammar' ? '语法句型' : '背单词'}模式 · 注释中
-                          {annotateTotalBatches > 0 ? ` ${annotateBatch}/${annotateTotalBatches}` : '...'}
+                          {t('app.step3.annotating', {
+                            mode: annotationPurpose === 'grammar' ? t('app.step3.modeGrammar') : t('app.step3.modeVocab'),
+                            batch: annotateBatch,
+                            total: annotateTotalBatches,
+                          })}
                         </span>
                         <Button
                           variant="ghost"
                           size="sm"
                           onClick={() => abortControllerRef.current?.abort()}
                         >
-                          停止
+                          {t('app.step3.stop')}
                         </Button>
                       </div>
                       {annotateTotalBatches > 0 && (
                         <ProgressBar progress={(annotateBatch / annotateTotalBatches) * 100} />
                       )}
                       <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">
-                        注释完成后可预览卡片并生成牌组
+                        {t('app.step3.annotatingHint')}
                       </p>
                     </div>
                     {/* 右：主题/结构选择（等待时配置） */}
                     <div className="space-y-3">
                       <div className="p-3 bg-gray-50 rounded-lg dark:bg-gray-800">
-                        <label className="block text-xs font-medium text-gray-600 mb-1.5 dark:text-gray-400">卡片结构</label>
+                        <label className="block text-xs font-medium text-gray-600 mb-1.5 dark:text-gray-400">{t('app.step3.cardStructure')}</label>
                         <div className="flex gap-2">
                           {([
-                            { key: 'sentence' as CardStyle, label: '句型卡', desc: '正面：截图+音频 → 背面：原文+翻译+注释' },
-                            { key: 'vocab' as CardStyle, label: '词汇卡', desc: '正面：单词 → 背面：释义+例句（含截图音频）' },
+                            { key: 'sentence' as CardStyle, label: t('app.cardStyle.sentence.label'), desc: t('app.cardStyle.sentence.desc') },
+                            { key: 'vocab' as CardStyle, label: t('app.cardStyle.vocab.label'), desc: t('app.cardStyle.vocab.desc') },
                           ]).map(({ key, label, desc }) => (
                             <label
                               key={key}
@@ -2438,13 +2399,13 @@ function App() {
                         </div>
                       </div>
                       <div className="p-3 bg-gray-50 rounded-lg dark:bg-gray-800">
-                        <label className="block text-xs font-medium text-gray-600 mb-1.5 dark:text-gray-400">视觉主题</label>
+                        <label className="block text-xs font-medium text-gray-600 mb-1.5 dark:text-gray-400">{t('app.step3.visualTheme')}</label>
                         <div className="grid grid-cols-4 gap-1.5">
                           {([
-                            { key: 'default' as CardTheme, label: '经典', desc: '清爽简洁，适合日常学习' },
-                            { key: 'minimal' as CardTheme, label: '极简沉浸', desc: '衬线字体，纸质书质感' },
-                            { key: 'netflix' as CardTheme, label: 'Netflix', desc: '暗色剧照风，沉浸观影感' },
-                            { key: 'dictionary' as CardTheme, label: '硬核词典', desc: '信息密集，专业词典排版' },
+                            { key: 'default' as CardTheme, label: t('app.theme.default.label'), desc: t('app.theme.default.desc') },
+                            { key: 'minimal' as CardTheme, label: t('app.theme.minimal.label'), desc: t('app.theme.minimal.desc') },
+                            { key: 'netflix' as CardTheme, label: t('app.theme.netflix.label'), desc: t('app.theme.netflix.desc') },
+                            { key: 'dictionary' as CardTheme, label: t('app.theme.dictionary.label'), desc: t('app.theme.dictionary.desc') },
                           ]).map(({ key, label, desc }) => (
                             <button
                               key={key}
@@ -2471,8 +2432,10 @@ function App() {
                     <div className="flex items-center gap-3">
                       <div className="p-3 bg-green-50 border border-green-200 rounded-lg dark:bg-green-900/20 dark:border-green-800 flex-1">
                         <p className="text-sm text-green-700 dark:text-green-300">
-                          注释完成 — {selectedIndices.size} 条句子
-                          {annotationPurpose && `（${annotationPurpose === 'grammar' ? '语法句型' : '背单词'}模式）`}
+                          {t('app.step3.annotatedDone', {
+                            count: selectedIndices.size,
+                            mode: annotationPurpose === 'grammar' ? t('app.step3.modeGrammar') : t('app.step3.modeVocab'),
+                          })}
                         </p>
                       </div>
                       <Button
@@ -2483,18 +2446,18 @@ function App() {
                           setAnnotationPurpose(null);
                         }}
                       >
-                        重新选择
+                        {t('app.step3.reselect')}
                       </Button>
                     </div>
 
                     {/* 主题/结构选择 */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div className="p-3 bg-gray-50 rounded-lg dark:bg-gray-800">
-                        <label className="block text-xs font-medium text-gray-600 mb-1.5 dark:text-gray-400">卡片结构</label>
+                        <label className="block text-xs font-medium text-gray-600 mb-1.5 dark:text-gray-400">{t('app.step3.cardStructure')}</label>
                         <div className="flex gap-2">
                           {([
-                            { key: 'sentence' as CardStyle, label: '句型卡', desc: '正面：截图+音频 → 背面：原文+翻译+注释' },
-                            { key: 'vocab' as CardStyle, label: '词汇卡', desc: '正面：单词 → 背面：释义+例句（含截图音频）' },
+                            { key: 'sentence' as CardStyle, label: t('app.cardStyle.sentence.label'), desc: t('app.cardStyle.sentence.desc') },
+                            { key: 'vocab' as CardStyle, label: t('app.cardStyle.vocab.label'), desc: t('app.cardStyle.vocab.desc') },
                           ]).map(({ key, label, desc }) => (
                             <label
                               key={key}
@@ -2527,13 +2490,13 @@ function App() {
                         </div>
                       </div>
                       <div className="p-3 bg-gray-50 rounded-lg dark:bg-gray-800">
-                        <label className="block text-xs font-medium text-gray-600 mb-1.5 dark:text-gray-400">视觉主题</label>
+                        <label className="block text-xs font-medium text-gray-600 mb-1.5 dark:text-gray-400">{t('app.step3.visualTheme')}</label>
                         <div className="grid grid-cols-4 gap-1.5">
                           {([
-                            { key: 'default' as CardTheme, label: '经典', desc: '清爽简洁，适合日常学习' },
-                            { key: 'minimal' as CardTheme, label: '极简沉浸', desc: '衬线字体，纸质书质感' },
-                            { key: 'netflix' as CardTheme, label: 'Netflix', desc: '暗色剧照风，沉浸观影感' },
-                            { key: 'dictionary' as CardTheme, label: '硬核词典', desc: '信息密集，专业词典排版' },
+                            { key: 'default' as CardTheme, label: t('app.theme.default.label'), desc: t('app.theme.default.desc') },
+                            { key: 'minimal' as CardTheme, label: t('app.theme.minimal.label'), desc: t('app.theme.minimal.desc') },
+                            { key: 'netflix' as CardTheme, label: t('app.theme.netflix.label'), desc: t('app.theme.netflix.desc') },
+                            { key: 'dictionary' as CardTheme, label: t('app.theme.dictionary.label'), desc: t('app.theme.dictionary.desc') },
                           ]).map(({ key, label, desc }) => (
                             <button
                               key={key}
@@ -2564,7 +2527,7 @@ function App() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <span className="bg-primary-100 text-primary-700 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold dark:bg-primary-900/40 dark:text-primary-300">4</span>
-                  预览与生成
+                  {t('app.step4.title')}
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -2598,11 +2561,11 @@ function App() {
                     {!recommendations && (
                       <>
                         <div className="p-3 bg-gray-50 rounded-lg dark:bg-gray-800">
-                          <label className="block text-xs font-medium text-gray-600 mb-1.5 dark:text-gray-400">卡片结构</label>
+                          <label className="block text-xs font-medium text-gray-600 mb-1.5 dark:text-gray-400">{t('app.step3.cardStructure')}</label>
                           <div className="flex gap-2">
                             {([
-                              { key: 'sentence' as CardStyle, label: '句型卡', desc: '正面：截图+音频 → 背面：原文+翻译+注释' },
-                              { key: 'vocab' as CardStyle, label: '词汇卡', desc: '正面：单词 → 背面：释义+例句（含截图音频）' },
+                              { key: 'sentence' as CardStyle, label: t('app.cardStyle.sentence.label'), desc: t('app.cardStyle.sentence.desc') },
+                              { key: 'vocab' as CardStyle, label: t('app.cardStyle.vocab.label'), desc: t('app.cardStyle.vocab.desc') },
                             ]).map(({ key, label, desc }) => (
                               <label
                                 key={key}
@@ -2635,13 +2598,13 @@ function App() {
                           </div>
                         </div>
                         <div className="p-3 bg-gray-50 rounded-lg dark:bg-gray-800">
-                          <label className="block text-xs font-medium text-gray-600 mb-1.5 dark:text-gray-400">视觉主题</label>
+                          <label className="block text-xs font-medium text-gray-600 mb-1.5 dark:text-gray-400">{t('app.step3.visualTheme')}</label>
                           <div className="grid grid-cols-4 gap-1.5">
                             {([
-                              { key: 'default' as CardTheme, label: '经典', desc: '清爽简洁，适合日常学习' },
-                              { key: 'minimal' as CardTheme, label: '极简沉浸', desc: '衬线字体，纸质书质感' },
-                              { key: 'netflix' as CardTheme, label: 'Netflix', desc: '暗色剧照风，沉浸观影感' },
-                              { key: 'dictionary' as CardTheme, label: '硬核词典', desc: '信息密集，专业词典排版' },
+                              { key: 'default' as CardTheme, label: t('app.theme.default.label'), desc: t('app.theme.default.desc') },
+                              { key: 'minimal' as CardTheme, label: t('app.theme.minimal.label'), desc: t('app.theme.minimal.desc') },
+                              { key: 'netflix' as CardTheme, label: t('app.theme.netflix.label'), desc: t('app.theme.netflix.desc') },
+                              { key: 'dictionary' as CardTheme, label: t('app.theme.dictionary.label'), desc: t('app.theme.dictionary.desc') },
                             ]).map(({ key, label, desc }) => (
                               <button
                                 key={key}
@@ -2659,7 +2622,7 @@ function App() {
                           </div>
                         </div>
                         <p className="text-xs text-gray-400 dark:text-gray-500">
-                          未使用 AI 标注，将生成基础卡片（含原文、音频、截图，无翻译/注释）
+                          {t('app.step4.noAiNote')}
                         </p>
                       </>
                     )}
@@ -2669,7 +2632,7 @@ function App() {
                       onClick={handleProcess}
                       disabled={selectedIndices.size === 0 || !videoFile}
                     >
-                      开始处理 ({selectedIndices.size} 条)
+                      {t('app.step4.startProcessing', { count: selectedIndices.size })}
                     </Button>
                   </div>
                 )}
@@ -2704,7 +2667,7 @@ function App() {
                       onClick={handleDownload}
                     >
                       <Download className="w-4 h-4 mr-2" />
-                      下载牌组 (.apkg)
+                      {t('app.step4.downloadApkg')}
                     </Button>
                     {taskId && (
                       <Button
@@ -2716,7 +2679,7 @@ function App() {
                         }}
                       >
                         <FolderOpen className="w-4 h-4 mr-1" />
-                        导出带媒体 ZIP
+                        {t('app.step4.exportMediaZip')}
                       </Button>
                     )}
                     <div className="flex gap-2">
@@ -2730,7 +2693,7 @@ function App() {
                         }}
                       >
                         <FileSpreadsheet className="w-4 h-4 mr-1" />
-                        导出 CSV
+                        {t('app.step4.exportCsv')}
                       </Button>
                       <Button
                         variant="outline"
@@ -2742,7 +2705,7 @@ function App() {
                         }}
                       >
                         <FileJson className="w-4 h-4 mr-1" />
-                        导出 JSON
+                        {t('app.step4.exportJson')}
                       </Button>
                     </div>
                     <div className="flex items-center gap-2">

@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { cn } from '../utils/cn';
 
 interface ProgressBarProps {
@@ -8,13 +9,14 @@ interface ProgressBarProps {
 }
 
 export const ProgressBar = ({ progress, className, showLabel = true, label }: ProgressBarProps) => {
+  const { t } = useTranslation();
   const percentage = Math.min(100, Math.max(0, progress));
 
   return (
     <div className={cn('w-full', className)}>
       {showLabel && (
         <div className="flex justify-between text-sm text-gray-600 mb-1 dark:text-gray-400">
-          <span>{label || '处理进度'}</span>
+          <span>{label || t('progressBar.defaultLabel')}</span>
           <span>{percentage.toFixed(0)}%</span>
         </div>
       )}

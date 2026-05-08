@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { SubtitleItem, AIRecommendation } from '../types';
 import { cn } from '../utils/cn';
 import { Check } from 'lucide-react';
@@ -27,6 +28,7 @@ export const SubtitleTable = ({
   recommendTotalBatches,
   learnedWords,
 }: SubtitleTableProps) => {
+  const { t } = useTranslation();
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
@@ -44,7 +46,7 @@ export const SubtitleTable = ({
         <div
           className="col-span-1 flex items-center justify-center cursor-pointer select-none"
           onClick={onSelectAll}
-          title={isAllSelected ? '取消全选' : '全选'}
+          title={isAllSelected ? t('subtitleTable.deselectAll') : t('subtitleTable.selectAll')}
         >
           <div className={cn(
             'w-5 h-5 rounded border-2 flex items-center justify-center transition-colors',
@@ -55,12 +57,12 @@ export const SubtitleTable = ({
             {isAllSelected && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
           </div>
         </div>
-        <div className="col-span-1 text-xs font-medium text-gray-500 dark:text-gray-400">序号</div>
-        <div className="col-span-5 text-xs font-medium text-gray-500 dark:text-gray-400">原文</div>
-        <div className="col-span-2 text-xs font-medium text-gray-500 dark:text-gray-400">时间</div>
-        <div className="col-span-1 text-xs font-medium text-gray-500 dark:text-gray-400">时长</div>
+        <div className="col-span-1 text-xs font-medium text-gray-500 dark:text-gray-400">{t('subtitleTable.columnIndex')}</div>
+        <div className="col-span-5 text-xs font-medium text-gray-500 dark:text-gray-400">{t('subtitleTable.columnOriginal')}</div>
+        <div className="col-span-2 text-xs font-medium text-gray-500 dark:text-gray-400">{t('subtitleTable.columnTime')}</div>
+        <div className="col-span-1 text-xs font-medium text-gray-500 dark:text-gray-400">{t('subtitleTable.columnDuration')}</div>
         <div className="col-span-2 text-xs font-medium text-gray-500 dark:text-gray-400">
-          AI 筛选
+          {t('subtitleTable.columnAiFilter')}
           {recommendations && (
             <span className="ml-1 text-green-600 dark:text-green-400">({recommendedCount})</span>
           )}
@@ -73,8 +75,8 @@ export const SubtitleTable = ({
           <div className="px-4 py-2 bg-blue-50 text-blue-700 text-sm flex items-center gap-2 dark:bg-blue-900/30 dark:text-blue-400">
             <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
             {recommendTotalBatches > 0
-              ? `AI 分析中：第 ${recommendBatch}/${recommendTotalBatches} 批`
-              : 'AI 正在分析字幕，评估学习价值...'}
+              ? t('subtitleTable.analyzingBatch', { batch: recommendBatch, total: recommendTotalBatches })
+              : t('subtitleTable.analyzing')}
           </div>
         )}
         {subtitles.map((subtitle) => {
@@ -127,7 +129,7 @@ export const SubtitleTable = ({
                       <span
                         className={cn(
                           'inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full',
-                          rec.reason?.startsWith('处理失败:')
+                          rec.reason?.startsWith(t('app.error.processingFailed'))
                             ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400'
                             : isLearned
                               ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400'
@@ -135,9 +137,9 @@ export const SubtitleTable = ({
                                 ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400'
                                 : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
                         )}
-                        title={isLearned ? `已学: ${rec.word}` : rec.reason}
+                        title={isLearned ? t('subtitleTable.learnedTooltip', { word: rec.word }) : rec.reason}
                       >
-                        {rec.reason?.startsWith('处理失败:') ? '失败' : isLearned ? '已学' : rec.include ? '推荐' : '跳过'}
+                        {rec.reason?.startsWith(t('app.error.processingFailed')) ? t('subtitleTable.statusFailed') : isLearned ? t('subtitleTable.statusLearned') : rec.include ? t('subtitleTable.statusRecommended') : t('subtitleTable.statusSkip')}
                       </span>
                     );
                   })()
@@ -152,7 +154,7 @@ export const SubtitleTable = ({
 
       {subtitles.length === 0 && (
         <div className="p-8 text-center text-gray-500 dark:text-gray-400">
-          暂无字幕数据
+          {t('subtitleTable.noSubtitles')}
         </div>
       )}
     </div>
