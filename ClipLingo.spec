@@ -9,9 +9,14 @@ block_cipher = None
 # 获取 frontend/dist 的绝对路径
 frontend_dist = os.path.join(os.path.dirname(os.path.abspath(SPEC)), 'frontend', 'dist')
 
-# faster_whisper 的 VAD 模型资源
+# faster_whisper 包路径和资源
 import faster_whisper as _fw
-fw_assets = os.path.join(os.path.dirname(_fw.__file__), 'assets')
+_fw_dir = os.path.dirname(_fw.__file__)
+fw_assets = os.path.join(_fw_dir, 'assets')
+# 收集 faster_whisper 的 .py 源文件，确保打包后文件系统上有完整包
+_fw_datas = [(os.path.join(_fw_dir, f), 'faster_whisper')
+             for f in os.listdir(_fw_dir)
+             if f.endswith('.py')]
 
 a = Analysis(
     ['backend/main.py'],
@@ -24,6 +29,7 @@ a = Analysis(
         (frontend_dist, 'frontend/dist'),
         ('core', 'core'),
         (fw_assets, 'faster_whisper/assets'),
+        *_fw_datas,
     ],
     hiddenimports=[
         'fastapi',

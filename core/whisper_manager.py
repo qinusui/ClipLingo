@@ -15,7 +15,7 @@ from typing import Optional, Any
 # 确保项目根目录在 sys.path 中
 _root = str(Path(__file__).parent.parent)
 if _root not in sys.path:
-    sys.path.insert(0, _root)
+    sys.path.append(_root)
 
 from errors import ClipLingoError, ErrorCode
 
