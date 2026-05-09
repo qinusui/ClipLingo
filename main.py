@@ -290,10 +290,16 @@ def run(
         padding_end_ms=padding_end_ms
     )
 
-    # 合并数据
-    for p, m in zip(processed, media_items):
-        p["audio_path"] = m.audio_path
-        p["screenshot_path"] = m.screenshot_path
+    # 合并数据（按索引匹配，防止切割失败时错位）
+    media_map = {m.index: m for m in media_items}
+    for p in processed:
+        m = media_map.get(p["index"])
+        if m:
+            p["audio_path"] = m.audio_path
+            p["screenshot_path"] = m.screenshot_path
+        else:
+            p["audio_path"] = ""
+            p["screenshot_path"] = ""
 
     progress(3, f"媒体处理完成")
     # Step 4: 打包

@@ -320,7 +320,14 @@ def process_media_items(
                 audio_path=audio_path,
                 screenshot_path=screenshot_path
             )
-        return None
+        logger.warning(f"音频切割失败: card_{idx:04d} ({cut_start:.2f}s - {cut_end:.2f}s)")
+        return MediaItem(
+            index=idx,
+            start_sec=item["start_sec"],
+            end_sec=item["end_sec"],
+            audio_path="",
+            screenshot_path=screenshot_path
+        )
 
     with ThreadPoolExecutor(max_workers=num_workers) as executor:
         futures = {executor.submit(process_single, item): item for item in items}

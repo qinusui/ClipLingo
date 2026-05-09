@@ -185,6 +185,8 @@
       "syncFromAnkiHelp": "从 Anki 同步已学词汇",
       "syncingFromAnki": "同步中...",
       "syncFromAnki": "从 Anki 同步",
+      "fullSync": "全量同步",
+      "fullSyncHelp": "强制全量扫描（忽略近7天增量过滤）",
       "excludeWords": "排除词",
       "excludeWordsPlaceholder": "逗号分隔，如: oh, well, yeah",
       "showFiltered": "显示 {{filtered}} / {{total}}",
@@ -271,6 +273,7 @@
       "transcribeFailed": "转录失败: ",
       "needApiKey": "请先在配置中填写 API Key",
       "needSubtitles": "请先加载字幕",
+      "allLearned": "所选句子均已掌握，无需筛选。",
       "needSelectSentences": "请先勾选需要分析的句子",
       "aiScreenFailed": "AI 筛选失败: ",
       "needSelectSentencesForAnnotation": "请先选择需要注释的句子",
@@ -326,8 +329,8 @@
     "prompt": {
       "grammarScreenBody": "你是{source_language}学习教材编写专家。对输入的字幕列表，每条判断是否值得作为学习材料：\n\n判断标准：\n- 有明确的语法知识点（如时态、从句、虚拟语气等）\n- 有实用表达或固定搭配\n- 对话内容有意义（非简单寒暄如'okay', 'yeah', 'uh-huh'等）\n- 有文化背景或情境意义",
       "vocabScreenBody": "你是{source_language}词汇教学专家。对输入的字幕列表，每条判断是否值得作为单词学习材料：\n\n判断标准：\n- 句子中包含高频核心词汇或学术词汇\n- 包含值得掌握的动词短语、介词搭配或习语\n- 包含一词多义、熟词僻义的实际用例\n- 单词在语境中有助于理解和记忆\n- 对话内容有意义（非简单寒暄如'okay', 'yeah', 'uh-huh'等）\n\n对于 include=true 的句子，notes 字段需标注：重点单词-词性-释义，如遇词组则整体标注",
-      "grammarAnnotateBody": "你是{source_language}学习教材编写专家。为输入的字幕列表（已筛选为值得学习的内容）提供翻译和语法句型注释。\n\n返回格式（严格遵守）：\n{\"items\": [{\"index\": 数字, \"translation\": \"{target_language}翻译\", \"notes\": \"语法知识点和实用表达\", \"word\": \"句子中最值得学习的核心单词或词组\", \"definition\": \"该单词/词组的{target_language}释义\"}]}\n\n注意：\n- 必须返回一个 JSON 对象，items 是数组\n- 所有项目必须包含 translation、notes、word、definition\n- notes 应侧重语法结构和实用表达\n- word 为句子中最值得背诵的核心单词或词组\n- 保持原文顺序输出",
-      "vocabAnnotateBody": "你是{target_language}词汇教学专家。为输入的字幕列表（已筛选为值得学习的内容）提供翻译和词汇注释。\n\n返回格式（严格遵守）：\n{\"items\": [{\"index\": 数字, \"translation\": \"{target_language}翻译\", \"notes\": \"重点单词-词性-释义\", \"word\": \"句子中最值得学习的核心单词或词组\", \"definition\": \"该单词/词组的{target_language}释义\"}]}\n\n注意：\n- 必须返回一个 JSON 对象，items 是数组\n- 所有项目必须包含 translation、notes、word、definition\n- notes 格式：重点单词-词性-释义；遇词组则整体标注\n- word 为句子中最值得背诵的核心单词或词组\n- 保持原文顺序输出"
+      "grammarAnnotateBody": "你是{source_language}学习教材编写专家。为输入的字幕列表（已筛选为值得学习的内容）提供翻译和语法句型注释。",
+      "vocabAnnotateBody": "你是{target_language}词汇教学专家。为输入的字幕列表（已筛选为值得学习的内容）提供翻译和词汇注释。"
     },
     "subtitleSource": {
       "extractedFromVideo": "从视频提取（{{codec}} / {{language}}，{{total}} 条）"
