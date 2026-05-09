@@ -344,12 +344,12 @@ function App() {
     } catch {}
   };
 
-  const syncFromAnki = async () => {
+  const syncFromAnki = async (fullSync: boolean = false) => {
     setSyncingFromAnki(true);
     try {
       const online = await pingAnki();
       if (!online) return;
-      const words = await fetchWordsFromAnki();
+      const words = await fetchWordsFromAnki(fullSync);
       if (words.length === 0) return;
       // 写入后端数据库
       await fetch('/api/subtitles/sync-learned-from-anki', {
@@ -836,8 +836,24 @@ function App() {
     abortControllerRef.current = controller;
 
     try {
+      // 预过滤已学词汇，节省 AI 费用（跟随"排除已学词汇"复选框）
+      const screenSubs = subtitles.filter(s => {
+        if (!selectedIndices.has(s.index)) return false;
+        if (filterExcludeLearned) {
+          const rec = recommendations?.get(s.index);
+          if (rec?.word && learnedWords.has(rec.word.toLowerCase().trim())) return false;
+        }
+        return true;
+      });
+      if (screenSubs.length === 0) {
+        alert(t('app.error.allLearned'));
+        setIsRecommending(false);
+        setWorkflowPhase('idle');
+        return;
+      }
+
       const stream = subtitleAPI.startScreenStream(
-        subtitles.filter(s => selectedIndices.has(s.index)),
+        screenSubs,
         apiKey,
         customPrompt || undefined,
         recommendBatchSize,
@@ -2183,13 +2199,21 @@ function App() {
                     </label>
                   )}
                   <button
-                    onClick={syncFromAnki}
+                    onClick={() => syncFromAnki()}
                     disabled={syncingFromAnki}
                     className="flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 border border-gray-200 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
                     title={t('app.step2.syncFromAnkiHelp')}
                   >
                     <RefreshCw className={`w-3 h-3 ${syncingFromAnki ? 'animate-spin' : ''}`} />
                     {syncingFromAnki ? t('app.step2.syncingFromAnki') : t('app.step2.syncFromAnki')}
+                  </button>
+                  <button
+                    onClick={() => syncFromAnki(true)}
+                    disabled={syncingFromAnki}
+                    className="text-xs text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 underline disabled:opacity-50"
+                    title={t('app.step2.fullSyncHelp')}
+                  >
+                    {t('app.step2.fullSync')}
                   </button>
 
                   <div className="flex items-center gap-1.5 flex-1 min-w-[160px]">

@@ -142,13 +142,23 @@ export async function notesInfo(noteIds: number[]): Promise<Array<{
   return await ac('notesInfo', { notes: noteIds });
 }
 
+const LS_LAST_SYNC_KEY = 'anki_last_sync_time';
+
 /**
- * 从 Anki 的 ClipLingo 牌组中提取所有 Word 字段
- * 返回去重后的小写单词列表
+ * 从 Anki 的 ClipLingo 牌组中提取 Word 字段
+ * 默认增量同步（最近7天），首次调用全量
+ * @param fullSync 强制全量同步
+ * @returns 去重后的小写单词列表
  */
-export async function fetchWordsFromAnki(): Promise<string[]> {
-  // 搜索所有 ClipLingo 开头的牌组中的笔记
-  const noteIds = await findNotes('deck:ClipLingo*');
+export async function fetchWordsFromAnki(fullSync: boolean = false): Promise<string[]> {
+  let query = 'deck:ClipLingo*';
+  const lastSync = localStorage.getItem(LS_LAST_SYNC_KEY);
+
+  if (!fullSync && lastSync) {
+    query += ' added:7';
+  }
+
+  const noteIds = await findNotes(query);
   if (noteIds.length === 0) return [];
 
   // 分批查询（AnkiConnect 单次最多处理 100 条）
@@ -162,6 +172,9 @@ export async function fetchWordsFromAnki(): Promise<string[]> {
       if (word) words.push(word.toLowerCase());
     }
   }
+
+  // 记录同步时间
+  localStorage.setItem(LS_LAST_SYNC_KEY, new Date().toISOString());
 
   // 去重
   return [...new Set(words)];

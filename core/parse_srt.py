@@ -87,6 +87,10 @@ def parse_srt(file_path: str | Path) -> list[Subtitle]:
                 text=text
             ))
 
+    # 重新编号为连续序号（SRT 文件编号可能有缺口）
+    for i, sub in enumerate(subtitles):
+        sub.index = i + 1
+
     return subtitles
 
 
@@ -101,7 +105,13 @@ def filter_short_subtitles(subtitles: list[Subtitle], min_duration: float = 1.0)
     Returns:
         过滤后的列表
     """
-    return [s for s in subtitles if (s.end_sec - s.start_sec) >= min_duration]
+    filtered = [s for s in subtitles if (s.end_sec - s.start_sec) >= min_duration]
+
+    # 过滤后重新编号为连续序号
+    for i, sub in enumerate(filtered):
+        sub.index = i + 1
+
+    return filtered
 
 
 if __name__ == '__main__':
