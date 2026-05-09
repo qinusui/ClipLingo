@@ -25,8 +25,7 @@ logger = logging.getLogger(__name__)
 def is_whisper_installed() -> bool:
     """检查 whisper 是否可用"""
     try:
-        import importlib
-        importlib.import_module("faster_whisper")
+        import faster_whisper  # noqa: F811
         return True
     except ImportError:
         return False
@@ -77,8 +76,8 @@ def install_whisper() -> tuple[bool, str]:
 def get_whisper() -> Optional[Any]:
     """获取 faster_whisper 模块"""
     try:
-        import importlib
-        return importlib.import_module("faster_whisper")
+        import faster_whisper
+        return faster_whisper
     except ImportError:
         return None
 
