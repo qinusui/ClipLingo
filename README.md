@@ -17,7 +17,7 @@ Automatically convert video + subtitle files into Anki decks.
 | **Runtime**  | Local, data never leaves your machine                    | Local, but relies on Anki ecosystem | Browser extension, always online      |
 | **Privacy**    | All files and API keys processed locally                       | Local                 | Video watch data uploaded to servers    |
 | **AI** | Optional, supports any OpenAI-compatible API (DeepSeek / OpenAI / Ollama, etc.) | No built-in AI             | Built-in, but tied to their online service     |
-| **Language Pair**   | Any pair, freely switchable                                        | Mainly English              | Mainly English           |
+| **Language Pair**   | Any pair, freely switchable (Whisper supports ~100 languages, AI translation works with any language pair) | Mainly English              | Mainly English           |
 | **Learning Curve**  | Download and use, full GUI                                          | Requires familiarity with Anki + CLI  | Browser extension, easy       |
 | **Output**  | AnkiConnect direct sync + .apkg export                         | Requires Anki import       | Online review only         |
 | **Subtitle Sources**  | External SRT + embedded soft subs + Whisper transcription                       | External ASS/SRT         | Online video subtitles only         |
@@ -31,6 +31,8 @@ In short: **subs2srs is powerful but has a steep learning curve; LanguageReactor
 - `ClipLingo_Setup.exe` — Full installer with built-in Whisper transcription (~700MB)
 
 After installation, run `ClipLingo.exe` and open `http://localhost:8000` in your browser.
+
+> **Note**: Install to a path with only English characters. Paths containing Chinese (or other non-ASCII) characters may cause the program to fail to start.
 
 **Portable:**
 

@@ -59,7 +59,7 @@ def install_whisper() -> tuple[bool, str]:
                  "-i", source_url,
                  "--trusted-host", host,
                  "--timeout", "30"],
-                capture_output=True, text=True, timeout=600,
+                capture_output=True, encoding='utf-8', errors='replace', timeout=600,
                 **_NO_WINDOW
             )
             if result.returncode == 0:

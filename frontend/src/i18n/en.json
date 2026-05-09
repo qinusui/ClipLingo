@@ -178,7 +178,7 @@
     },
     "step2": {
       "title": "AI Screening",
-      "countInfo": "(Selected {{selected}}/{{total}}, total {{grandTotal}})",
+      "countInfo": "Selected {{selected}}/{{total}}, total {{grandTotal}}",
       "duration": "Duration",
       "secondsUnit": "s",
       "excludeLearned": "Exclude Learned",
@@ -202,7 +202,7 @@
     },
     "step3": {
       "title": "AI Annotation",
-      "countInfo": "(Selected {{count}} lines)",
+      "countInfo": "Selected {{count}} lines",
       "annotationPrompt": "Annotation Prompt",
       "promptPreset": "Prompt Preset",
       "promptContentLabel": "Prompt Content (editable)",
@@ -214,6 +214,7 @@
       "annotating": "{{mode}} Mode · Annotating {{batch}}/{{total}}",
       "stop": "Stop",
       "annotatingHint": "After annotation, you can preview cards and generate the deck",
+      "previewHint": "Switch styles to preview templates (real content will appear after annotation):",
       "cardStructure": "Card Structure",
       "visualTheme": "Visual Theme",
       "annotatedDone": "Annotation complete — {{count}} sentences ({{mode}} mode)",

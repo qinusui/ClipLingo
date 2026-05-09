@@ -178,7 +178,7 @@
     },
     "step2": {
       "title": "AI 筛选",
-      "countInfo": "(已选 {{selected}}/{{total}}，共 {{grandTotal}} 条)",
+      "countInfo": "已选 {{selected}}/{{total}}，共 {{grandTotal}} 条",
       "duration": "时长",
       "secondsUnit": "秒",
       "excludeLearned": "排除已学",
@@ -202,7 +202,7 @@
     },
     "step3": {
       "title": "AI 注释",
-      "countInfo": "(已选 {{count}} 条)",
+      "countInfo": "已选 {{count}} 条",
       "annotationPrompt": "注释提示词",
       "promptPreset": "提示词预设",
       "promptContentLabel": "提示词内容（可自由修改）",
@@ -214,6 +214,7 @@
       "annotating": "{{mode}}模式 · 注释中 {{batch}}/{{total}}",
       "stop": "停止",
       "annotatingHint": "注释完成后可预览卡片并生成牌组",
+      "previewHint": "切换样式预览模板效果（等注释完成后将显示真实内容）：",
       "cardStructure": "卡片结构",
       "visualTheme": "视觉主题",
       "annotatedDone": "注释完成 — {{count}} 条句子（{{mode}}模式）",

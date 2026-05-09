@@ -163,7 +163,7 @@ async def extract_embedded_subtitles(
             "-show_entries", "stream=index,codec_name:stream_tags=language,title",
             "-of", "json",
             str(video_path)
-        ], capture_output=True, text=True, timeout=30, **_NO_WINDOW)
+        ], capture_output=True, encoding='utf-8', errors='replace', timeout=30, **_NO_WINDOW)
 
         if probe_result.returncode != 0:
             logger.error(f"ffprobe failed: {probe_result.stderr}")
@@ -213,7 +213,7 @@ async def extract_embedded_subtitles(
             "-f", "srt",
             str(srt_path)
         ]
-        subprocess.run(extract_cmd, capture_output=True, text=True, timeout=60, **_NO_WINDOW)
+        subprocess.run(extract_cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=60, **_NO_WINDOW)
 
         if not srt_path.exists() or srt_path.stat().st_size == 0:
             return {
@@ -1033,7 +1033,7 @@ def _check_ffmpeg_installed() -> dict:
         result = subprocess.run(
             [ffmpeg_path, "-version"],
             capture_output=True,
-            text=True,
+            encoding='utf-8', errors='replace',
             timeout=5,
             **_NO_WINDOW
         )
