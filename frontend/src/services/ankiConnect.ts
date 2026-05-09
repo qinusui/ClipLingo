@@ -50,28 +50,47 @@ export async function createDeck(deckName: string): Promise<void> {
   await ac('createDeck', { deck: deckName });
 }
 
-/** 创建模型（幂等） */
+/** 创建或更新模型（幂等） */
 export async function createModel(model: {
   modelName: string;
   inOrderFields: string[];
   css: string;
   cardTemplates: Array<{ Name: string; Front: string; Back: string }>;
 }): Promise<void> {
-  // 先检查模型是否已存在
+  let modelExists = false;
   try {
-    const models = await ac<Record<string, unknown>>('modelNames');
+    const models = await ac<string[]>('modelNames');
     if (Array.isArray(models) && models.includes(model.modelName)) {
-      return; // 已存在，跳过
+      modelExists = true;
     }
   } catch {
     // 忽略，继续创建
   }
-  await ac('createModel', {
-    modelName: model.modelName,
-    inOrderFields: model.inOrderFields,
-    css: model.css,
-    cardTemplates: model.cardTemplates,
-  });
+
+  if (modelExists) {
+    // 更新已有模型的模板和样式
+    await ac('updateModelTemplates', {
+      model: {
+        name: model.modelName,
+        templates: Object.fromEntries(
+          model.cardTemplates.map((t) => [t.Name, { Front: t.Front, Back: t.Back }])
+        ),
+      },
+    });
+    await ac('updateModelStyling', {
+      model: {
+        name: model.modelName,
+        css: model.css,
+      },
+    });
+  } else {
+    await ac('createModel', {
+      modelName: model.modelName,
+      inOrderFields: model.inOrderFields,
+      css: model.css,
+      cardTemplates: model.cardTemplates,
+    });
+  }
 }
 
 /** 将 URL 转为 base64 */

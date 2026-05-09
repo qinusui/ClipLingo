@@ -61,5 +61,8 @@ dist2/
 dist3/
 dist4/
 build/
+# 测试临时目录
+*测试*/
+
 # Binary files
 bin/*.exe

@@ -13,6 +13,7 @@ import { AnkiSyncButton } from './components/AnkiSyncButton';
 import { SubtitleItem, ProcessedCard, AIRecommendation, CardStyle, CardTheme, WorkflowPhase, AnnotationPurpose } from './types';
 import { subtitleAPI, processAPI, queueAPI, API_BASE_URL } from './services/api';
 import { pingAnki, fetchWordsFromAnki } from './services/ankiConnect';
+import type { SyncProgress, SyncResult } from './services/syncToAnki';
 import { useTheme } from './hooks/useTheme';
 import { getFriendlyMessage, getApiErrorMessage } from './utils/errors';
 
@@ -219,6 +220,12 @@ function App() {
     error?: string;
   }>>([]);
   const [batchSubmitting, setBatchSubmitting] = useState(false);
+  const [batchSyncStates, setBatchSyncStates] = useState<Record<string, {
+    state: 'syncing' | 'done' | 'error';
+    progress?: SyncProgress;
+    result?: SyncResult;
+    error?: string;
+  }>>({});
   const batchPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [subtitles, setSubtitles] = useState<SubtitleItem[]>([]);
@@ -271,6 +278,14 @@ function App() {
   const [showAnnotationPromptEditor, setShowAnnotationPromptEditor] = useState(false);
   const [cardStyles, setCardStyles] = useState<Set<CardStyle>>(new Set(['sentence']));
   const [cardTheme, setCardTheme] = useState<CardTheme>('default');
+  const dummyPreviewCard = useMemo<ProcessedCard>(() => ({
+    sentence: 'You\'re watching a great movie scene here.',
+    translation: '',
+    notes: '',
+    word: 'vocabulary',
+    definition: '',
+    start_sec: 0, end_sec: 0,
+  }), []);
   const [showPromptEditor, setShowPromptEditor] = useState(false);
   const recommendBatchSize = 30;
   const [ffmpegInstalled, setFFmpegInstalled] = useState<boolean | null>(null);
@@ -476,15 +491,23 @@ function App() {
       alert(t('app.error.ankiNotRunning'));
       return;
     }
+    const tid = task.task_id;
+    setBatchSyncStates(prev => ({ ...prev, [tid]: { state: 'syncing' } }));
     try {
       const deckName = task.video_name.replace(/\.[^.]+$/, '');
-      // 从任务参数中获取样式和主题
       const taskCardStyles = task.params?.card_styles || Array.from(cardStyles);
       const taskTheme = task.params?.theme || cardTheme;
-      const res = await syncToAnki(task.result.cards, deckName, API_BASE_URL, taskCardStyles, taskTheme);
-      alert(t('app.error.syncDone', { added: res.added, skipped: res.skipped, failed: res.failed }));
+      const res = await syncToAnki(
+        task.result.cards,
+        deckName,
+        API_BASE_URL,
+        taskCardStyles,
+        taskTheme,
+        (p) => setBatchSyncStates(prev => ({ ...prev, [tid]: { state: 'syncing', progress: p } })),
+      );
+      setBatchSyncStates(prev => ({ ...prev, [tid]: { state: 'done', result: res } }));
     } catch (err) {
-      alert(t('app.error.syncFailed') + (err instanceof Error ? err.message : String(err)));
+      setBatchSyncStates(prev => ({ ...prev, [tid]: { state: 'error', error: err instanceof Error ? err.message : String(err) } }));
     }
   };
 
@@ -694,7 +717,7 @@ function App() {
     setTranscribeMessage(t('app.error.transcribePreparing'));
 
     try {
-      const { task_id } = await subtitleAPI.startTranscribe(videoFile, minDuration, undefined, whisperModel);
+      const { task_id } = await subtitleAPI.startTranscribe(videoFile, minDuration, sourceLanguage, whisperModel);
 
       const pollInterval = setInterval(async () => {
         try {
@@ -1710,26 +1733,62 @@ function App() {
                             )}
                           </div>
                           <div className="flex items-center gap-2 flex-shrink-0">
-                            {task.status === 'done' && task.result && (
-                              <>
-                                <button
-                                  onClick={() => {
-                                    const result = task.result!;
-                                    const apkgName = result.apkg_url?.split('/').pop() || 'deck.apkg';
-                                    downloadUrl(`${API_BASE_URL}${result.apkg_url}`, apkgName);
-                                  }}
-                                  className="text-xs text-blue-600 hover:underline dark:text-blue-400"
-                                >
-                                  {t('app.batch.download')}
-                                </button>
-                                <button
-                                  onClick={() => handleBatchSyncToAnki(task)}
-                                  className="text-xs text-green-600 hover:underline dark:text-green-400"
-                                >
-                                  {t('app.batch.syncAnki')}
-                                </button>
-                              </>
-                            )}
+                            {task.status === 'done' && task.result && (() => {
+                              const ss = batchSyncStates[task.task_id];
+                              return (
+                                <>
+                                  <button
+                                    onClick={() => {
+                                      const result = task.result!;
+                                      const apkgName = result.apkg_url?.split('/').pop() || 'deck.apkg';
+                                      downloadUrl(`${API_BASE_URL}${result.apkg_url}`, apkgName);
+                                    }}
+                                    className="text-xs text-blue-600 hover:underline dark:text-blue-400"
+                                  >
+                                    {t('app.batch.download')}
+                                  </button>
+                                  {(() => {
+                                    if (!ss) return (
+                                      <button
+                                        onClick={() => handleBatchSyncToAnki(task)}
+                                        className="text-xs text-green-600 hover:underline dark:text-green-400"
+                                      >
+                                        {t('app.batch.syncAnki')}
+                                      </button>
+                                    );
+                                    if (ss.state === 'syncing' && ss.progress) {
+                                      const pct = Math.round((ss.progress.current / ss.progress.total) * 100);
+                                      return (
+                                        <div className="flex items-center gap-1">
+                                          <div className="w-16 bg-gray-200 rounded-full h-1.5 dark:bg-gray-600">
+                                            <div className="bg-green-500 h-1.5 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                                          </div>
+                                          <span className="text-xs text-gray-400">{pct}%</span>
+                                        </div>
+                                      );
+                                    }
+                                    if (ss.state === 'done' && ss.result) {
+                                      return (
+                                        <span className="text-xs text-green-600 dark:text-green-400">
+                                          +{ss.result.added}/{ss.result.skipped}/{ss.result.failed}
+                                        </span>
+                                      );
+                                    }
+                                    if (ss.state === 'error') {
+                                      return <span className="text-xs text-red-500">{ss.error || 'Error'}</span>;
+                                    }
+                                    return (
+                                      <button
+                                        onClick={() => handleBatchSyncToAnki(task)}
+                                        className="text-xs text-green-600 hover:underline dark:text-green-400"
+                                      >
+                                        {t('app.batch.syncAnki')}
+                                      </button>
+                                    );
+                                  })()}
+                                </>
+                              );
+                            })()}
                             {task.status === 'waiting' && (
                               <button
                                 onClick={() => handleBatchCancelTask(task.task_id)}
@@ -2083,7 +2142,7 @@ function App() {
                   <span className="bg-primary-100 text-primary-700 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold dark:bg-primary-900/40 dark:text-primary-300">2</span>
                   {t('app.step2.title')}
                   <span className="text-sm font-normal text-gray-500 ml-2 dark:text-gray-400">
-                    ({t('app.step2.countInfo', { selected: selectedIndices.size, total: filteredSubtitles.length, grandTotal: subtitles.length })})
+                    ({t('app.step2.countInfo', { selected: filteredSubtitles.filter(s => selectedIndices.has(s.index)).length, total: filteredSubtitles.length, grandTotal: subtitles.length })})
                   </span>
                 </CardTitle>
               </CardHeader>
@@ -2462,6 +2521,18 @@ function App() {
                           ))}
                         </div>
                       </div>
+                    </div>
+                    {/* 等待时预览空模板，切换样式即时可见 */}
+                    <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                      <p className="text-xs text-gray-400 mb-2 dark:text-gray-500">{t('app.step3.previewHint')}</p>
+                      <CardPreview
+                        cards={[dummyPreviewCard]}
+                        cardStyles={Array.from(cardStyles)}
+                        currentIndex={0}
+                        onPrevious={() => {}}
+                        onNext={() => {}}
+                        theme={cardTheme}
+                      />
                     </div>
                   </div>
                 )}
