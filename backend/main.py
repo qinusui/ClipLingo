@@ -370,10 +370,11 @@ def _open_browser():
     webbrowser.open('http://localhost:8000')
 
 
-if __name__ == "__main__":
-    import multiprocessing
-    multiprocessing.freeze_support()
+# PyInstaller 多进程支持：必须在顶层调用，子进程 __name__ == "__mp_main__" 依赖此调用
+import multiprocessing
+multiprocessing.freeze_support()
 
+if __name__ == "__main__":
     # Docker 或 PyInstaller 中禁用 reload
     is_docker = os.environ.get('DOCKER_CONTAINER') == '1'
 
