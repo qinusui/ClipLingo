@@ -686,6 +686,9 @@ export async function syncToAnki(
   let skipped = 0;
   let failed = 0;
 
+  // 每次同步生成唯一标识，防止跨批次媒体文件覆盖导致错位
+  const uid = Math.random().toString(36).slice(2, 8);
+
   // 获取主题配置
   const themeConfig = getThemeConfig(theme || 'default');
   const styles = cardStyles || ['sentence'];
@@ -755,7 +758,7 @@ export async function syncToAnki(
             ? card.screenshot_path
             : `${apiBase}${card.screenshot_path}`;
           const imgBase64 = await urlToBase64(imgUrl);
-          const imgName = `cliplingo_${String(i + 1).padStart(4, '0')}.jpg`;
+          const imgName = `cliplingo_${uid}_${String(i + 1).padStart(4, '0')}.jpg`;
           await storeMediaFile(imgName, imgBase64);
           screenshotField = `<img src="${imgName}">`;
         }
@@ -769,7 +772,7 @@ export async function syncToAnki(
             ? card.audio_path
             : `${apiBase}${card.audio_path}`;
           const audioBase64 = await urlToBase64(audioUrl);
-          const audioName = `cliplingo_${String(i + 1).padStart(4, '0')}.mp3`;
+          const audioName = `cliplingo_${uid}_${String(i + 1).padStart(4, '0')}.mp3`;
           await storeMediaFile(audioName, audioBase64);
           audioField = `[sound:${audioName}]`;
         }
