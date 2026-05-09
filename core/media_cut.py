@@ -73,7 +73,8 @@ def get_video_duration(video_path: str) -> float:
         video_path
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, **_NO_WINDOW)
+        result = subprocess.run(cmd, capture_output=True,
+                                encoding='utf-8', errors='replace', timeout=10, **_NO_WINDOW)
     except FileNotFoundError:
         raise ClipLingoError(ErrorCode.FFMPEG_NOT_FOUND, "ffprobe 未找到")
     except subprocess.TimeoutExpired:
@@ -137,7 +138,8 @@ def extract_full_audio(video_path: str, output_path: str, quality: int = 2) -> t
         output_path
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600, **_NO_WINDOW)
+        result = subprocess.run(cmd, capture_output=True,
+                                encoding='utf-8', errors='replace', timeout=600, **_NO_WINDOW)
         if result.returncode == 0:
             return True, ""
         return False, result.stderr[:300] if result.stderr else "ffmpeg 返回非零退出码"
@@ -175,7 +177,8 @@ def cut_audio(
     ]
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True,
+            cmd, capture_output=True,
+            encoding='utf-8', errors='replace',
             timeout=max(30, duration * 2), **_NO_WINDOW
         )
         return result.returncode == 0
@@ -218,7 +221,7 @@ def capture_screenshot(
         result = subprocess.run(
             cmd,
             capture_output=True,
-            text=True,
+            encoding='utf-8', errors='replace',
             timeout=30,
             **_NO_WINDOW
         )

@@ -4,6 +4,25 @@ ClipLingo - FastAPI 后端服务
 """
 
 import sys
+import os
+import io
+
+# ── 最早阶段：强制 UTF-8 模式（开发模式无 runtime hook 时兜底） ──
+if sys.platform == "win32":
+    if not os.environ.get("PYTHONIOENCODING"):
+        os.environ["PYTHONIOENCODING"] = "utf-8"
+    if not os.environ.get("PYTHONUTF8"):
+        os.environ["PYTHONUTF8"] = "1"
+    for _name in ("stdout", "stderr", "stdin"):
+        _stream = getattr(sys, _name, None)
+        if _stream is not None and hasattr(_stream, "buffer") and _stream.buffer is not None:
+            try:
+                setattr(sys, _name, io.TextIOWrapper(
+                    _stream.buffer, encoding="utf-8", errors="replace"
+                ))
+            except Exception:
+                pass
+
 import logging
 from pathlib import Path
 

@@ -1,4 +1,6 @@
 ; installer.iss - Inno Setup 安装包配置
+; 支持中文路径：Inno Setup 6+ 原生 Unicode，{app} 变量自动处理中文路径
+Unicode=true
 [Setup]
 AppName=ClipLingo
 AppVersion=1.3.1
