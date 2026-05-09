@@ -5,7 +5,6 @@ ClipLingo - 主程序
 
 import os
 import sys
-import io
 
 # ── 最早阶段：强制 UTF-8 模式（解决中文路径问题） ──
 if sys.platform == "win32":
@@ -15,11 +14,9 @@ if sys.platform == "win32":
         os.environ["PYTHONUTF8"] = "1"
     for _name in ("stdout", "stderr", "stdin"):
         _stream = getattr(sys, _name, None)
-        if _stream is not None and hasattr(_stream, "buffer") and _stream.buffer is not None:
+        if _stream is not None and hasattr(_stream, "reconfigure"):
             try:
-                setattr(sys, _name, io.TextIOWrapper(
-                    _stream.buffer, encoding="utf-8", errors="replace"
-                ))
+                _stream.reconfigure(encoding="utf-8", errors="replace")
             except Exception:
                 pass
 

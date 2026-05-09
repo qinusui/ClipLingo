@@ -7,7 +7,6 @@ PyInstaller 运行时钩子：修复打包后的环境问题。
 """
 import os
 import sys
-import io
 
 # ── 强制 UTF-8 模式（必须在其他导入之前） ──
 if sys.platform == "win32":
@@ -18,14 +17,12 @@ if sys.platform == "win32":
     if not os.environ.get("PYTHONUTF8"):
         os.environ["PYTHONUTF8"] = "1"
 
-    # 重配 stdio 为 UTF-8
+    # 重配 stdio 为 UTF-8（用 reconfigure 避免 TextIOWrapper GC 关闭 buffer）
     for _name in ("stdout", "stderr", "stdin"):
         _stream = getattr(sys, _name, None)
-        if _stream is not None and hasattr(_stream, "buffer") and _stream.buffer is not None:
+        if _stream is not None and hasattr(_stream, "reconfigure"):
             try:
-                setattr(sys, _name, io.TextIOWrapper(
-                    _stream.buffer, encoding="utf-8", errors="replace"
-                ))
+                _stream.reconfigure(encoding="utf-8", errors="replace")
             except Exception:
                 pass
 
