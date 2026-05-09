@@ -27,7 +27,7 @@ from pathlib import Path
 if getattr(sys, 'frozen', False):
     # PyInstaller 打包后的路径
     BASE_DIR = Path(sys._MEIPASS)
-    INSTALL_DIR = Path(sys.executable).parent
+    INSTALL_DIR = Path(os.environ.get('APPDATA', os.path.expanduser('~'))) / 'ClipLingo'
 else:
     # 正常 Python 运行的路径
     BASE_DIR = Path(__file__).parent
