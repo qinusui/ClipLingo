@@ -1,5 +1,45 @@
 # ClipLingo Release Notes
 
+## v1.3.1 (2026-05-09)
+
+**English**
+
+### Bug Fixes
+
+- **AnkiConnect sync card style now takes effect**: switching themes after first sync now updates model templates and CSS correctly
+- **AnkiConnect sync blank card front**: sentence cards now display original text by default when screenshot/audio is empty
+- **Batch Whisper transcription**: fixed Whisper being called for every file instead of only files without subtitles
+- **ZIP download crash**: fixed subprocess encoding failure when install path contains Chinese characters
+- **Chinese install path**: fixed TextIOWrapper GC prematurely closing buffer, now uses `reconfigure()` instead
+- **Batch sync progress**: batch AnkiConnect sync now shows real-time progress bar with added/skipped/failed counters
+- **Double parentheses in filter count**: removed duplicate parentheses and fixed selected count exceeding filtered total
+- **Single-file transcription**: now correctly passes source language to Whisper for better accuracy
+
+### UX Improvements
+
+- **Annotating phase preview**: card template preview now visible during AI annotation, users can adjust styles while waiting
+- **README notes**: added reminder to use English-only install paths; added language support description
+
+**中文**
+
+### Bug 修复
+
+- **AnkiConnect 同步卡片样式不生效**：首次同步后切换主题现在能正确更新模型模板和 CSS
+- **AnkiConnect 同步卡片正面空白**：句型卡在截图/音频为空时自动显示原文
+- **批量 Whisper 转录错误**：修复批量处理时对每个文件都调用 Whisper 而非仅对无字幕文件调用
+- **下载 ZIP 闪退**：修复安装路径含中文时 subprocess 编码失败
+- **中文安装路径**：修复 TextIOWrapper 被 GC 过早关闭 buffer，改用 `reconfigure()` 重配
+- **批量同步进度**：批量 AnkiConnect 同步现在显示实时进度条和添加/跳过/失败计数
+- **筛选计数双层括号**：修复括号重复和筛选后已选数超过总数的问题
+- **单文件转录**：正确传递源语言参数给 Whisper，提升识别准确率
+
+### 用户体验优化
+
+- **注释阶段预览**：AI 注释进行中即可预览卡片模板效果，等待时调整样式无需额外等待
+- **README 补充**：添加安装路径使用纯英文的提示和语言对说明
+
+---
+
 ## v1.3.0 (2026-05-08)
 
 **English**
