@@ -928,10 +928,7 @@ function App() {
       return;
     }
 
-    const selectedSubs = subtitles.filter(s => {
-      const rec = recommendations?.get(s.index);
-      return rec?.include && selectedIndices.has(s.index);
-    });
+    const selectedSubs = subtitles.filter(s => selectedIndices.has(s.index));
 
     if (selectedSubs.length === 0) {
       alert(t('app.error.needSelectSentencesForAnnotation'));
@@ -969,15 +966,13 @@ function App() {
             const next = new Map(prev || []);
             for (const item of event.items!) {
               const existing = next.get(item.index);
-              if (existing) {
-                next.set(item.index, {
-                  ...existing,
-                  translation: item.translation,
-                  notes: item.notes,
-                  word: item.word,
-                  definition: item.definition,
-                });
-              }
+              next.set(item.index, {
+                ...(existing || { include: true, reason: '', index: item.index }),
+                translation: item.translation || '',
+                notes: item.notes || '',
+                word: item.word || '',
+                definition: item.definition || '',
+              });
             }
             return next;
           });
@@ -2356,8 +2351,8 @@ function App() {
             </div>
           )}
 
-          {/* Step 3 · AI 注释 */}
-          {['screened', 'annotating', 'annotated'].includes(workflowPhase) && (
+          {/* Step 3 · AI 注释（有已选字幕即可用，不依赖 AI 筛选） */}
+          {selectedIndices.size > 0 && (
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -2371,7 +2366,7 @@ function App() {
               <CardContent>
 
                 {/* 3a: 选择用途 */}
-                {workflowPhase === 'screened' && (
+                {(workflowPhase !== 'annotating' && workflowPhase !== 'annotated') && (
                   <>
                   {/* 注释提示词编辑器 */}
                   <div className="mb-4">
