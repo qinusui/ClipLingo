@@ -36,8 +36,8 @@ logger = logging.getLogger(__name__)
 def _get_base_dir() -> Path:
     """获取基础目录，兼容打包和开发环境"""
     if getattr(sys, 'frozen', False):
-        # PyInstaller 打包后，使用可执行文件所在目录
-        return Path(sys.executable).parent
+        # 打包后使用 %APPDATA% 避免 Program Files 权限问题
+        return Path(os.environ.get('APPDATA', os.path.expanduser('~'))) / 'ClipLingo'
     return Path(__file__).parent.parent.parent
 
 
@@ -830,56 +830,67 @@ else:
 
 def _whisper_subprocess(video_path: str, srt_path: str, model_name: str, language: str,
                         result_path: str, progress_pipe):
-    """在独立进程中运行 Whisper 转录，通过 Pipe 报告进度"""
+    """在独立进程中运行 Whisper 转录，通过 Pipe 报告进度（含错误）"""
     import sys as _sys
+    import traceback as _traceback
     _sys.path.append(_PROJECT_ROOT)
 
-    from core.whisper_manager import load_model
-    from core.whisper_transcribe import save_as_srt
-    from core.media_cut import get_video_duration
-
-    progress_pipe.send({"step": "loading", "message": f"加载 {model_name} 模型..."})
-    model = load_model(model_name)
-    if model is None:
-        raise RuntimeError("Whisper 未安装，请先安装 Whisper")
-
-    # 获取视频总时长，用于计算转录进度百分比
     try:
-        duration_sec = get_video_duration(video_path)
-    except Exception:
-        duration_sec = 0.0
+        from core.whisper_manager import load_model
+        from core.whisper_transcribe import save_as_srt
+        from core.media_cut import get_video_duration
 
-    progress_pipe.send({"step": "transcribing", "message": "转录中...", "duration_sec": duration_sec})
-    segments_iter, info = model.transcribe(
-        video_path,
-        language=language,
-        word_timestamps=True,
-        vad_filter=True,
-    )
+        progress_pipe.send({"step": "loading", "message": f"加载 {model_name} 模型..."})
+        model = load_model(model_name)
+        if model is None:
+            raise RuntimeError("Whisper 未安装，请先安装 Whisper")
 
-    segments = []
-    for seg in segments_iter:
-        text = seg.text.strip()
-        if text:
-            segments.append({"start": seg.start, "end": seg.end, "text": text})
-            # 逐段上报进度
-            progress = min(seg.end / duration_sec, 1.0) if duration_sec > 0 else 0.0
-            progress_pipe.send({
-                "step": "transcribing",
-                "progress": progress,
-                "transcribed_sec": seg.end,
-                "duration_sec": duration_sec,
-                "text": text,
-            })
+        # 获取视频总时长，用于计算转录进度百分比
+        try:
+            duration_sec = get_video_duration(video_path)
+        except Exception:
+            duration_sec = 0.0
 
-    save_as_srt(segments, srt_path)
+        progress_pipe.send({"step": "transcribing", "message": "转录中...", "duration_sec": duration_sec})
+        segments_iter, info = model.transcribe(
+            video_path,
+            language=language,
+            word_timestamps=True,
+            vad_filter=True,
+        )
 
-    progress_pipe.send({"step": "done", "segment_count": len(segments)})
+        segments = []
+        for seg in segments_iter:
+            text = seg.text.strip()
+            if text:
+                segments.append({"start": seg.start, "end": seg.end, "text": text})
+                # 逐段上报进度
+                progress = min(seg.end / duration_sec, 1.0) if duration_sec > 0 else 0.0
+                progress_pipe.send({
+                    "step": "transcribing",
+                    "progress": progress,
+                    "transcribed_sec": seg.end,
+                    "duration_sec": duration_sec,
+                    "text": text,
+                })
 
-    # 保存转录元信息到临时 JSON，供主进程读取
-    import json as _json
-    with open(result_path, "w", encoding="utf-8") as f:
-        _json.dump({"segment_count": len(segments)}, f)
+        save_as_srt(segments, srt_path)
+
+        progress_pipe.send({"step": "done", "segment_count": len(segments)})
+
+        # 保存转录元信息到临时 JSON，供主进程读取
+        import json as _json
+        with open(result_path, "w", encoding="utf-8") as f:
+            _json.dump({"segment_count": len(segments)}, f)
+
+    except Exception as e:
+        # 通过 pipe 将真实错误传回父进程，避免父进程只能看到 exitcode
+        progress_pipe.send({
+            "step": "error",
+            "error": str(e),
+            "traceback": _traceback.format_exc(),
+        })
+        raise
 
 
 def _run_transcribe_task(task_id: str, video_path_str: str, srt_path_str: str,
@@ -896,6 +907,7 @@ def _run_transcribe_task(task_id: str, video_path_str: str, srt_path_str: str,
 
     result_json_path = str(Path(video_path_str).with_suffix(".result.json"))
     proc = None
+    _subprocess_error = None  # 子进程通过 pipe 传回的错误信息
 
     try:
         update("processing", 1, "准备转录...")
@@ -957,6 +969,9 @@ def _run_transcribe_task(task_id: str, video_path_str: str, srt_path_str: str,
                                 _transcribe_store[task_id] = store
                         else:
                             update("processing", 2, "转录中，请耐心等待...")
+                    elif step == "error":
+                        _subprocess_error = msg.get("error", "转录子进程异常退出")
+                        break
                     elif step == "done":
                         break
                 except (EOFError, OSError):
@@ -979,8 +994,11 @@ def _run_transcribe_task(task_id: str, video_path_str: str, srt_path_str: str,
 
         proc.join(timeout=30)
 
+        # 优先使用子进程通过 pipe 传回的真实错误
+        if _subprocess_error:
+            raise RuntimeError(_subprocess_error)
         if proc.exitcode != 0:
-            raise RuntimeError(f"Whisper 进程异常退出 (code={proc.exitcode})")
+            raise RuntimeError(f"转录子进程异常退出 (code={proc.exitcode})")
 
         update("processing", 3, "解析生成的字幕...")
 

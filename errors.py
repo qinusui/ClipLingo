@@ -97,8 +97,9 @@ _KEYWORD_MAP: list[tuple[str, ErrorCode]] = [
     # ffmpeg
     ("ffmpeg", ErrorCode.FFMPEG_NOT_FOUND),
     ("ffprobe", ErrorCode.FFMPEG_NOT_FOUND),
-    # Whisper
-    ("whisper", ErrorCode.WHISPER_NOT_INSTALLED),
+    # Whisper（仅匹配明确的"未安装"提示，避免误判其他 whisper 相关错误）
+    ("whisper 未安装", ErrorCode.WHISPER_NOT_INSTALLED),
+    ("whisper not installed", ErrorCode.WHISPER_NOT_INSTALLED),
     # 字幕
     ("no subtitles", ErrorCode.SUBTITLE_EMPTY),
     ("没有符合条件的字幕", ErrorCode.SUBTITLE_EMPTY),
