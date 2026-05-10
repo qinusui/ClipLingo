@@ -14,13 +14,14 @@ import uuid
 import shutil
 import zipfile
 import tempfile
+import os
 import sys
 
 from utils.zip_export import generate_csv_with_media_paths
 
 if getattr(sys, 'frozen', False):
     _ROOT = Path(sys._MEIPASS)
-    _INSTALL_DIR = Path(sys.executable).parent
+    _INSTALL_DIR = Path(os.environ.get('APPDATA', os.path.expanduser('~'))) / 'ClipLingo'
 else:
     _ROOT = Path(__file__).parent.parent
     _INSTALL_DIR = _ROOT.parent
@@ -173,9 +174,7 @@ def _ensure_executor():
 
 
 def _get_base_output() -> Path:
-    if getattr(sys, 'frozen', False):
-        return Path(sys.executable).parent / "output"
-    return _ROOT.parent / "output"
+    return _INSTALL_DIR / "output"
 
 
 @router.post("/add")

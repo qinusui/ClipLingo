@@ -35,7 +35,7 @@ else:
 
 # ---- 日志配置（必须在其他模块导入之前） ----
 LOG_DIR = INSTALL_DIR / "logs"
-LOG_DIR.mkdir(exist_ok=True)
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 LOG_FILE = LOG_DIR / "clipplingo.log"
 
 from logging.handlers import RotatingFileHandler
@@ -158,7 +158,7 @@ app.add_middleware(
 
 # 挂载输出目录供下载和预览（写到安装目录，不是 _internal）
 output_dir = INSTALL_DIR / "output"
-output_dir.mkdir(exist_ok=True)
+output_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/output", StaticFiles(directory=str(output_dir)), name="output")
 
 # 挂载前端构建产物

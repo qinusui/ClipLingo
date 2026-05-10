@@ -34,12 +34,12 @@ from utils.zip_export import generate_csv_with_media_paths
 
 router = APIRouter()
 
-# 临时文件存储目录
+# 临时文件存储目录（打包后使用 %APPDATA% 避免权限问题）
 if getattr(sys, 'frozen', False):
-    TEMP_DIR = Path(sys.executable).parent / "temp"
+    TEMP_DIR = Path(os.environ.get('APPDATA', os.path.expanduser('~'))) / 'ClipLingo' / 'temp'
 else:
     TEMP_DIR = Path(__file__).parent.parent.parent / "temp"
-TEMP_DIR.mkdir(exist_ok=True)
+TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
 # 任务进度存储 (task_id -> progress dict)
 task_store: dict = {}
@@ -102,7 +102,7 @@ async def upload_and_process(
     # 每个任务使用独立的 output_dir，避免批量处理时互相冲突
     if output_dir is None:
         if getattr(sys, 'frozen', False):
-            base_output = Path(sys.executable).parent / "output"
+            base_output = Path(os.environ.get('APPDATA', os.path.expanduser('~'))) / 'ClipLingo' / 'output'
         else:
             base_output = Path(__file__).parent.parent.parent / "output"
     else:
