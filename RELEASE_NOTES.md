@@ -1,5 +1,41 @@
 # ClipLingo Release Notes
 
+## v1.3.2 (2026-05-10)
+
+**English**
+
+### Features
+
+- **AI Annotation decoupled from AI Screening**: users can now use either step independently — annotate selected subtitles for grammar/vocabulary without running AI screening first, or screen without annotating
+
+### Bug Fixes
+
+- **Packaged Whisper not working**: faster_whisper `.py` source files were missing from the PyInstaller bundle, and an empty directory inserted at `sys.path[0]` blocked PYZ module lookups — both caused `importlib.import_module("faster_whisper")` to fail in the subprocess
+- **Whisper error misclassification**: any Whisper subprocess crash was reported as "Whisper not installed" due to overly broad keyword matching (`"whisper"` matching any error containing the word). The subprocess now sends the real error back through a pipe, and the keyword match is narrowed to `"whisper 未安装"` / `"whisper not installed"`
+- **AnkiConnect media file mismatch**: syncToAnki used numeric-only filenames that collided across batches, causing screenshots to be swapped between cards
+- **Screenshot misalignment after cut failure**: `process_single` returned `None` on failure instead of a placeholder `MediaItem`, shifting all downstream screenshots in the ZIP export
+- **Installed version permission errors**: logs, output, and temp directories incorrectly pointed to `Program Files\ClipLingo` (read-only for users) in frozen mode — now unified to `%APPDATA%\ClipLingo` with `mkdir(parents=True)` across all modules
+- **Learned word filtering**: AI screening now pre-filters already-learned words before sending to the API (respects the "Exclude learned words" checkbox)
+- **Incremental Anki sync**: `fetchWordsFromAnki` now performs incremental sync by default (adds only new words), with a manual full-sync option
+
+**中文**
+
+### 新功能
+
+- **AI 注释与 AI 筛选解耦**：用户可独立使用任意步骤——跳过 AI 筛选直接为已选字幕生成语法/词汇注释，或仅做筛选不做注释
+
+### Bug 修复
+
+- **打包版 Whisper 无法使用**：faster_whisper `.py` 源文件未被 PyInstaller 打包到 `_internal`，且 `sys.path[0]` 插入了空目录遮蔽 PYZ 模块查找——两者共同导致子进程 `importlib.import_module("faster_whisper")` 失败
+- **Whisper 错误误报为"未安装"**：子进程任意异常退出都被归类为 `WHISPER_NOT_INSTALLED`，因为父进程错误消息含 `"Whisper"` 触发泛匹配。修复后子进程通过 pipe 传回真实错误，关键词收窄为 `"whisper 未安装"`
+- **AnkiConnect 媒体文件错位**：syncToAnki 仅用数字序号命名媒体文件，跨批次同名文件互相覆盖导致截图张冠李戴
+- **音频切割失败致截图错位**：`process_single` 失败时返回 `None` 而非占位 `MediaItem`，ZIP 导出中后续卡片媒体全部前移错位
+- **安装版权限错误**：frozen 模式下日志/输出/临时目录指向 `Program Files\ClipLingo`（用户无写入权限），现已统一改为 `%APPDATA%\ClipLingo`，所有模块统一使用 `mkdir(parents=True)`
+- **已学词汇过滤**：AI 筛选前预过滤已学词汇（跟随"排除已学词汇"复选框），减少不必要的 API 调用
+- **Anki 增量同步**：`fetchWordsFromAnki` 默认增量同步（仅添加新词），支持手动触发全量同步
+
+---
+
 ## v1.3.1 (2026-05-09)
 
 **English**
