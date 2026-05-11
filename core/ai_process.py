@@ -162,10 +162,15 @@ def process_subtitles_with_ai(subtitles: list, api_key: str = None,
     print(f"开始 AI 处理，共 {len(subtitle_dicts)} 条字幕...")
     results = processor.process_batch(subtitle_dicts)
 
-    # 合并原数据和 AI 结果（保留所有句子，仅添加注释）
+    # 合并原数据和 AI 结果（跳过 AI 处理失败的条目）
     processed = []
+    skipped = 0
     for i, sub in enumerate(subtitle_dicts):
-        result = results[i] if i < len(results) and isinstance(results[i], dict) else {}
+        result = results[i] if i < len(results) and isinstance(results[i], dict) else {"skip": True, "reason": "AI 未返回对应结果"}
+        if result.get("skip"):
+            skipped += 1
+            print(f"  [跳过] 第 {sub['index']} 条: {result.get('reason', 'AI 处理失败')}")
+            continue
         processed.append({
             "index": sub["index"],
             "start_sec": sub["start_sec"],
@@ -176,7 +181,10 @@ def process_subtitles_with_ai(subtitles: list, api_key: str = None,
             "reason": result.get("reason", "")
         })
 
-    print(f"AI 注释完成，共 {len(processed)} 条")
+    if skipped:
+        print(f"AI 注释完成，保留 {len(processed)} 条，跳过 {skipped} 条失败")
+    else:
+        print(f"AI 注释完成，共 {len(processed)} 条")
 
     return processed
 

@@ -89,7 +89,6 @@ from dotenv import load_dotenv
 from api.subtitles import router as subtitles_router
 from api.process import router as process_router
 from api.cards import router as cards_router
-from api.queue import router as queue_router
 
 load_dotenv()
 
@@ -143,7 +142,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Anki Card Generator API",
     description="智能提取视频学习内容，生成 Anki 卡片",
-    version="1.3.2",
+    version="1.4.0",
     lifespan=lifespan
 )
 
@@ -179,7 +178,6 @@ if frontend_dist.exists():
 app.include_router(subtitles_router, prefix="/api/subtitles", tags=["subtitles"])
 app.include_router(process_router, prefix="/api/process", tags=["process"])
 app.include_router(cards_router, prefix="/api/cards", tags=["cards"])
-app.include_router(queue_router, prefix="/api/queue", tags=["queue"])
 
 
 @app.post("/api/shutdown")
@@ -227,7 +225,7 @@ async def root():
         return FileResponse(frontend_index)
     return {
         "message": "ClipLingo API",
-        "version": "1.3.2",
+        "version": "1.4.0",
         "docs": "/docs"
     }
 
@@ -312,7 +310,7 @@ async def check_update():
     import urllib.request
     import json as _json
 
-    current = "1.3.2"
+    current = "1.4.0"
     repo = "qinusui/ClipLingo"
     api_url = f"https://api.github.com/repos/{repo}/releases/latest"
 

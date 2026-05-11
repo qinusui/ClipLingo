@@ -44,6 +44,7 @@ export interface AIRecommendation {
   notes?: string;
   word?: string;
   definition?: string;
+  corrected_text?: string;
 }
 
 export type CardStyle = 'sentence' | 'vocab';

@@ -1,5 +1,6 @@
 """
 处理相关 API - 处理字幕并生成卡片
+支持多视频上传：合并模式（一个牌组）或独立模式（多个牌组）
 """
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
@@ -51,12 +52,10 @@ def _to_url(file_path: str) -> str:
     if not file_path:
         return None
     p = Path(file_path)
-    # 找到 output 目录后的相对路径
     parts = p.parts
     for i, part in enumerate(parts):
         if part == "output":
             return "/output/" + "/".join(parts[i+1:])
-    # fallback: 用文件名
     return "/output/" + p.parent.name + "/" + p.name
 
 
@@ -80,8 +79,9 @@ def _build_cards(processed_data):
 
 @router.post("/upload-and-process")
 async def upload_and_process(
-    video: UploadFile = File(...),
-    subtitle: UploadFile = File(...),
+    videos: list[UploadFile] = File(...),
+    subtitles: list[UploadFile] = File(default=[]),
+    merge: bool = Form(True),
     min_duration: float = Form(1.0),
     output_dir: str = Form(None),
     api_key: Optional[str] = Form(None),
@@ -91,15 +91,25 @@ async def upload_and_process(
     padding_start_ms: int = Form(200),
     padding_end_ms: int = Form(200),
     card_styles: Optional[str] = Form(None),
-    theme: str = Form("default")
+    theme: str = Form("default"),
+    source_language: str = Form("en"),
+    target_language: str = Form("zh"),
 ):
     """
     上传视频和字幕文件，后台异步处理
+
+    支持多个视频：
+    - merge=True（默认）：所有视频合并到一个 Anki 牌组
+    - merge=False：每个视频独立生成牌组
+
     返回 task_id，前端通过 /progress/{task_id} 轮询进度
     """
+    if not videos:
+        raise HTTPException(status_code=400, detail="至少需要一个视频文件")
+
     task_id = str(uuid.uuid4())
 
-    # 每个任务使用独立的 output_dir，避免批量处理时互相冲突
+    # 每个任务使用独立的 output_dir
     if output_dir is None:
         if getattr(sys, 'frozen', False):
             base_output = Path(os.environ.get('APPDATA', os.path.expanduser('~'))) / 'ClipLingo' / 'output'
@@ -112,14 +122,34 @@ async def upload_and_process(
     task_dir = TEMP_DIR / task_id
     task_dir.mkdir(exist_ok=True)
 
-    # 保存上传的文件
-    video_path = task_dir / video.filename
-    subtitle_path = task_dir / subtitle.filename
+    # 保存所有上传的文件
+    video_paths = []
+    subtitle_paths = []
+    video_names = []
 
-    with open(video_path, "wb") as f:
-        shutil.copyfileobj(video.file, f)
-    with open(subtitle_path, "wb") as f:
-        shutil.copyfileobj(subtitle.file, f)
+    for i, video in enumerate(videos):
+        v_path = task_dir / video.filename
+        with open(v_path, "wb") as f:
+            shutil.copyfileobj(video.file, f)
+        video_paths.append(str(v_path))
+        video_names.append(video.filename)
+
+    for i, subtitle in enumerate(subtitles):
+        if subtitle.filename:
+            s_path = task_dir / subtitle.filename
+            with open(s_path, "wb") as f:
+                shutil.copyfileobj(subtitle.file, f)
+            # 空文件（0 字节）视为未提供字幕，后端走 Whisper 转录
+            if s_path.stat().st_size == 0:
+                subtitle_paths.append("")
+            else:
+                subtitle_paths.append(str(s_path))
+        else:
+            subtitle_paths.append("")
+
+    # 补齐 subtitle_paths 长度
+    while len(subtitle_paths) < len(video_paths):
+        subtitle_paths.append("")
 
     if api_key:
         os.environ["DEEPSEEK_API_KEY"] = api_key
@@ -146,12 +176,14 @@ async def upload_and_process(
             "status": "preparing",
             "step": 0,
             "total_steps": 5,
-            "message": "准备处理...",
+            "message": f"准备处理 {len(videos)} 个视频...",
             "details": None,
             "result": None,
             "error": None,
             "error_code": None,
             "output_dir": output_dir,
+            "merge": merge,
+            "total_videos": len(videos),
         }
 
     def progress_callback(step, total_steps, message, details=None):
@@ -171,52 +203,92 @@ async def upload_and_process(
                 task_store[task_id]["message"] = "开始处理..."
 
             result = process_cards(
-                video_path=str(video_path),
-                subtitle_path=str(subtitle_path),
+                video_paths=video_paths,
+                subtitle_paths=[p if p else None for p in subtitle_paths],
                 output_dir=output_dir,
+                merge=merge,
                 min_duration=min_duration,
                 progress_callback=progress_callback,
                 pre_processed=pre_processed_data,
                 api_base=api_base,
                 model_name=model_name,
                 padding_start_ms=padding_start_ms,
+                source_language=source_language,
+                target_language=target_language,
                 padding_end_ms=padding_end_ms,
                 card_styles=card_styles_list,
                 theme=theme
             )
 
-            apkg_filename = Path(result["apkg_path"]).name
-            cards = _build_cards(result.get("processed", []))
+            # 记录已学单词
+            def _record_words(processed_list, video_name=""):
+                try:
+                    from services.progress import mark_words_learned
+                    words_to_record = [
+                        {"word": p.get("word", ""), "definition": p.get("definition", "")}
+                        for p in processed_list
+                        if p.get("word")
+                    ]
+                    if words_to_record:
+                        mark_words_learned(words_to_record, source_video=video_name)
+                except Exception as e:
+                    print(f"记录已学单词失败（不影响主流程）: {e}")
 
-            # 记录已学单词到进度数据库
-            try:
-                from services.progress import mark_words_learned
-                words_to_record = [
-                    {"word": p.get("word", ""), "definition": p.get("definition", "")}
-                    for p in result.get("processed", [])
-                    if p.get("word")
-                ]
-                if words_to_record:
-                    mark_words_learned(words_to_record, source_video=video.filename or "")
-            except Exception as e:
-                print(f"记录已学单词失败（不影响主流程）: {e}")
+            if merge:
+                apkg_filename = Path(result["apkg_path"]).name
+                cards = _build_cards(result.get("processed", []))
+                _record_words(result.get("processed", []), video_names[0] if len(video_names) == 1 else "")
 
-            with task_store_lock:
-                task_store[task_id].update({
-                    "status": "completed",
-                    "step": 5,
-                    "message": f"处理完成，生成了 {result['cards_count']} 张卡片",
-                    "result": {
-                        "success": True,
+                with task_store_lock:
+                    task_store[task_id].update({
+                        "status": "completed",
+                        "step": 5,
                         "message": f"处理完成，生成了 {result['cards_count']} 张卡片",
-                        "task_id": task_id,
-                        "cards_count": result["cards_count"],
-                        "apkg_path": apkg_filename,
-                        "apkg_url": f"/output/{task_id}/{apkg_filename}",
-                        "video_name": video.filename or "",
-                        "cards": [c.model_dump() for c in cards]
-                    }
-                })
+                        "result": {
+                            "success": True,
+                            "message": f"处理完成，生成了 {result['cards_count']} 张卡片",
+                            "task_id": task_id,
+                            "cards_count": result["cards_count"],
+                            "apkg_path": apkg_filename,
+                            "apkg_url": f"/output/{task_id}/{apkg_filename}",
+                            "video_name": ", ".join(video_names),
+                            "cards": [c.model_dump() for c in cards]
+                        }
+                    })
+            else:
+                # 独立模式：返回多个牌组结果
+                all_results = result.get("results", [])
+                flat_cards = []
+                apkg_list = []
+                for r in all_results:
+                    apkg_name = Path(r["apkg_path"]).name
+                    apkg_list.append({
+                        "video_name": r["video_name"],
+                        "cards_count": r["cards_count"],
+                        "apkg_path": apkg_name,
+                        "apkg_url": f"/output/{task_id}/{apkg_name}",
+                    })
+                    for p in r.get("processed", []):
+                        flat_cards.append(p)
+                    _record_words(r.get("processed", []), r.get("video_name", ""))
+
+                cards = _build_cards(flat_cards)
+
+                with task_store_lock:
+                    task_store[task_id].update({
+                        "status": "completed",
+                        "step": 5,
+                        "message": f"处理完成，{len(all_results)} 个视频共 {result['total_cards']} 张卡片",
+                        "result": {
+                            "success": True,
+                            "message": f"处理完成，{len(all_results)} 个视频共 {result['total_cards']} 张卡片",
+                            "task_id": task_id,
+                            "merge": False,
+                            "total_cards": result["total_cards"],
+                            "videos": apkg_list,
+                            "cards": [c.model_dump() for c in cards]
+                        }
+                    })
 
         except Exception as e:
             import traceback
@@ -236,7 +308,7 @@ async def upload_and_process(
     thread = threading.Thread(target=run_processing, daemon=True)
     thread.start()
 
-    return {"task_id": task_id, "status": "started"}
+    return {"task_id": task_id, "status": "started", "merge": merge}
 
 
 @router.get("/progress/{task_id}")
@@ -307,7 +379,7 @@ async def cleanup_output(task_id: str):
 
 @router.get("/export-zip/{task_id}")
 async def export_zip_with_media(task_id: str):
-    """导出带媒体文件的 ZIP 包"""
+    """导出带媒体文件的 ZIP 包（单个牌组或多牌组）"""
     with task_store_lock:
         task = task_store.get(task_id)
 
@@ -315,8 +387,10 @@ async def export_zip_with_media(task_id: str):
         raise HTTPException(status_code=404, detail="任务不存在或未完成")
 
     output_dir = Path(task["output_dir"])
-    cards = task["result"].get("cards", [])
-    video_name = task["result"].get("video_name", "export")
+    result = task["result"]
+    cards = result.get("cards", [])
+    video_name = result.get("video_name", "export")
+    is_merge = result.get("merge", True) and "videos" not in result
 
     # 生成 CSV
     csv_content = generate_csv_with_media_paths(cards)
@@ -338,9 +412,10 @@ async def export_zip_with_media(task_id: str):
                 if f.is_file() and f.suffix == '.jpg':
                     zf.write(str(f), f"screenshots/{f.name}")
 
+    stem = Path(video_name.split(",")[0].strip()).stem if video_name else "export"
     return FileResponse(
         str(zip_path),
-        filename=f"ClipLingo_{Path(video_name).stem}.zip",
+        filename=f"ClipLingo_{stem}.zip",
         media_type="application/zip",
         background=None,
     )
@@ -382,15 +457,15 @@ async def start_processing(
         os.environ["DEEPSEEK_API_KEY"] = api_key
 
     try:
-        # 在线程池中执行，避免阻塞事件循环（心跳需要响应）
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
             None,
             process_cards,
-            str(video_path),
-            str(subtitle_path),
+            [str(video_path)],
+            [str(subtitle_path)],
             output_dir,
-            None,  # api_key (already set in env)
+            True,  # merge single video
+            api_key,  # unused, already in env
             min_duration
         )
 

@@ -324,13 +324,20 @@ SCREENING_RETURN_FORMAT = """
 - include=false 时 reason 说明原因（如：纯简单应答、无知识价值）
 - 保持原文顺序输出，每条都必须有 index 字段"""
 
+SCREENING_CORRECT_TEXT_EXTRA = """
+- 如果原文有明显转录错误（拼写错误、漏词、误识别），请在 corrected_text 字段中提供修正后的文本；如无错误则省略此字段"""
 
-def _build_screening_prompt(custom_prompt: str = None, source_language: str = "en", target_language: str = "zh") -> str:
+
+def _build_screening_prompt(custom_prompt: str = None, source_language: str = "en", target_language: str = "zh",
+                             correct_text: bool = False) -> str:
     """构建筛选专用提示词（只判断 include/reason，不返回翻译注释）"""
     src_name = _get_lang_name(source_language)
     tgt_name = _get_lang_name(target_language)
     criteria = custom_prompt if custom_prompt else SCREENING_CRITERIA.format(source_language=src_name)
-    return criteria + SCREENING_RETURN_FORMAT.format(target_language=tgt_name)
+    fmt = SCREENING_RETURN_FORMAT.format(target_language=tgt_name)
+    if correct_text:
+        fmt += SCREENING_CORRECT_TEXT_EXTRA
+    return criteria + fmt
 
 
 # ─────────────────── 两阶段 AI：注释专用提示词 ───────────────────
@@ -717,7 +724,8 @@ async def ai_screen_stream(request: AIRecommendRequest):
     if not api_key:
         raise HTTPException(status_code=400, detail="需要提供 API Key")
 
-    system_prompt = _build_screening_prompt(request.custom_prompt, request.source_language, request.target_language)
+    system_prompt = _build_screening_prompt(request.custom_prompt, request.source_language, request.target_language,
+                                            request.correct_text)
     subtitle_dicts = [
         {"index": s.index, "start_sec": s.start_sec, "end_sec": s.end_sec, "text": s.text}
         for s in request.subtitles
@@ -752,6 +760,8 @@ async def ai_screen_stream(request: AIRecommendRequest):
                 item.pop("notes", None)
                 item.pop("word", None)
                 item.pop("definition", None)
+                if not request.correct_text:
+                    item.pop("corrected_text", None)
             completed += 1
             print(f"  AI 筛选流式：第 {num}/{total_batches} 批完成 ({completed}/{total_batches})")
             yield f"data: {json.dumps({'type': 'batch', 'batch': num, 'items': items}, ensure_ascii=False)}\n\n"

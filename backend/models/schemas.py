@@ -117,6 +117,7 @@ class AIRecommendRequest(BaseModel):
     batch_size: int = 30
     source_language: str = Field(default="en", description="源语言代码，如 en、ja、ko")
     target_language: str = Field(default="zh", description="目标语言代码，如 zh、en、ja")
+    correct_text: bool = Field(default=False, description="是否允许 AI 修正字幕原文")
 
 
 class AIRecommendItem(BaseModel):
@@ -128,6 +129,7 @@ class AIRecommendItem(BaseModel):
     notes: Optional[str] = None
     word: Optional[str] = None
     definition: Optional[str] = None
+    corrected_text: Optional[str] = None
 
 
 class AIRecommendResponse(BaseModel):

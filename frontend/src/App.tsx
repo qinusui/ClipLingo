@@ -11,9 +11,9 @@ import { ProcessingStatus } from './components/ProcessingStatus';
 import { CardPreview } from './components/CardPreview';
 import { AnkiSyncButton } from './components/AnkiSyncButton';
 import { SubtitleItem, ProcessedCard, AIRecommendation, CardStyle, CardTheme, WorkflowPhase, AnnotationPurpose } from './types';
-import { subtitleAPI, processAPI, queueAPI, API_BASE_URL } from './services/api';
+import { subtitleAPI, processAPI, API_BASE_URL } from './services/api';
 import { pingAnki, fetchWordsFromAnki } from './services/ankiConnect';
-import type { SyncProgress, SyncResult } from './services/syncToAnki';
+
 import { useTheme } from './hooks/useTheme';
 import { getFriendlyMessage, getApiErrorMessage } from './utils/errors';
 
@@ -24,20 +24,6 @@ function formatSRTTime(seconds: number): string {
   const s = Math.floor(seconds % 60);
   const ms = Math.floor((seconds % 1) * 1000);
   return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')},${ms.toString().padStart(3, '0')}`;
-}
-
-// 根据选中的字幕生成新的 SRT 文件内容
-function generateSRTContent(subtitles: SubtitleItem[], selectedIndices: Set<number>): string {
-  const selectedSubtitles = subtitles.filter(s => selectedIndices.has(s.index));
-  let content = '';
-
-  selectedSubtitles.forEach((sub, idx) => {
-    content += `${idx + 1}\n`;
-    content += `${formatSRTTime(sub.start_sec)} --> ${formatSRTTime(sub.end_sec)}\n`;
-    content += `${sub.text}\n\n`;
-  });
-
-  return content;
 }
 
 // 生成 CSV 内容（utf-8-sig 编码，Excel 兼容）
@@ -123,34 +109,8 @@ function buildAnnotationPrompt(template: string, sourceLanguage: string, targetL
     .replace(/\{target_language\}/g, getLangName(targetLanguage));
 }
 
-const PRESET_TEMPLATES = {
-  grammar: {
-    label: i18n.t('app.promptPreset.grammarScreen'),
-    prompt: i18n.t('app.prompt.grammarScreenBody'),
-  },
-  vocab: {
-    label: i18n.t('app.promptPreset.vocabScreen'),
-    prompt: i18n.t('app.prompt.vocabScreenBody'),
-  },
-} as const;
-
-type PresetKey = keyof typeof PRESET_TEMPLATES;
-
-// 注释阶段预设模板
-const ANNOTATION_TEMPLATES = {
-  grammar: {
-    label: i18n.t('app.promptPreset.grammarAnnotate'),
-    prompt: i18n.t('app.prompt.grammarAnnotateBody'),
-  },
-  vocab: {
-    label: i18n.t('app.promptPreset.vocabAnnotate'),
-    prompt: i18n.t('app.prompt.vocabAnnotateBody'),
-  },
-} as const;
-
-type AnnotationPresetKey = keyof typeof ANNOTATION_TEMPLATES;
-
-const DEFAULT_RECOMMEND_PROMPT = PRESET_TEMPLATES.grammar.prompt;
+type PresetKey = 'grammar' | 'vocab';
+type AnnotationPresetKey = 'grammar' | 'vocab';
 
 // 从 localStorage 读取 AI 配置（持久化）
 function loadAIConfig() {
@@ -163,6 +123,16 @@ function loadAIConfig() {
 
 function App() {
   const { t, i18n } = useTranslation();
+
+  const presetTemplates = useMemo(() => ({
+    grammar: { label: t('app.promptPreset.grammarScreen'), prompt: t('app.prompt.grammarScreenBody') },
+    vocab: { label: t('app.promptPreset.vocabScreen'), prompt: t('app.prompt.vocabScreenBody') },
+  }), [t]);
+
+  const annotationTemplates = useMemo(() => ({
+    grammar: { label: t('app.promptPreset.grammarAnnotate'), prompt: t('app.prompt.grammarAnnotateBody') },
+    vocab: { label: t('app.promptPreset.vocabAnnotate'), prompt: t('app.prompt.vocabAnnotateBody') },
+  }), [t]);
   const { theme, toggleTheme } = useTheme();
   const savedConfig = loadAIConfig();
   const [apiBase, setApiBase] = useState(savedConfig?.apiBase || 'https://api.deepseek.com');
@@ -178,55 +148,16 @@ function App() {
   const [paddingStartMs, setPaddingStartMs] = useState(200);
   const [paddingEndMs, setPaddingEndMs] = useState(200);
   const [whisperModel, setWhisperModel] = useState('base');
-  const [showModelPicker, setShowModelPicker] = useState(false);
   const [checkingEmbedded, setCheckingEmbedded] = useState(false);
   const [extractedSource, setExtractedSource] = useState('');
 
-  const [videoFile, setVideoFile] = useState<File | null>(null);
-  const [subtitleFile, setSubtitleFile] = useState<File | null>(null);
+  const [videoFiles, setVideoFiles] = useState<File[]>([]);
+  const [subtitleFiles, setSubtitleFiles] = useState<(File | null)[]>([]);
+  // 每个视频贡献的字幕条数（与 videoFiles 一一对应，0=无字幕→后端 Whisper）
+  const [subtitleCounts, setSubtitleCounts] = useState<number[]>([]);
 
-  // 批量处理模式
-  const [batchMode, setBatchMode] = useState(false);
-  const [batchFiles, setBatchFiles] = useState<Array<{ video: File; subtitle: File | null }>>([]);
-  const [batchId, setBatchId] = useState<string | null>(null);
-  const [batchTasks, setBatchTasks] = useState<Array<{
-    task_id: string;
-    video_name: string;
-    status: string;
-    step: number;
-    message: string;
-    params?: {
-      card_styles?: string[];
-      theme?: string;
-    };
-    result?: {
-      success: boolean;
-      task_id: string;
-      video_name: string;
-      cards_count: number;
-      apkg_url: string;
-      cards: Array<{
-        sentence: string;
-        translation: string;
-        notes: string;
-        word?: string;
-        definition?: string;
-        start_sec: number;
-        end_sec: number;
-        audio_path?: string;
-        screenshot_path?: string;
-      }>;
-    };
-    error?: string;
-  }>>([]);
-  const [batchSubmitting, setBatchSubmitting] = useState(false);
-  const [batchSyncStates, setBatchSyncStates] = useState<Record<string, {
-    state: 'syncing' | 'done' | 'error';
-    progress?: SyncProgress;
-    result?: SyncResult;
-    error?: string;
-  }>>({});
-  const batchPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 多视频模式
+  const [mergeMode, setMergeMode] = useState(true);
 
   const [subtitles, setSubtitles] = useState<SubtitleItem[]>([]);
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
@@ -234,6 +165,7 @@ function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingSteps, setProcessingSteps] = useState(PROCESSING_STEPS);
   const [currentStep, setCurrentStep] = useState(-1);
+  const [processingMessage, setProcessingMessage] = useState('');
 
   const [result, setResult] = useState<ProcessedCard[] | null>(null);
   const [apkgPath, setApkgPath] = useState<string | null>(null);
@@ -271,9 +203,9 @@ function App() {
   const [annotationPurpose, setAnnotationPurpose] = useState<AnnotationPurpose | null>(null);
   const [annotateBatch, setAnnotateBatch] = useState(0);
   const [annotateTotalBatches, setAnnotateTotalBatches] = useState(0);
-  const [customPrompt, setCustomPrompt] = useState<string>(buildPresetPrompt(DEFAULT_RECOMMEND_PROMPT, savedConfig?.sourceLanguage || 'en'));
+  const [customPrompt, setCustomPrompt] = useState<string>(buildPresetPrompt(t('app.prompt.grammarScreenBody'), savedConfig?.sourceLanguage || 'en'));
   const [promptPreset, setPromptPreset] = useState<PresetKey>('grammar');
-  const [annotationPrompt, setAnnotationPrompt] = useState<string>(buildAnnotationPrompt(ANNOTATION_TEMPLATES.grammar.prompt, savedConfig?.sourceLanguage || 'en', savedConfig?.targetLanguage || 'zh'));
+  const [annotationPrompt, setAnnotationPrompt] = useState<string>(buildAnnotationPrompt(t('app.prompt.grammarAnnotateBody'), savedConfig?.sourceLanguage || 'en', savedConfig?.targetLanguage || 'zh'));
   const [annotationPreset, setAnnotationPreset] = useState<AnnotationPresetKey>('grammar');
   const [showAnnotationPromptEditor, setShowAnnotationPromptEditor] = useState(false);
   const [cardStyles, setCardStyles] = useState<Set<CardStyle>>(new Set(['sentence']));
@@ -307,6 +239,7 @@ function App() {
   const [filterMinDuration, setFilterMinDuration] = useState(1);
   const [filterMaxDuration, setFilterMaxDuration] = useState(15);
   const [filterExcludeLearned, setFilterExcludeLearned] = useState(true);
+  const [correctText, setCorrectText] = useState(false);
   const [filterBlacklist, setFilterBlacklist] = useState('');
 
   // 页面关闭时通知后端退出
@@ -373,150 +306,15 @@ function App() {
     });
   }, []);
 
-  // ── 批量处理函数 ──
-
-  const handleBatchAddFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    if (!files.length) return;
-
-    const videoExts = ['.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv', '.wmv', '.ts', '.m4v'];
-    const subExts = ['.srt', '.ass', '.ssa', '.vtt', '.sub'];
-
-    const videos = files.filter(f => videoExts.some(ext => f.name.toLowerCase().endsWith(ext)));
-    const subs = files.filter(f => subExts.some(ext => f.name.toLowerCase().endsWith(ext)));
-
-    // 按文件名（去掉扩展名）匹配字幕
-    const subMap = new Map<string, File>();
-    subs.forEach(s => {
-      const base = s.name.replace(/\.[^.]+$/, '').toLowerCase();
-      subMap.set(base, s);
-    });
-
-    const newBatch = videos.map(v => {
-      const base = v.name.replace(/\.[^.]+$/, '').toLowerCase();
-      return { video: v, subtitle: subMap.get(base) || null };
-    });
-
-    setBatchFiles(prev => [...prev, ...newBatch]);
-    e.target.value = '';
-  };
-
-  const handleBatchRemove = (index: number) => {
-    setBatchFiles(prev => prev.filter((_, i) => i !== index));
-  };
-
-  const handleBatchSetSubtitle = (index: number, file: File | null) => {
-    setBatchFiles(prev => prev.map((f, i) => i === index ? { ...f, subtitle: file } : f));
-  };
-
-  const handleBatchSubmit = async () => {
-    const videoFiles = batchFiles.map(f => f.video);
-    const subtitleFiles = batchFiles.map(f => f.subtitle);
-
-    const noSubCount = subtitleFiles.filter(s => !s).length;
-    if (noSubCount > 0) {
-      const ok = confirm(t('app.error.batchConfirmWhisper', { count: noSubCount }));
-      if (!ok) return;
-    }
-
-    setBatchSubmitting(true);
-    try {
-      const result = await queueAPI.add(videoFiles, subtitleFiles, {
-        apiKey: apiKey || undefined,
-        apiBase: apiBase || undefined,
-        modelName: modelName || undefined,
-        language: sourceLanguage || undefined,
-        whisperModel,
-        paddingStartMs,
-        paddingEndMs,
-        cardStyles: Array.from(cardStyles),
-        theme: cardTheme,
-      });
-
-      setBatchId(result.batch_id);
-      setBatchTasks(result.tasks.map(t => ({
-        ...t,
-        step: 0,
-        message: i18n.t('app.batch.pendingStatus'),
-      })));
-
-      // 启动轮询
-      startBatchPolling(result.batch_id);
-    } catch (err) {
-      alert(t('app.error.submitFailed') + getApiErrorMessage(err));
-    } finally {
-      setBatchSubmitting(false);
-    }
-  };
-
-  const startBatchPolling = (bid: string) => {
-    if (batchPollRef.current) clearInterval(batchPollRef.current);
-    batchPollRef.current = setInterval(async () => {
-      try {
-        const status = await queueAPI.getStatus(bid);
-        setBatchTasks(status.tasks);
-
-        // 全部完成或失败时停止轮询
-        const allDone = status.tasks.every(
-          t => t.status === 'done' || t.status === 'failed' || t.status === 'cancelled'
-        );
-        if (allDone || !status.running) {
-          if (batchPollRef.current) clearInterval(batchPollRef.current);
-        }
-      } catch {
-        // 轮询失败不中断
-      }
-    }, 1500);
-  };
-
-  const handleBatchCancelTask = async (taskId: string) => {
-    try {
-      await queueAPI.cancel(taskId);
-    } catch {}
-  };
-
-  const handleBatchCancelAll = async () => {
-    if (!batchId) return;
-    try {
-      await queueAPI.cancelBatch(batchId);
-    } catch {}
-  };
-
-  const handleBatchSyncToAnki = async (task: typeof batchTasks[0]) => {
-    if (!task.result?.cards) return;
-    const { syncToAnki } = await import('./services/syncToAnki');
-    const { pingAnki } = await import('./services/ankiConnect');
-    const online = await pingAnki();
-    if (!online) {
-      alert(t('app.error.ankiNotRunning'));
-      return;
-    }
-    const tid = task.task_id;
-    setBatchSyncStates(prev => ({ ...prev, [tid]: { state: 'syncing' } }));
-    try {
-      const deckName = task.video_name.replace(/\.[^.]+$/, '');
-      const taskCardStyles = task.params?.card_styles || Array.from(cardStyles);
-      const taskTheme = task.params?.theme || cardTheme;
-      const res = await syncToAnki(
-        task.result.cards,
-        deckName,
-        API_BASE_URL,
-        taskCardStyles,
-        taskTheme,
-        (p) => setBatchSyncStates(prev => ({ ...prev, [tid]: { state: 'syncing', progress: p } })),
-      );
-      setBatchSyncStates(prev => ({ ...prev, [tid]: { state: 'done', result: res } }));
-    } catch (err) {
-      setBatchSyncStates(prev => ({ ...prev, [tid]: { state: 'error', error: err instanceof Error ? err.message : String(err) } }));
-    }
-  };
-
-  // 清理批量轮询
+  // 同步 subtitleFiles 长度与 videoFiles
   useEffect(() => {
-    return () => {
-      if (batchPollRef.current) clearInterval(batchPollRef.current);
-    };
-  }, []);
+    setSubtitleFiles(prev => {
+      if (prev.length === videoFiles.length) return prev;
+      const updated = [...prev];
+      while (updated.length < videoFiles.length) updated.push(null);
+      return updated.slice(0, videoFiles.length);
+    });
+  }, [videoFiles.length]);
 
   // 检测 ffmpeg 和 Whisper 插件安装状态（延迟 3 秒等后端就绪）
   useEffect(() => {
@@ -561,7 +359,7 @@ function App() {
 
   // 源语言变化时，同步更新预设提示词中的语言名称
   useEffect(() => {
-    for (const tmpl of Object.values(PRESET_TEMPLATES)) {
+    for (const tmpl of Object.values(presetTemplates)) {
       const built = buildPresetPrompt(tmpl.prompt, sourceLanguage);
       for (const code of LANGUAGE_CODES) {
         if (code === sourceLanguage) continue;
@@ -572,7 +370,7 @@ function App() {
       }
     }
     // 同步注释提示词
-    for (const tmpl of Object.values(ANNOTATION_TEMPLATES)) {
+    for (const tmpl of Object.values(annotationTemplates)) {
       const built = buildAnnotationPrompt(tmpl.prompt, sourceLanguage, targetLanguage);
       for (const srcCode of LANGUAGE_CODES) {
         for (const tgtCode of LANGUAGE_CODES) {
@@ -660,21 +458,24 @@ function App() {
 
   // 生成字幕 — 方案链：软字幕 > Whisper 转录
   const handleTranscribe = async () => {
-    if (!videoFile || transcribingRef.current) return;
-    if (transcribedVideoName.current === videoFile.name) return;
+    if (videoFiles.length === 0 || transcribingRef.current) return;
+    if (transcribedVideoName.current === videoFiles[0].name) return;
 
     setCheckingEmbedded(true);
     setExtractedSource('');
 
     try {
       // 优先提取内嵌软字幕
-      const result = await subtitleAPI.extractEmbeddedSubs(videoFile, 0, minDuration);
+      const result = await subtitleAPI.extractEmbeddedSubs(videoFiles[0], 0, minDuration);
 
       if (result.found && result.extracted) {
         setSubtitles(result.extracted.subtitles as SubtitleItem[]);
         setSelectedIndices(new Set(result.extracted.subtitles.map((s: SubtitleItem) => s.index)));
         setRecommendations(null);
-        transcribedVideoName.current = videoFile.name;
+        const counts = new Array(videoFiles.length).fill(0);
+        counts[0] = result.extracted.subtitles.length;
+        setSubtitleCounts(counts);
+        transcribedVideoName.current = videoFiles[0].name;
         setExtractedSource(t('app.subtitleSource.extractedFromVideo', { codec: result.extracted.codec, language: result.extracted.language, total: result.extracted.total }));
         setCheckingEmbedded(false);
         scrollToStep2();
@@ -682,23 +483,15 @@ function App() {
       }
 
       if (result.found && !result.extracted) {
-        // 内嵌字幕无法提取，提示使用 Whisper
         console.log('内嵌字幕无法提取:', result.message);
       }
     } catch (e) {
       console.error('检测字幕失败:', e);
-      // 提取失败时静默继续到 Whisper 转录
     }
 
     setCheckingEmbedded(false);
-    setShowModelPicker(true);
-  };
 
-  // 确认模型后开始转录
-  const startTranscribe = async () => {
-    if (!videoFile || transcribingRef.current) return;
-
-    // 检查 Whisper 插件是否已安装
+    // 内嵌字幕不可用 → 启动 Whisper 转录
     try {
       const whisperStatus = await subtitleAPI.getWhisperStatus();
       if (!whisperStatus.installed) {
@@ -709,7 +502,6 @@ function App() {
       console.error('检查 Whisper 状态失败:', e);
     }
 
-    setShowModelPicker(false);
     transcribingRef.current = true;
     setIsTranscribing(true);
     setTranscribeStep(0);
@@ -717,7 +509,7 @@ function App() {
     setTranscribeMessage(t('app.error.transcribePreparing'));
 
     try {
-      const { task_id } = await subtitleAPI.startTranscribe(videoFile, minDuration, sourceLanguage, whisperModel);
+      const { task_id } = await subtitleAPI.startTranscribe(videoFiles[0], minDuration, sourceLanguage, whisperModel);
 
       const pollInterval = setInterval(async () => {
         try {
@@ -726,14 +518,12 @@ function App() {
           setTranscribeStep(progress.step);
           setTranscribeTotalSteps(progress.total_steps);
 
-          // 使用真实的转录进度（如果有）
           if (progress.whisper_progress) {
             const wp = progress.whisper_progress;
             const pct = Math.round(wp.progress * 100);
             whisperHasRealProgress.current = true;
             setTranscribeAnimProgress(pct);
             setWhisperText(wp.text || '');
-            // 格式化时间轴文字
             const fmtTime = (sec: number) => {
               const m = Math.floor(sec / 60);
               const s = Math.floor(sec % 60);
@@ -752,7 +542,10 @@ function App() {
             setSubtitles(progress.result.subtitles);
             setSelectedIndices(new Set(progress.result.subtitles.map((s: SubtitleItem) => s.index)));
             setRecommendations(null);
-            transcribedVideoName.current = videoFile.name;
+            const counts = new Array(videoFiles.length).fill(0);
+            counts[0] = progress.result.subtitles.length;
+            setSubtitleCounts(counts);
+            transcribedVideoName.current = videoFiles[0].name;
             scrollToStep2();
           }
 
@@ -777,9 +570,10 @@ function App() {
     }
   };
 
-  // 加载字幕
+  // 加载字幕（每个视频独立加载，保留 per-video 边界）
   const handleLoadSubtitles = async () => {
-    if (!subtitleFile) return;
+    const validSubs = subtitleFiles.filter(f => f !== null);
+    if (validSubs.length === 0) return;
 
     try {
       setProcessingSteps(steps =>
@@ -789,10 +583,21 @@ function App() {
       );
       setCurrentStep(0);
 
-      const response = await subtitleAPI.upload(subtitleFile, minDuration);
+      let allSubtitles: SubtitleItem[] = [];
+      const counts: number[] = new Array(videoFiles.length).fill(0);
 
-      setSubtitles(response.subtitles);
-      setSelectedIndices(new Set(response.subtitles.map(s => s.index)));
+      for (let i = 0; i < subtitleFiles.length; i++) {
+        const subFile = subtitleFiles[i];
+        if (subFile) {
+          const response = await subtitleAPI.upload(subFile, minDuration);
+          counts[i] = response.subtitles.length;
+          allSubtitles = allSubtitles.concat(response.subtitles);
+        }
+      }
+
+      setSubtitleCounts(counts);
+      setSubtitles(allSubtitles);
+      setSelectedIndices(new Set(allSubtitles.map((s: SubtitleItem) => s.index)));
       scrollToStep2();
 
       setProcessingSteps(steps =>
@@ -861,6 +666,7 @@ function App() {
         modelName || undefined,
         sourceLanguage,
         targetLanguage,
+        correctText,
         controller.signal
       );
 
@@ -1025,6 +831,7 @@ function App() {
         modelName || undefined,
         sourceLanguage,
         targetLanguage,
+        correctText,
         controller.signal
       );
 
@@ -1071,7 +878,7 @@ function App() {
 
   // 处理选中的字幕
   const handleProcess = async () => {
-    if (!videoFile) {
+    if (videoFiles.length === 0) {
       alert(t('app.error.needUploadVideo'));
       return;
     }
@@ -1079,30 +886,27 @@ function App() {
       alert(t('app.error.needLoadSubtitles'));
       return;
     }
-
     if (selectedIndices.size === 0) {
       alert(t('app.error.needSelectOne'));
+      return;
+    }
+    if (isRecommending || workflowPhase === 'screening' || workflowPhase === 'annotating') {
       return;
     }
 
     setIsProcessing(true);
     setProcessingSteps(PROCESSING_STEPS.map(s => ({ ...s, status: 'pending' as const })));
     setCurrentStep(0);
+    setProcessingMessage('');
 
-    // 根据选中的字幕生成新的 SRT 文件
-    const srtContent = generateSRTContent(subtitles, selectedIndices);
-    const selectedSubtitleBlob = new Blob([srtContent], { type: 'text/plain' });
-    const selectedSubtitleFile = new File([selectedSubtitleBlob], 'selected_subtitles.srt', { type: 'text/plain' });
-
-    // 构建预处理数据
-    // 有 AI 推荐时使用推荐结果，无推荐时使用空翻译/注释（跳过后端 AI 步骤）
-    const preProcessed = subtitles
+    // ── 构建预处理数据（全量，保持视频顺序） ──
+    const allPreProcessed = subtitles
       .filter(s => selectedIndices.has(s.index))
       .map(s => {
         const rec = recommendations?.get(s.index);
         return {
           index: s.index,
-          text: s.text,
+          text: rec?.corrected_text || s.text,
           translation: rec?.translation || '',
           notes: rec?.notes || '',
           reason: rec?.reason || '',
@@ -1111,28 +915,72 @@ function App() {
         };
       });
 
+    // ── 按视频分组：生成独立 SRT + 独立 pre_processed ──
+    const perVideoSRTFiles: (File | null)[] = [];
+    const perVideoPreProcessed: any[][] = videoFiles.map(() => []);
+    let ppIdx = 0; // 在 allPreProcessed 中的游标
+
+    let globalPos = 0;
+    for (let vi = 0; vi < videoFiles.length; vi++) {
+      const count = subtitleCounts[vi] || 0;
+      const videoSubs = subtitles.slice(globalPos, globalPos + count);
+      globalPos += count;
+
+      // 本视频被选中的字幕
+      const selectedSubs = videoSubs.filter(s => selectedIndices.has(s.index));
+
+      if (selectedSubs.length === 0) {
+        // 无选中字幕 → 发送空文件，后端走 Whisper 转录
+        perVideoSRTFiles.push(new File([], `_auto_transcribe_${vi}.srt`, { type: 'text/plain' }));
+        perVideoPreProcessed[vi] = [];
+      } else {
+        // 生成该视频的 SRT（重新编号 1..N）
+        let srtContent = '';
+        const videoPP: any[] = [];
+        selectedSubs.forEach((sub, newIdx) => {
+          srtContent += `${newIdx + 1}\n`;
+          srtContent += `${formatSRTTime(sub.start_sec)} --> ${formatSRTTime(sub.end_sec)}\n`;
+          srtContent += `${sub.text}\n\n`;
+
+          // 从 allPreProcessed 按序取对应条目
+          if (ppIdx < allPreProcessed.length) {
+            videoPP.push(allPreProcessed[ppIdx]);
+            ppIdx++;
+          }
+        });
+
+        perVideoSRTFiles.push(new File([srtContent], `video_${vi}_selected.srt`, { type: 'text/plain' }));
+        perVideoPreProcessed[vi] = videoPP;
+      }
+    }
+
     try {
-      // 1. 上传并启动后台处理
+      // 发送多 SRT + 嵌套的 pre_processed
       const { task_id } = await processAPI.uploadAndProcess(
-        videoFile,
-        selectedSubtitleFile,
+        videoFiles,
+        perVideoSRTFiles,
+        mergeMode,
         minDuration,
         apiKey || undefined,
-        preProcessed,
+        perVideoPreProcessed,
         apiBase || undefined,
         modelName || undefined,
         paddingStartMs,
         paddingEndMs,
         Array.from(cardStyles),
-        cardTheme
+        cardTheme,
+        sourceLanguage,
+        targetLanguage
       );
 
       setTaskId(task_id);
 
-      // 2. 轮询进度
+      // 轮询进度
       const pollInterval = setInterval(async () => {
         try {
           const progress = await processAPI.getProgress(task_id);
+
+          setProcessingMessage(progress.message || '');
 
           // 更新步骤状态（后端 step 1-4 映射到前端 index 0-2）
           // 后端: 1=解析, 2=AI注释(跳过), 3=媒体切割, 4=打包
@@ -1240,8 +1088,9 @@ function App() {
       }
 
       // 清理界面状态，方便继续处理下一个视频
-      setVideoFile(null);
-      setSubtitleFile(null);
+      setVideoFiles([]);
+      setSubtitleFiles([]);
+      setSubtitleCounts([]);
       setSubtitles([]);
       setSelectedIndices(new Set());
       setResult(null);
@@ -1251,6 +1100,7 @@ function App() {
       setFailedIndices(new Set());
       setProcessingSteps(PROCESSING_STEPS);
       setCurrentStep(-1);
+      setProcessingMessage('');
       setExtractedSource('');
       transcribedVideoName.current = null;
       setWorkflowPhase('idle');
@@ -1320,6 +1170,20 @@ function App() {
       for (const i of filteredIndices) newSelected.add(i);
       setSelectedIndices(newSelected);
     }
+  };
+
+  // 反选（作用于筛选结果）
+  const invertSelection = () => {
+    const filteredIndices = new Set(filteredSubtitles.map(s => s.index));
+    const newSelected = new Set(selectedIndices);
+    for (const i of filteredIndices) {
+      if (newSelected.has(i)) {
+        newSelected.delete(i);
+      } else {
+        newSelected.add(i);
+      }
+    }
+    setSelectedIndices(newSelected);
   };
 
   return (
@@ -1534,83 +1398,112 @@ function App() {
                 </div>
               )}
 
-              {/* 批量/单文件模式切换 */}
-              {!isProcessing && !batchId && (
+              {/* 合并/独立模式切换 */}
+              {!isProcessing && (
                 <div className="flex items-center gap-2 mb-4">
+                  <span className="text-xs text-gray-500 dark:text-gray-400">{t('app.step1.outputMode') || '输出模式'}:</span>
                   <button
-                    onClick={() => setBatchMode(false)}
-                    className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${!batchMode ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'}`}
+                    onClick={() => setMergeMode(true)}
+                    className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${mergeMode ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'}`}
                   >
-                    {t('app.step1.modeSingle')}
+                    {t('app.step1.modeMerge') || '合并牌组'}
                   </button>
                   <button
-                    onClick={() => setBatchMode(true)}
-                    className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${batchMode ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'}`}
+                    onClick={() => setMergeMode(false)}
+                    className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${!mergeMode ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'}`}
                   >
-                    {t('app.step1.modeBatch')}
+                    {t('app.step1.modeIndependent') || '独立牌组'}
                   </button>
                 </div>
               )}
 
-              {/* ── 批量模式：文件列表 + 提交 ── */}
-              {batchMode && !batchId && (
-                <div className="space-y-4">
-                  <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 text-center">
-                    <input
-                      type="file"
-                      id="batch-files"
-                      multiple
-                      accept=".mp4,.mkv,.avi,.mov,.webm,.srt,.ass,.vtt"
-                      onChange={handleBatchAddFiles}
-                      className="hidden"
-                    />
-                    <label htmlFor="batch-files" className="cursor-pointer">
-                      <div className="text-gray-500 dark:text-gray-400">
-                        <p className="text-sm font-medium">{t('app.step1.batchDropPrompt')}</p>
-                        <p className="text-xs mt-1">{t('app.step1.batchDropHint')}</p>
-                      </div>
-                    </label>
-                  </div>
+              {/* 文件上传 */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* 左侧：文件上传 */}
+                <div className="lg:col-span-2 space-y-4">
+                  <FileUpload
+                    accept=".mp4,.mkv,.avi,.mov,.webm"
+                    onFilesSelect={(files) => {
+                      setVideoFiles(prev => [...prev, ...Array.from(files)]);
+                      transcribedVideoName.current = null;
+                      setExtractedSource('');
+                      setSubtitles([]);
+                      setSubtitleCounts([]);
+                      setSelectedIndices(new Set());
+                      setRecommendations(null);
+                    }}
+                    selectedFiles={videoFiles}
+                    onClear={() => {
+                      setVideoFiles([]);
+                      setSubtitleFiles([]);
+                      setSubtitleCounts([]);
+                      transcribedVideoName.current = null;
+                      setExtractedSource('');
+                      setSubtitles([]);
+                      setSelectedIndices(new Set());
+                      setRecommendations(null);
+                    }}
+                    label={t('app.step1.videoFile')}
+                    icon="video"
+                    multiple
+                  />
 
-                  {batchFiles.length > 0 && (
+                  {/* 视频列表 */}
+                  {videoFiles.length > 0 && (
                     <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
                       <table className="w-full text-sm">
                         <thead className="bg-gray-50 dark:bg-gray-800">
                           <tr>
                             <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 w-8">#</th>
-                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t('app.step1.batchColVideo')}</th>
-                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t('app.step1.batchColSubtitle')}</th>
-                            <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 w-12">{t('app.step1.batchColAction')}</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t('app.step1.batchColVideo') || '视频文件'}</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t('app.step1.batchColSubtitle') || '字幕文件'}</th>
+                            <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 w-12">{t('app.step1.batchColAction') || '操作'}</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                          {batchFiles.map((f, i) => (
+                          {videoFiles.map((vf, i) => (
                             <tr key={i}>
                               <td className="px-3 py-2 text-gray-400">{i + 1}</td>
-                              <td className="px-3 py-2 font-medium text-gray-800 dark:text-gray-200">{f.video.name}</td>
+                              <td className="px-3 py-2 font-medium text-gray-800 dark:text-gray-200 truncate max-w-[200px]" title={vf.name}>{vf.name}</td>
                               <td className="px-3 py-2">
-                                {f.subtitle ? (
-                                  <span className="text-green-600 dark:text-green-400">{f.subtitle.name}</span>
-                                ) : (
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-yellow-600 dark:text-yellow-400 text-xs">{t('app.step1.batchWhisperFallback')}</span>
-                                    <label className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 cursor-pointer">
-                                      {t('app.step1.batchSelectSubtitle')}
-                                      <input
-                                        type="file"
-                                        accept=".srt,.ass,.vtt,.ssa,.sub"
-                                        className="hidden"
-                                        onChange={(e) => {
-                                          const file = e.target.files?.[0];
-                                          if (file) handleBatchSetSubtitle(i, file);
-                                        }}
-                                      />
-                                    </label>
+                                {subtitleFiles[i] ? (
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-green-600 dark:text-green-400 truncate max-w-[140px]" title={subtitleFiles[i]!.name}>{subtitleFiles[i]!.name}</span>
+                                    <button
+                                      onClick={() => {
+                                        setSubtitleFiles(prev => { const next = [...prev]; next[i] = null; return next; });
+                                      }}
+                                      className="text-gray-400 hover:text-red-500 flex-shrink-0"
+                                    >
+                                      <X className="w-3 h-3" />
+                                    </button>
                                   </div>
+                                ) : (
+                                  <label className="flex items-center gap-1 text-yellow-600 dark:text-yellow-400 text-xs cursor-pointer hover:text-yellow-800 dark:hover:text-yellow-300">
+                                    <input
+                                      type="file"
+                                      accept=".srt,.ass,.vtt,.ssa,.sub"
+                                      className="hidden"
+                                      onChange={(e) => {
+                                        const file = e.target.files?.[0];
+                                        if (file) {
+                                          setSubtitleFiles(prev => { const next = [...prev]; next[i] = file; return next; });
+                                        }
+                                      }}
+                                    />
+                                    <span>{t('app.step1.willAutoTranscribe') || '将自动转录'}</span>
+                                    <span className="text-blue-500 ml-1">({t('app.step1.optionalSelectSub') || '可选字幕'})</span>
+                                  </label>
                                 )}
                               </td>
                               <td className="px-3 py-2 text-center">
-                                <button onClick={() => handleBatchRemove(i)} className="text-red-400 hover:text-red-600">
+                                <button
+                                  onClick={() => {
+                                    setVideoFiles(prev => prev.filter((_, j) => j !== i));
+                                    setSubtitleFiles(prev => prev.filter((_, j) => j !== i));
+                                  }}
+                                  className="text-red-400 hover:text-red-600"
+                                >
                                   <X className="w-4 h-4" />
                                 </button>
                               </td>
@@ -1621,227 +1514,12 @@ function App() {
                     </div>
                   )}
 
-                  <Button
-                    variant="primary"
-                    className="w-full"
-                    onClick={handleBatchSubmit}
-                    disabled={batchFiles.length === 0 || batchSubmitting}
-                    isLoading={batchSubmitting}
-                  >
-                    <Sparkles className="w-4 h-4 mr-2" />
-                    {t('app.step1.batchSubmit', { count: batchFiles.length })}
-                  </Button>
-                </div>
-              )}
-
-              {/* ── 批量模式：队列状态面板 ── */}
-              {batchId && batchTasks.length > 0 && (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200">
-                      {t('app.batch.title')}
-                      <span className="ml-2 text-sm font-normal text-gray-500">
-                        {t('app.batch.progress', { done: batchTasks.filter(t => t.status === 'done').length, total: batchTasks.length })}
-                      </span>
-                    </h3>
-                    <div className="flex gap-2">
-                      {batchTasks.some(t => t.status === 'done') && (
-                        <>
-                          <button
-                            onClick={() => downloadUrl(queueAPI.downloadAllUrl(batchId || undefined), 'ClipLingo_Batch.zip')}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-white bg-green-600 rounded-lg hover:bg-green-700"
-                          >
-                            <Download className="w-4 h-4" /> {t('app.batch.downloadAllZip')}
-                          </button>
-                          <button
-                            onClick={() => downloadUrl(queueAPI.exportAllZipUrl(batchId || undefined), 'ClipLingo_Batch_Media.zip')}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-emerald-700 border border-emerald-300 rounded-lg hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
-                          >
-                            <FolderOpen className="w-4 h-4" /> {t('app.batch.downloadAllMediaZip')}
-                          </button>
-                          <button
-                            onClick={() => {
-                              const allCards = batchTasks
-                                .filter(t => t.status === 'done' && t.result?.cards)
-                                .flatMap(t => t.result!.cards);
-                              if (allCards.length === 0) return;
-                              downloadString(generateCSVContent(allCards), 'ClipLingo_batch.csv', 'text/csv');
-                            }}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-blue-600 border border-blue-300 rounded-lg hover:bg-blue-50 dark:border-blue-700 dark:hover:bg-blue-900/20"
-                          >
-                            <FileSpreadsheet className="w-4 h-4" /> CSV
-                          </button>
-                          <button
-                            onClick={() => {
-                              const allCards = batchTasks
-                                .filter(t => t.status === 'done' && t.result?.cards)
-                                .flatMap(t => t.result!.cards);
-                              if (allCards.length === 0) return;
-                              downloadString(generateJSONContent(allCards), 'ClipLingo_batch.json', 'application/json');
-                            }}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-purple-600 border border-purple-300 rounded-lg hover:bg-purple-50 dark:border-purple-700 dark:hover:bg-purple-900/20"
-                          >
-                            <FileJson className="w-4 h-4" /> JSON
-                          </button>
-                        </>
-                      )}
-                      {batchTasks.some(t => t.status === 'waiting' || t.status === 'running') && (
-                        <button
-                          onClick={handleBatchCancelAll}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-red-600 border border-red-300 rounded-lg hover:bg-red-50 dark:border-red-700 dark:hover:bg-red-900/20"
-                        >
-                          {t('app.batch.cancelQueue')}
-                        </button>
-                      )}
-                      <button
-                        onClick={() => { setBatchId(null); setBatchTasks([]); setBatchFiles([]); }}
-                        className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400"
-                      >
-                        {t('app.batch.back')}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* 整体进度条 */}
-                  {(() => {
-                    const doneCount = batchTasks.filter(t => t.status === 'done').length;
-                    const pct = Math.round((doneCount / batchTasks.length) * 100);
-                    return (
-                      <div className="w-full bg-gray-200 rounded-full h-2 dark:bg-gray-700">
-                        <div className="bg-primary-500 h-2 rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
-                      </div>
-                    );
-                  })()}
-
-                  {/* 任务列表 */}
-                  <div className="space-y-2">
-                    {batchTasks.map((task) => {
-                      const statusIcon = {
-                        waiting: '○',
-                        running: '⟳',
-                        done: '✓',
-                        failed: '✗',
-                        cancelled: '⊘',
-                      }[task.status] || '?';
-                      const statusColor = {
-                        waiting: 'text-gray-400',
-                        running: 'text-blue-500',
-                        done: 'text-green-500',
-                        failed: 'text-red-500',
-                        cancelled: 'text-gray-400',
-                      }[task.status] || 'text-gray-400';
-
-                      return (
-                        <div key={task.task_id} className="flex items-center gap-3 p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
-                          <span className={`text-lg ${statusColor}`}>{statusIcon}</span>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">{task.video_name}</p>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">{task.message}</p>
-                            {task.status === 'running' && (
-                              <div className="w-full bg-gray-200 rounded-full h-1.5 mt-1 dark:bg-gray-600">
-                                <div className="bg-blue-500 h-1.5 rounded-full transition-all" style={{ width: `${(task.step / 5) * 100}%` }} />
-                              </div>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2 flex-shrink-0">
-                            {task.status === 'done' && task.result && (() => {
-                              const ss = batchSyncStates[task.task_id];
-                              return (
-                                <>
-                                  <button
-                                    onClick={() => {
-                                      const result = task.result!;
-                                      const apkgName = result.apkg_url?.split('/').pop() || 'deck.apkg';
-                                      downloadUrl(`${API_BASE_URL}${result.apkg_url}`, apkgName);
-                                    }}
-                                    className="text-xs text-blue-600 hover:underline dark:text-blue-400"
-                                  >
-                                    {t('app.batch.download')}
-                                  </button>
-                                  {(() => {
-                                    if (!ss) return (
-                                      <button
-                                        onClick={() => handleBatchSyncToAnki(task)}
-                                        className="text-xs text-green-600 hover:underline dark:text-green-400"
-                                      >
-                                        {t('app.batch.syncAnki')}
-                                      </button>
-                                    );
-                                    if (ss.state === 'syncing' && ss.progress) {
-                                      const pct = Math.round((ss.progress.current / ss.progress.total) * 100);
-                                      return (
-                                        <div className="flex items-center gap-1">
-                                          <div className="w-16 bg-gray-200 rounded-full h-1.5 dark:bg-gray-600">
-                                            <div className="bg-green-500 h-1.5 rounded-full transition-all" style={{ width: `${pct}%` }} />
-                                          </div>
-                                          <span className="text-xs text-gray-400">{pct}%</span>
-                                        </div>
-                                      );
-                                    }
-                                    if (ss.state === 'done' && ss.result) {
-                                      return (
-                                        <span className="text-xs text-green-600 dark:text-green-400">
-                                          +{ss.result.added}/{ss.result.skipped}/{ss.result.failed}
-                                        </span>
-                                      );
-                                    }
-                                    if (ss.state === 'error') {
-                                      return <span className="text-xs text-red-500">{ss.error || 'Error'}</span>;
-                                    }
-                                    return (
-                                      <button
-                                        onClick={() => handleBatchSyncToAnki(task)}
-                                        className="text-xs text-green-600 hover:underline dark:text-green-400"
-                                      >
-                                        {t('app.batch.syncAnki')}
-                                      </button>
-                                    );
-                                  })()}
-                                </>
-                              );
-                            })()}
-                            {task.status === 'waiting' && (
-                              <button
-                                onClick={() => handleBatchCancelTask(task.task_id)}
-                                className="text-xs text-red-400 hover:text-red-600"
-                              >
-                                {t('app.batch.cancel')}
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* 单文件模式 UI */}
-              {!batchMode && !batchId && (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* 左侧：文件上传 */}
-                <div className="lg:col-span-2 space-y-4">
-                  <FileUpload
-                    accept=".mp4,.mkv,.avi,.mov,.webm"
-                    onFileSelect={(f) => { setVideoFile(f); transcribedVideoName.current = null; setExtractedSource(''); setSubtitles([]); setSelectedIndices(new Set()); setRecommendations(null); }}
-                    selectedFile={videoFile}
-                    onClear={() => { setVideoFile(null); transcribedVideoName.current = null; setExtractedSource(''); setSubtitles([]); setSelectedIndices(new Set()); setRecommendations(null); }}
-                    label={t('app.step1.videoFile')}
-                    icon="video"
-                  />
-                  <FileUpload
-                    accept=".srt"
-                    onFileSelect={setSubtitleFile}
-                    selectedFile={subtitleFile}
-                    onClear={() => setSubtitleFile(null)}
-                    label={t('app.step1.subtitleFileOptional')}
-                    icon="text"
-                  />
-
-                  {/* Whisper 模型选择器 */}
-                  {showModelPicker && !isTranscribing && (
+                  {/* Whisper 模型选择器（有未配字幕的视频时显示） */}
+                  {videoFiles.some((_, i) => !subtitleFiles[i]) && !isTranscribing && (
                     <div className="border border-gray-200 rounded-lg p-4 bg-gray-50 space-y-3 dark:border-gray-600 dark:bg-gray-800">
-                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('app.step1.whisperModelHint')}</p>
+                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                        {t('app.step1.whisperModelHint')}
+                      </p>
                       <div className="space-y-2">
                         {WHISPER_MODELS.map(m => (
                           <label
@@ -1867,14 +1545,6 @@ function App() {
                             <span className="text-xs text-gray-400 dark:text-gray-500">{m.speed}</span>
                           </label>
                         ))}
-                      </div>
-                      <div className="flex gap-2">
-                        <Button variant="primary" size="sm" onClick={startTranscribe}>
-                          {t('app.step1.startTranscribe')}
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => setShowModelPicker(false)}>
-                          {t('app.step1.cancel')}
-                        </Button>
                       </div>
                     </div>
                   )}
@@ -1903,7 +1573,7 @@ function App() {
                       <span className="flex-1">{extractedSource}</span>
                       <button
                         className="text-xs text-gray-500 underline hover:text-gray-700 shrink-0 dark:text-gray-400 dark:hover:text-gray-200"
-                        onClick={() => { setExtractedSource(''); setShowModelPicker(true); }}
+                        onClick={() => { setExtractedSource(''); }}
                       >
                         {t('app.step1.useWhisperInstead')}
                       </button>
@@ -2088,28 +1758,26 @@ function App() {
                   )}
                 </div>
               </div>
-              )}
 
-              {/* 单文件模式：确认操作行 */}
-              {!batchMode && !batchId && (
+              {/* 确认操作行 */}
               <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
                 <div className="flex items-center gap-3 flex-wrap">
                   {/* 状态指示 */}
                   <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
-                    videoFile
+                    videoFiles.length > 0
                       ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
                       : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500'
                   }`}>
-                    {videoFile ? '✓' : '○'} {t('app.step1.videoReady')}
+                    {videoFiles.length > 0 ? `✓ ${videoFiles.length}` : '○'} {t('app.step1.videoReady')}
                   </span>
                   <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
                     subtitles.length > 0
                       ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                      : subtitleFile
+                      : subtitleFiles.some(f => f !== null)
                         ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
                         : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500'
                   }`}>
-                    {subtitles.length > 0 ? `✓ ${t('app.step1.subtitlesReady', { count: subtitles.length })}` : subtitleFile ? `○ ${t('app.step1.subtitlesPending')}` : `○ ${t('app.step1.subtitleLabel')}`}
+                    {subtitles.length > 0 ? `✓ ${t('app.step1.subtitlesReady', { count: subtitles.length })}` : subtitleFiles.some(f => f !== null) ? `○ ${t('app.step1.subtitlesPending')}` : `○ ${t('app.step1.subtitleLabel')}`}
                   </span>
 
                   <div className="flex-1" />
@@ -2117,7 +1785,7 @@ function App() {
                   {/* 操作按钮 */}
                   {subtitles.length > 0 ? (
                     <span className="text-sm text-green-600 dark:text-green-400 font-medium">{t('app.step1.subtitlesReadyGoNext')}</span>
-                  ) : subtitleFile ? (
+                  ) : subtitleFiles.some(f => f !== null) ? (
                     <Button
                       variant="primary"
                       size="sm"
@@ -2126,7 +1794,7 @@ function App() {
                     >
                       {t('app.step1.loadSubtitles')}
                     </Button>
-                  ) : videoFile ? (
+                  ) : videoFiles.length > 0 ? (
                     <Button
                       variant="primary"
                       size="sm"
@@ -2140,7 +1808,6 @@ function App() {
                   )}
                 </div>
               </div>
-              )}
             </CardContent>
           </Card>
 
@@ -2260,6 +1927,15 @@ function App() {
                       {t('app.step2.selectRecommendedOnly')}
                     </Button>
                   )}
+                  {filteredSubtitles.length > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={invertSelection}
+                    >
+                      {t('app.step2.invertSelection')}
+                    </Button>
+                  )}
                   {failedIndices.size > 0 && workflowPhase !== 'screening' && (
                     <Button
                       variant="ghost"
@@ -2271,6 +1947,16 @@ function App() {
                       {t('app.step2.retryFailed', { count: failedIndices.size })}
                     </Button>
                   )}
+                  <label className="flex items-center gap-1.5 cursor-pointer ml-2">
+                    <input
+                      type="checkbox"
+                      checked={correctText}
+                      onChange={e => setCorrectText(e.target.checked)}
+                      disabled={isRecommending}
+                      className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                    />
+                    <span className="text-xs text-gray-600 dark:text-gray-400">{t('app.step2.correctText')}</span>
+                  </label>
                   <Button
                     variant="ghost"
                     size="sm"
@@ -2291,12 +1977,12 @@ function App() {
                     <div>
                       <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">{t('app.step2.promptPreset')}</label>
                       <div className="flex gap-2">
-                        {(Object.keys(PRESET_TEMPLATES) as PresetKey[]).map((key) => (
+                        {(Object.keys(presetTemplates) as PresetKey[]).map((key) => (
                           <button
                             key={key}
                             onClick={() => {
                               setPromptPreset(key);
-                              setCustomPrompt(buildPresetPrompt(PRESET_TEMPLATES[key].prompt, sourceLanguage));
+                              setCustomPrompt(buildPresetPrompt(presetTemplates[key].prompt, sourceLanguage));
                             }}
                             disabled={isRecommending}
                             className={`px-3 py-1.5 rounded text-sm font-medium border transition-colors ${
@@ -2305,7 +1991,7 @@ function App() {
                                 : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-600'
                             }`}
                           >
-                            {PRESET_TEMPLATES[key].label}
+                            {presetTemplates[key].label}
                           </button>
                         ))}
                       </div>
@@ -2386,12 +2072,12 @@ function App() {
                         <div>
                           <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">{t('app.step3.promptPreset')}</label>
                           <div className="flex gap-2">
-                            {(Object.keys(ANNOTATION_TEMPLATES) as AnnotationPresetKey[]).map((key) => (
+                            {(Object.keys(annotationTemplates) as AnnotationPresetKey[]).map((key) => (
                               <button
                                 key={key}
                                 onClick={() => {
                                   setAnnotationPreset(key);
-                                  setAnnotationPrompt(buildAnnotationPrompt(ANNOTATION_TEMPLATES[key].prompt, sourceLanguage, targetLanguage));
+                                  setAnnotationPrompt(buildAnnotationPrompt(annotationTemplates[key].prompt, sourceLanguage, targetLanguage));
                                 }}
                                 className={`px-3 py-1.5 rounded text-sm font-medium border transition-colors ${
                                   annotationPreset === key
@@ -2399,7 +2085,7 @@ function App() {
                                     : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-600'
                                 }`}
                               >
-                                {ANNOTATION_TEMPLATES[key].label}
+                                {annotationTemplates[key].label}
                               </button>
                             ))}
                           </div>
@@ -2760,7 +2446,7 @@ function App() {
                       variant="primary"
                       className="w-full"
                       onClick={handleProcess}
-                      disabled={selectedIndices.size === 0 || !videoFile}
+                      disabled={selectedIndices.size === 0 || videoFiles.length === 0}
                     >
                       {t('app.step4.startProcessing', { count: selectedIndices.size })}
                     </Button>
@@ -2773,6 +2459,7 @@ function App() {
                     <ProcessingStatus
                       steps={processingSteps}
                       currentStepIndex={currentStep}
+                      message={processingMessage}
                     />
                     <ProgressBar
                       progress={(currentStep + 1) / PROCESSING_STEPS.length * 100}
@@ -2816,7 +2503,7 @@ function App() {
                         size="sm"
                         className="flex-1"
                         onClick={() => {
-                          const filename = videoFile?.name?.replace(/\.[^.]+$/, '') || 'ClipLingo';
+                          const filename = videoFiles[0]?.name?.replace(/\.[^.]+$/, '') || 'ClipLingo';
                           downloadString(generateCSVContent(result), `${filename}.csv`, 'text/csv');
                         }}
                       >
@@ -2828,7 +2515,7 @@ function App() {
                         size="sm"
                         className="flex-1"
                         onClick={() => {
-                          const filename = videoFile?.name?.replace(/\.[^.]+$/, '') || 'ClipLingo';
+                          const filename = videoFiles[0]?.name?.replace(/\.[^.]+$/, '') || 'ClipLingo';
                           downloadString(generateJSONContent(result), `${filename}.json`, 'application/json');
                         }}
                       >
@@ -2839,7 +2526,7 @@ function App() {
                     <div className="flex items-center gap-2">
                       <AnkiSyncButton
                         cards={result}
-                        deckName={videoFile?.name?.replace(/\.[^.]+$/, '') || 'ClipLingo'}
+                        deckName={videoFiles[0]?.name?.replace(/\.[^.]+$/, '') || 'ClipLingo'}
                         apiBase={API_BASE_URL}
                         cardStyles={Array.from(cardStyles)}
                         theme={cardTheme}

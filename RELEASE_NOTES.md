@@ -1,5 +1,45 @@
 # ClipLingo Release Notes
 
+## v1.4.0 (2026-05-11)
+
+**English**
+
+### Multi-Video Per-File Subtitle Support
+
+- Each video now gets its own independent subtitle (SRT) file — subtitles no longer merge into a single file
+- Videos without subtitles still auto-trigger Whisper transcription (unchanged)
+- Per-video `pre_processed` data correctly scoped, eliminating cross-video misalignment
+
+### Progress Display with Video Tracking
+
+- Processing progress now shows which video is being processed and at what step (e.g., `[Video 2/3] Cutting audio...`)
+- Backend progress messages streamed to the ProcessingStatus component in real time
+
+### UX Improvements
+
+- After uploading the first video, an "Add More" drop zone remains visible for easy batch addition
+- Empty subtitle files (0 bytes) are treated as "no subtitle" → backend falls back to Whisper
+
+**中文**
+
+### 多视频独立字幕
+
+- 每个视频现在拥有独立的字幕（SRT）文件——不再合并为单一文件
+- 无字幕的视频仍然自动触发 Whisper 转录（不变）
+- 每个视频的 `pre_processed` 数据独立作用域，消除跨视频错位
+
+### 进度条显示视频追踪
+
+- 处理进度现在显示当前处理到第几个视频的哪个步骤（例如：`[视频 2/3] 切割音频中...`）
+- 后端进度消息实时推送到 ProcessingStatus 组件
+
+### 用户体验优化
+
+- 上传第一个视频后，保留"继续添加"拖拽区域，方便批量添加
+- 空字幕文件（0 字节）视为"无字幕"→ 后端自动走 Whisper 转录
+
+---
+
 ## v1.3.2 (2026-05-10)
 
 **English**

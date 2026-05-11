@@ -83,7 +83,7 @@ def get_whisper() -> Optional[Any]:
 
 
 def load_model(model_name: str = "base") -> Optional[Any]:
-    """加载 faster-whisper WhisperModel"""
+    """加载 faster-whisper WhisperModel（下载失败自动走镜像重试）"""
     # 确保 huggingface token 文件存在，避免 OSError
     token_path = os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "token")
     if not os.path.exists(token_path):
@@ -101,7 +101,40 @@ def load_model(model_name: str = "base") -> Optional[Any]:
     faster_whisper = get_whisper()
     if faster_whisper is None:
         return None
-    try:
+
+    def _try_load():
         return faster_whisper.WhisperModel(model_name)
-    except Exception as e:
-        raise ClipLingoError(ErrorCode.WHISPER_MODEL_FAILED, str(e)[:200])
+
+    # 网络错误关键词（huggingface_hub / requests / urllib3 常见错误）
+    _NET_ERR = ("timeout", "connection", "unreachable", "refused", "reset",
+                "host", "network", "dns", "getaddrinfo", "name or service",
+                "tls", "ssl", "certificate", "eof", "broken pipe",
+                "nodata", "no data", "403", "502", "503")
+
+    def _is_network_error(err: Exception) -> bool:
+        msg = str(err).lower()
+        return any(kw in msg for kw in _NET_ERR)
+
+    try:
+        return _try_load()
+    except Exception as first_err:
+        if not _is_network_error(first_err):
+            raise ClipLingoError(ErrorCode.WHISPER_MODEL_FAILED, str(first_err)[:200])
+
+        # 网络错误 → 切换 HuggingFace 镜像重试
+        mirror = "https://hf-mirror.com"
+        logger.info(f"模型下载失败（{str(first_err)[:100]}），尝试镜像 {mirror}")
+        old_endpoint = os.environ.get("HF_ENDPOINT")
+        os.environ["HF_ENDPOINT"] = mirror
+        try:
+            return _try_load()
+        except Exception as second_err:
+            # 恢复旧值
+            if old_endpoint is not None:
+                os.environ["HF_ENDPOINT"] = old_endpoint
+            else:
+                os.environ.pop("HF_ENDPOINT", None)
+            raise ClipLingoError(ErrorCode.WHISPER_MODEL_FAILED,
+                                f"镜像重试也失败: {str(second_err)[:150]}")
+        if old_endpoint is None:
+            os.environ.pop("HF_ENDPOINT", None)

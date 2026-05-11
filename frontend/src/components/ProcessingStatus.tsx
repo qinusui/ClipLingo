@@ -11,11 +11,17 @@ interface Step {
 interface ProcessingStatusProps {
   steps: Step[];
   currentStepIndex: number;
+  message?: string;
 }
 
-export const ProcessingStatus = ({ steps, currentStepIndex }: ProcessingStatusProps) => {
+export const ProcessingStatus = ({ steps, currentStepIndex, message }: ProcessingStatusProps) => {
   return (
     <div className="space-y-3">
+      {message && (
+        <div className="text-sm text-gray-600 dark:text-gray-400 px-1">
+          {message}
+        </div>
+      )}
       {steps.map((step, index) => {
         const isActive = index === currentStepIndex;
         const isCompleted = index < currentStepIndex;

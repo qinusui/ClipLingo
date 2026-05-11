@@ -70,7 +70,7 @@ Requires Python 3.10+, ffmpeg (in PATH), and Node.js 18+.
 - **Two-Phase AI Workflow**: Screen first (quick learning value assessment) → then annotate (generate translations and notes based on purpose), both prompts fully customizable
 - **4 Card Themes**: Classic, Minimal Immersive, Netflix Stills, Dictionary — distinct visual styles, preview before generation
 - **2 Card Structures**: Sentence cards (screenshot + audio → original text + translation + notes) and Vocab cards (word → definition + example)
-- **Batch Processing**: Import multiple videos at once, assign subtitle files per video, auto-transcribe videos without subtitles
+- **Multi-Video Processing**: Upload multiple videos at once with per-video subtitle assignment; merge all into one deck or generate independent decks per video
 - **Rule-Based Filtering**: Duration range, learned word exclusion, keyword blacklist — quickly filter large subtitle sets
 - **Embedded Subtitle Extraction**: Auto-detect embedded soft subtitles in video files, no need to manually prepare SRT files
 
@@ -101,18 +101,23 @@ Adjust in the left "Subtitle Processing Config" panel:
 - **Padding Start**: Audio clipping head padding (default 200ms)
 - **Padding End**: Audio clipping tail padding (default 200ms)
 
-### Batch Processing
+### Multi-Video Processing
 
-Supports importing multiple videos at once. Each video can have its own subtitle file assigned. Videos without subtitles will automatically trigger Whisper transcription. Batch tasks support downloading all as ZIP, syncing to Anki individually, cancellation, and more.
+Upload multiple videos at once — each video can have its own subtitle file assigned, or let Whisper auto-transcribe videos without subtitles. Two output modes:
+
+- **Merge (default)** — all videos' cards combined into one Anki deck
+- **Independent** — each video gets its own deck
+
+After uploading the first video, an "Add More" drop zone stays visible for easy batch addition. Processing progress shows which video is currently being processed and at what step.
 
 ## Workflow
 
 The interface uses a four-step vertical layout:
 
-1. **Prepare**: Upload video and subtitle files (or auto-generate subtitles), the bottom confirmation bar shows readiness status
+1. **Prepare**: Upload one or more video files along with optional subtitle files (or auto-generate via Whisper). A video list table lets you assign subtitles per video, remove videos, or continue adding more. Choose merge mode (one combined deck) or independent mode (one deck per video).
 2. **AI Screen**: Set filter rules (duration/exclusion words), then click "AI Screen" — the table shows real-time recommendation/skip badges
 3. **AI Annotate**: Choose purpose (Grammar / Vocabulary), wait for annotation to complete; card structure and visual theme can be selected during this step
-4. **Preview & Generate**: Preview card effects, click "Generate" when satisfied, then sync to Anki or download .apkg deck
+4. **Preview & Generate**: Preview card effects, click "Generate" when satisfied. The progress bar shows which video is being processed at each step. Then sync to Anki or download .apkg deck
 
 **Two usage modes:**
 
