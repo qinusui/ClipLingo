@@ -89,6 +89,7 @@ from dotenv import load_dotenv
 from api.subtitles import router as subtitles_router
 from api.process import router as process_router
 from api.cards import router as cards_router
+from api.themes import router as themes_router
 
 load_dotenv()
 
@@ -174,10 +175,19 @@ if frontend_dist.exists():
     if assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="frontend-assets")
 
+# 挂载文档图片目录（用于卡片预览占位等）
+if getattr(sys, 'frozen', False):
+    docs_dir = BASE_DIR / "docs"
+else:
+    docs_dir = BASE_DIR.parent / "docs"
+if docs_dir.exists():
+    app.mount("/docs", StaticFiles(directory=str(docs_dir)), name="docs")
+
 # 注册路由
 app.include_router(subtitles_router, prefix="/api/subtitles", tags=["subtitles"])
 app.include_router(process_router, prefix="/api/process", tags=["process"])
 app.include_router(cards_router, prefix="/api/cards", tags=["cards"])
+app.include_router(themes_router, prefix="/api/themes", tags=["themes"])
 
 
 @app.post("/api/shutdown")

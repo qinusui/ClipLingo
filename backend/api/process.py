@@ -28,7 +28,8 @@ if getattr(sys, 'frozen', False):
 else:
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from main import run as process_cards
+from main import run as process_cards, generate_apkg
+from api.subtitles import _build_screening_prompt, _build_annotation_prompt
 
 from errors import translate_error, get_message, ErrorCode, ClipLingoError
 from utils.zip_export import generate_csv_with_media_paths
@@ -92,8 +93,14 @@ async def upload_and_process(
     padding_end_ms: int = Form(200),
     card_styles: Optional[str] = Form(None),
     theme: str = Form("default"),
+    theme_overrides: Optional[str] = Form(None),
     source_language: str = Form("en"),
     target_language: str = Form("zh"),
+    screen_prompt_criteria: Optional[str] = Form(None),
+    annotation_purpose: str = Form("grammar"),
+    annotation_prompt_criteria: Optional[str] = Form(None),
+    select_recommended_only: bool = Form(False),
+    stop_after_media: bool = Form(False),
 ):
     """
     上传视频和字幕文件，后台异步处理
@@ -101,6 +108,7 @@ async def upload_and_process(
     支持多个视频：
     - merge=True（默认）：所有视频合并到一个 Anki 牌组
     - merge=False：每个视频独立生成牌组
+    - stop_after_media=True：仅处理媒体不打包，状态变为 awaiting_styles，之后调 /generate-apkg 完成打包
 
     返回 task_id，前端通过 /progress/{task_id} 轮询进度
     """
@@ -170,6 +178,14 @@ async def upload_and_process(
         except json.JSONDecodeError:
             card_styles_list = [card_styles]
 
+    # 解析主题覆盖变量
+    theme_overrides_dict = None
+    if theme_overrides:
+        try:
+            theme_overrides_dict = json.loads(theme_overrides)
+        except json.JSONDecodeError:
+            pass
+
     # 初始化任务进度
     with task_store_lock:
         task_store[task_id] = {
@@ -202,7 +218,21 @@ async def upload_and_process(
                 task_store[task_id]["status"] = "processing"
                 task_store[task_id]["message"] = "开始处理..."
 
-            result = process_cards(
+            # 构建完整的 AI 提示词（前端传入的是 criteria 部分，后端补充返回格式）
+            screen_full_prompt = _build_screening_prompt(
+                custom_prompt=screen_prompt_criteria,
+                source_language=source_language,
+                target_language=target_language,
+            )
+            annotation_full_prompt = _build_annotation_prompt(
+                purpose=annotation_purpose,
+                source_language=source_language,
+                target_language=target_language,
+                custom_criteria=annotation_prompt_criteria,
+            )
+
+            # 构建 process_cards 参数
+            process_kwargs = dict(
                 video_paths=video_paths,
                 subtitle_paths=[p if p else None for p in subtitle_paths],
                 output_dir=output_dir,
@@ -216,9 +246,20 @@ async def upload_and_process(
                 source_language=source_language,
                 target_language=target_language,
                 padding_end_ms=padding_end_ms,
-                card_styles=card_styles_list,
-                theme=theme
+                screen_system_prompt=screen_full_prompt,
+                annotation_system_prompt=annotation_full_prompt,
+                select_recommended_only=select_recommended_only,
+                stop_after_media=stop_after_media,
             )
+            # 完整模式才传样式参数；两阶段模式在 Phase 2 才传
+            if not stop_after_media:
+                process_kwargs.update(dict(
+                    card_styles=card_styles_list,
+                    theme=theme,
+                    theme_overrides=theme_overrides_dict,
+                ))
+
+            result = process_cards(**process_kwargs)
 
             # 记录已学单词
             def _record_words(processed_list, video_name=""):
@@ -234,7 +275,55 @@ async def upload_and_process(
                 except Exception as e:
                     print(f"记录已学单词失败（不影响主流程）: {e}")
 
-            if merge:
+            if stop_after_media:
+                # Phase 1 完成：媒体已处理，等待用户选择样式
+                if merge:
+                    cards = _build_cards(result.get("processed", []))
+                    _record_words(result.get("processed", []), video_names[0] if len(video_names) == 1 else "")
+
+                    with task_store_lock:
+                        task_store[task_id].update({
+                            "status": "awaiting_styles",
+                            "step": 3,
+                            "total_steps": 5,
+                            "message": f"媒体处理完成，共 {result['cards_count']} 张卡片，请选择样式",
+                            "result": {
+                                "success": True,
+                                "message": f"媒体处理完成，共 {result['cards_count']} 张卡片",
+                                "task_id": task_id,
+                                "phase": "media_done",
+                                "merge": True,
+                                "cards_count": result["cards_count"],
+                                "video_name": ", ".join(video_names),
+                                "cards": [c.model_dump() for c in cards],
+                            }
+                        })
+                else:
+                    all_results = result.get("results", [])
+                    flat_cards = []
+                    for r in all_results:
+                        for p in r.get("processed", []):
+                            flat_cards.append(p)
+                    cards = _build_cards(flat_cards)
+
+                    with task_store_lock:
+                        task_store[task_id].update({
+                            "status": "awaiting_styles",
+                            "step": 3,
+                            "total_steps": 5,
+                            "message": f"媒体处理完成，{len(all_results)} 个视频共 {result['total_cards']} 张卡片，请选择样式",
+                            "result": {
+                                "success": True,
+                                "message": f"媒体处理完成，{len(all_results)} 个视频共 {result['total_cards']} 张卡片",
+                                "task_id": task_id,
+                                "phase": "media_done",
+                                "merge": False,
+                                "total_cards": result["total_cards"],
+                                "cards": [c.model_dump() for c in cards],
+                            }
+                        })
+
+            elif merge:
                 apkg_filename = Path(result["apkg_path"]).name
                 cards = _build_cards(result.get("processed", []))
                 _record_words(result.get("processed", []), video_names[0] if len(video_names) == 1 else "")
@@ -339,14 +428,144 @@ async def get_progress(task_id: str):
         "error_code": task.get("error_code")
     }
 
-    # 如果已完成，附带结果
-    if task["status"] == "completed" and task["result"]:
+    # 如果已完成或等待样式，附带结果
+    if (task["status"] == "completed" or task["status"] == "awaiting_styles" or task["status"] == "packing") and task.get("result"):
         response["result"] = task["result"]
     elif task["status"] == "error":
         response["error"] = task.get("error")
         response["error_code"] = task.get("error_code")
 
     return response
+
+
+@router.post("/generate-apkg")
+async def generate_apkg_endpoint(
+    task_id: str = Form(...),
+    card_styles: Optional[str] = Form(None),
+    theme: str = Form("default"),
+    theme_overrides: Optional[str] = Form(None),
+):
+    """
+    Phase 2: 从已处理的媒体文件生成 .apkg
+
+    需要先完成 Phase 1（status='awaiting_styles'）。
+    """
+    import json as _json
+
+    with task_store_lock:
+        task = task_store.get(task_id)
+
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if task.get("status") != "awaiting_styles":
+        raise HTTPException(status_code=400, detail="任务状态不正确，需要先完成媒体处理")
+
+    output_dir = task["output_dir"]
+
+    # 解析样式参数
+    card_styles_list = None
+    if card_styles:
+        try:
+            card_styles_list = _json.loads(card_styles)
+        except _json.JSONDecodeError:
+            card_styles_list = [card_styles]
+
+    theme_overrides_dict = None
+    if theme_overrides:
+        try:
+            theme_overrides_dict = _json.loads(theme_overrides)
+        except _json.JSONDecodeError:
+            pass
+
+    def progress_callback(step, total_steps, message, details=None):
+        with task_store_lock:
+            task_store[task_id].update({
+                "status": "packing",
+                "step": step,
+                "total_steps": total_steps,
+                "message": message,
+                "details": details,
+            })
+
+    def run_packing():
+        try:
+            result = generate_apkg(
+                output_dir=output_dir,
+                card_styles=card_styles_list,
+                theme=theme,
+                theme_overrides=theme_overrides_dict,
+                progress_callback=progress_callback,
+            )
+
+            is_merge = result.get("apkg_path") is not None  # merge=True 返回 apkg_path
+            if is_merge:
+                apkg_filename = Path(result["apkg_path"]).name
+                cards = _build_cards(result.get("processed", []))
+                with task_store_lock:
+                    task_store[task_id].update({
+                        "status": "completed",
+                        "step": 1,
+                        "total_steps": 2,
+                        "message": f"处理完成，生成了 {result['cards_count']} 张卡片",
+                        "result": {
+                            "success": True,
+                            "message": f"处理完成，生成了 {result['cards_count']} 张卡片",
+                            "task_id": task_id,
+                            "cards_count": result["cards_count"],
+                            "apkg_path": apkg_filename,
+                            "apkg_url": f"/output/{task_id}/{apkg_filename}",
+                            "cards": [c.model_dump() for c in cards],
+                        }
+                    })
+            else:
+                all_results = result.get("results", [])
+                flat_cards = []
+                apkg_list = []
+                for r in all_results:
+                    apkg_name = Path(r["apkg_path"]).name
+                    apkg_list.append({
+                        "video_name": r["video_name"],
+                        "cards_count": r["cards_count"],
+                        "apkg_path": apkg_name,
+                        "apkg_url": f"/output/{task_id}/{apkg_name}",
+                    })
+                    for p in r.get("processed", []):
+                        flat_cards.append(p)
+
+                cards = _build_cards(flat_cards)
+                with task_store_lock:
+                    task_store[task_id].update({
+                        "status": "completed",
+                        "step": 1,
+                        "total_steps": 2,
+                        "message": f"处理完成，{len(all_results)} 个视频共 {result['total_cards']} 张卡片",
+                        "result": {
+                            "success": True,
+                            "message": f"处理完成，{len(all_results)} 个视频共 {result['total_cards']} 张卡片",
+                            "task_id": task_id,
+                            "merge": False,
+                            "total_cards": result["total_cards"],
+                            "videos": apkg_list,
+                            "cards": [c.model_dump() for c in cards],
+                        }
+                    })
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            error_code, error_msg = translate_error(e)
+            with task_store_lock:
+                task_store[task_id].update({
+                    "status": "error",
+                    "message": f"打包失败: {error_msg}",
+                    "error": error_msg,
+                    "error_code": error_code.value,
+                })
+
+    thread = threading.Thread(target=run_packing, daemon=True)
+    thread.start()
+
+    return {"task_id": task_id, "status": "packing"}
 
 
 @router.post("/cleanup")

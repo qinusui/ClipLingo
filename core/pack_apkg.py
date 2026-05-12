@@ -28,6 +28,32 @@ def generate_model_id(name: str) -> int:
     return int.from_bytes(hash_val[:4], 'big') & 0x7FFFFFFF
 
 
+# ── CSS 变量覆盖层模板 ──────────────────────────────────────
+# 用户自定义 CSS 变量注入时，生成 :root + 选择器覆盖规则
+_VARIABLE_OVERRIDE_TEMPLATE = """\
+/* ── 用户自定义样式覆盖 ── */
+:root {{
+{variable_declarations}
+}}
+
+.card {{ background-color: var(--card-bg, inherit) !important; color: var(--card-text, inherit) !important; padding: var(--card-padding, inherit) !important; border-radius: var(--card-radius, inherit) !important; box-shadow: var(--card-shadow, none) !important; }}
+.original, .sentence, .subtitle-text {{ font-family: var(--font-sentence, inherit) !important; font-size: var(--font-size-sentence, inherit) !important; }}
+.translation {{ color: var(--translation-color, inherit) !important; font-family: var(--font-translation, inherit) !important; font-size: var(--font-size-translation, inherit) !important; }}
+.notes, .annotation {{ color: var(--annotation-color, inherit) !important; }}
+.container {{ border-color: var(--accent-color, inherit) !important; }}
+hr, hr#answer, .divider {{ border-color: var(--accent-color, inherit) !important; }}
+"""
+
+
+def _inject_theme_overrides(css: str, overrides: dict | None) -> str:
+    """将用户 CSS 变量注入到主题 CSS 前面"""
+    if not overrides:
+        return css
+    declarations = "\n".join(f"  {k}: {v};" for k, v in overrides.items())
+    override_css = _VARIABLE_OVERRIDE_TEMPLATE.format(variable_declarations=declarations)
+    return override_css + "\n" + css
+
+
 # ── 统一样式 ──────────────────────────────────────────────
 _CSS = """\
 .card {
@@ -780,6 +806,46 @@ _DICT_VOCAB_BACK = """\
 </div>"""
 
 
+def _load_custom_theme(name: str) -> dict | None:
+    """从磁盘加载自定义主题，返回与 THEMES 兼容的配置字典，不存在返回 None"""
+    import sys
+    import os
+
+    if getattr(sys, 'frozen', False):
+        writable = Path(os.environ.get('APPDATA', os.path.expanduser('~'))) / 'ClipLingo'
+    else:
+        # 项目根目录
+        writable = Path(__file__).parent.parent
+
+    d = writable / "themes" / "custom" / name
+    if not d.is_dir():
+        return None
+
+    meta_file = d / "theme.json"
+    front_file = d / "front.html"
+    back_file = d / "back.html"
+    css_file = d / "style.css"
+
+    if not (meta_file.exists() and front_file.exists() and back_file.exists() and css_file.exists()):
+        return None
+
+    import json
+    meta = json.loads(meta_file.read_text(encoding="utf-8"))
+    front_html = front_file.read_text(encoding="utf-8")
+    back_html = back_file.read_text(encoding="utf-8")
+    css = css_file.read_text(encoding="utf-8")
+
+    return {
+        "name": meta.get("label", name),
+        "css": css,
+        # 自定义主题的 sentence 和 vocab 使用同一套模板
+        # 用户通过 Anki 条件语法（{{#Word}} 等）自行区分卡片类型
+        "sentence": (front_html, back_html),
+        "vocab": (front_html, back_html),
+        "_custom": True,
+    }
+
+
 # ── 主题注册表 ──────────────────────────────────────────────
 THEMES = {
     "default": {
@@ -815,7 +881,8 @@ def create_deck(
     card_styles: list[str] = None,
     audio_dir: str = None,
     screenshot_dir: str = None,
-    theme: str = "default"
+    theme: str = "default",
+    theme_overrides: dict | None = None
 ) -> genanki.Deck:
     """
     创建 Anki 牌组
@@ -827,6 +894,7 @@ def create_deck(
         audio_dir: 音频目录
         screenshot_dir: 截图目录
         theme: 主题名称，可选 "default"、"minimal"、"netflix"、"dictionary"
+        theme_overrides: CSS 变量覆盖字典，如 {"--card-bg": "#1a1a2e"}
 
     Returns:
         genanki.Deck 对象
@@ -834,7 +902,8 @@ def create_deck(
     if card_styles is None:
         card_styles = ["sentence"]
 
-    theme_cfg = THEMES.get(theme, THEMES["default"])
+    theme_cfg = THEMES.get(theme) or _load_custom_theme(theme) or THEMES["default"]
+    css = _inject_theme_overrides(theme_cfg["css"], theme_overrides)
 
     # 根据选中的样式构建模板列表
     templates = []
@@ -853,7 +922,7 @@ def create_deck(
         generate_model_id("ClipLingo_" + deck_name + "_" + theme),
         f'ClipLingo-{theme_cfg["name"]}',
         templates,
-        css=theme_cfg["css"]
+        css=css
     )
 
     deck = genanki.Deck(
@@ -968,7 +1037,8 @@ def create_apkg(
     audio_dir: str,
     screenshot_dir: str,
     card_styles: list[str] = None,
-    theme: str = "default"
+    theme: str = "default",
+    theme_overrides: dict | None = None
 ) -> str:
     """
     创建完整的 .apkg 文件
@@ -981,6 +1051,7 @@ def create_apkg(
         screenshot_dir: 截图目录
         card_styles: 卡片样式列表，如 ["sentence"]、["vocab"]、["sentence", "vocab"]
         theme: 主题名称，可选 "default"、"minimal"、"netflix"、"dictionary"
+        theme_overrides: CSS 变量覆盖字典
 
     Returns:
         输出的 .apkg 文件路径
@@ -1004,7 +1075,7 @@ def create_apkg(
             definition=c.get("definition", "")
         ))
 
-    deck = create_deck(deck_name, card_data_list, card_styles=card_styles, theme=theme)
+    deck = create_deck(deck_name, card_data_list, card_styles=card_styles, theme=theme, theme_overrides=theme_overrides)
 
     # 收集媒体文件
     audio_files = []

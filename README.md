@@ -12,33 +12,27 @@ Automatically convert video + subtitle files into Anki decks.
 
 ## Why ClipLingo
 
-|           | ClipLingo                                         | subs2srs           | LanguageReactor |
-| --------- | ------------------------------------------------- | ------------------ | --------------- |
-| **Runtime**  | Local, data never leaves your machine                    | Local, but relies on Anki ecosystem | Browser extension, always online      |
-| **Privacy**    | All files and API keys processed locally                       | Local                 | Video watch data uploaded to servers    |
-| **AI** | Optional, supports any OpenAI-compatible API (DeepSeek / OpenAI / Ollama, etc.) | No built-in AI             | Built-in, but tied to their online service     |
-| **Language Pair**   | Any pair, freely switchable (Whisper supports ~100 languages, AI translation works with any language pair) | Mainly English              | Mainly English           |
-| **Learning Curve**  | Download and use, full GUI                                          | Requires familiarity with Anki + CLI  | Browser extension, easy       |
-| **Output**  | AnkiConnect direct sync + .apkg export                         | Requires Anki import       | Online review only         |
-| **Subtitle Sources**  | External SRT + embedded soft subs + Whisper transcription                       | External ASS/SRT         | Online video subtitles only         |
+|                      | ClipLingo                                                                                                  | subs2srs                             | LanguageReactor                            |
+| -------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------ | ------------------------------------------ |
+| **Runtime**          | Local, data never leaves your machine                                                                      | Local, but relies on Anki ecosystem  | Browser extension, always online           |
+| **Privacy**          | All files and API keys processed locally                                                                   | Local                                | Video watch data uploaded to servers       |
+| **AI**               | Optional, supports any OpenAI-compatible API (DeepSeek / OpenAI / Ollama, etc.)                            | No built-in AI                       | Built-in, but tied to their online service |
+| **Language Pair**    | Any pair, freely switchable (Whisper supports ~100 languages, AI translation works with any language pair) | Mainly English                       | Mainly English                             |
+| **Learning Curve**   | Download and use, full GUI                                                                                 | Requires familiarity with Anki + CLI | Browser extension, easy                    |
+| **Output**           | AnkiConnect direct sync + .apkg export                                                                     | Requires Anki import                 | Online review only                         |
+| **Subtitle Sources** | External SRT + embedded soft subs + Whisper transcription                                                  | External ASS/SRT                     | Online video subtitles only                |
 
 In short: **subs2srs is powerful but has a steep learning curve; LanguageReactor is convenient but your data isn't yours. ClipLingo balances ease of use and privacy, with AI features entirely optional.**
 
 ## Download & Install
 
-**Installer (Recommended):**
+**Installer (Windows,Recommended):**
 
-- `ClipLingo_Setup.exe` — Full installer with built-in Whisper transcription (~700MB)
+- `ClipLingo_Setup.exe` — Full installer with built-in Whisper transcription 
 
 After installation, run `ClipLingo.exe` and open `http://localhost:8000` in your browser.
 
 > **Note**: Install to a path with only English characters. Paths containing Chinese (or other non-ASCII) characters may cause the program to fail to start.
-
-**Portable:**
-
-- `ClipLingo_portable.zip` — Extract and run (~700MB)
-
-Run `ClipLingo.exe` and open `http://localhost:8000` in your browser.
 
 **Docker:**
 
@@ -68,7 +62,8 @@ Requires Python 3.10+, ffmpeg (in PATH), and Node.js 18+.
 - **Bidirectional Learned Words Sync**: Extracts learned words from ClipLingo decks in Anki, auto-skip during AI screening; also supports local SQLite tracking
 - **Whisper Transcription**: Built-in faster-whisper, transcribe video directly to subtitles (English/Japanese/Korean and more), cancellable, with timeout protection
 - **Two-Phase AI Workflow**: Screen first (quick learning value assessment) → then annotate (generate translations and notes based on purpose), both prompts fully customizable
-- **4 Card Themes**: Classic, Minimal Immersive, Netflix Stills, Dictionary — distinct visual styles, preview before generation
+- **4 Built-in + Custom Card Themes**: Classic, Minimal Immersive, Netflix Stills, Dictionary — plus import your own HTML/CSS themes via ZIP
+- **CSS Variable Editor**: Fine-tune built-in theme colors, fonts, spacing, and shadows with live preview; changes persist per theme and carry into .apkg generation and AnkiConnect sync
 - **2 Card Structures**: Sentence cards (screenshot + audio → original text + translation + notes) and Vocab cards (word → definition + example)
 - **Multi-Video Processing**: Upload multiple videos at once with per-video subtitle assignment; merge all into one deck or generate independent decks per video
 - **Rule-Based Filtering**: Duration range, learned word exclusion, keyword blacklist — quickly filter large subtitle sets
@@ -116,8 +111,8 @@ The interface uses a four-step vertical layout:
 
 1. **Prepare**: Upload one or more video files along with optional subtitle files (or auto-generate via Whisper). A video list table lets you assign subtitles per video, remove videos, or continue adding more. Choose merge mode (one combined deck) or independent mode (one deck per video).
 2. **AI Screen**: Set filter rules (duration/exclusion words), then click "AI Screen" — the table shows real-time recommendation/skip badges
-3. **AI Annotate**: Choose purpose (Grammar / Vocabulary), wait for annotation to complete; card structure and visual theme can be selected during this step
-4. **Preview & Generate**: Preview card effects, click "Generate" when satisfied. The progress bar shows which video is being processed at each step. Then sync to Anki or download .apkg deck
+3. **AI Annotate**: Choose purpose (Grammar / Vocabulary), wait for annotation to complete
+4. **Style & Preview**: Choose card structure (sentence/vocab), visual theme (built-in or custom), fine-tune CSS variables for built-in themes, then preview card effects. Click "Generate" when satisfied. Then sync to Anki or download .apkg deck
 
 **Two usage modes:**
 
@@ -144,7 +139,7 @@ AI Screen (fast, returns only include/skip + reason)
     ↓ User confirms selection
 Choose purpose: Grammar or Vocabulary
     ↓ AI generates translations and annotations based on purpose
-Choose card structure + visual theme
+Choose card structure + visual theme + optional CSS tweaks
     ↓ Real-time preview
 Generate → Sync to Anki / Download .apkg
 ```
@@ -153,28 +148,44 @@ Generate → Sync to Anki / Download .apkg
 
 ### Card Structures
 
-| Structure | Front | Back |
-|---|---|---|
-| **Sentence Card** | Screenshot + Audio (tests listening) | Original text + Translation + Notes |
-| **Vocab Card** | Word (large display) | Definition + Example (with screenshot and audio) |
+| Structure         | Front                                | Back                                             |
+| ----------------- | ------------------------------------ | ------------------------------------------------ |
+| **Sentence Card** | Screenshot + Audio (tests listening) | Original text + Translation + Notes              |
+| **Vocab Card**    | Word (large display)                 | Definition + Example (with screenshot and audio) |
 
 Both structures can be selected simultaneously to generate two sets of cards at once.
 
 ### Visual Themes
 
-| Theme | Style |
-|---|---|
-| **Classic** | Clean and simple, blue tones, suitable for daily study |
-| **Minimal Immersive** | Serif fonts, paper texture, warm tones |
-| **Netflix** | Dark background, red accents, cinematic feel |
-| **Dictionary** | Parchment background, gold accents, professional dictionary layout |
+| Theme                 | Style                                                              |
+| --------------------- | ------------------------------------------------------------------ |
+| **Classic**           | Clean and simple, blue tones, suitable for daily study             |
+| **Minimal Immersive** | Serif fonts, paper texture, warm tones                             |
+| **Netflix**           | Dark background, red accents, cinematic feel                       |
+| **Dictionary**        | Parchment background, gold accents, professional dictionary layout |
+| **Custom (import)**   | Any HTML/CSS template imported via ZIP, fully custom look          |
 
-Themes and structures can be freely combined (2×4 = 8 combinations), with real-time preview before generation.
+Themes and structures can be freely combined, with real-time preview before generation.
+
+### Theme Customization
+
+**CSS Variable Editor** (built-in themes only): Tweak individual visual properties — background color, text color, accent color, fonts, font sizes, padding, border radius, and shadow — with instant live preview. Changes are saved per theme and automatically applied to .apkg generation and AnkiConnect sync.
+
+**Custom Theme Import** (ZIP packages): Import fully custom card templates for complete control over HTML/CSS. A valid theme ZIP contains:
+
+```
+my-theme.zip
+├── theme.json    # { "name": "my-theme", "label": "My Theme", "version": 1 }
+├── front.html    # Front template (use {{sentence}}, {{translation}}, etc.)
+├── back.html     # Back template
+└── style.css     # Stylesheet
+```
+
+Template variables use lowercase for convenience (`{{sentence}}`, `{{translation}}`, `{{annotation}}`, `{{audio}}`, `{{screenshot}}`, `{{word}}`, `{{definition}}`) — these are automatically mapped to Anki's standard field names. Anki conditional syntax (`{{#word}}...{{/word}}`, `{{^screenshot}}...{{/screenshot}}`) is fully supported.
 
 ## Example
 
 ![Card Format Example](docs/example.png)
-
 
 ## License
 

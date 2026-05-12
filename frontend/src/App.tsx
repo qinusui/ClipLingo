@@ -9,9 +9,13 @@ import { FileUpload } from './components/FileUpload';
 import { SubtitleTable } from './components/SubtitleTable';
 import { ProcessingStatus } from './components/ProcessingStatus';
 import { CardPreview } from './components/CardPreview';
+import { StyleThemeSelector } from './components/StyleThemeSelector';
+import { CssVariableEditor } from './components/CssVariableEditor';
+import { ThemeImporter } from './components/ThemeImporter';
 import { AnkiSyncButton } from './components/AnkiSyncButton';
-import { SubtitleItem, ProcessedCard, AIRecommendation, CardStyle, CardTheme, WorkflowPhase, AnnotationPurpose } from './types';
+import { SubtitleItem, ProcessedCard, AIRecommendation, CardStyle, CardTheme, ThemeOverrides, WorkflowPhase, AnnotationPurpose } from './types';
 import { subtitleAPI, processAPI, API_BASE_URL } from './services/api';
+import { themeAPI, type ThemeListItem } from './services/themeAPI';
 import { pingAnki, fetchWordsFromAnki } from './services/ankiConnect';
 
 import { useTheme } from './hooks/useTheme';
@@ -93,6 +97,15 @@ const PROCESSING_STEPS: ProcessingStep[] = [
   { id: 'pack', label: i18n.t('app.processing.packAnkiDeck'), status: 'pending' },
 ];
 
+const MEDIA_PROCESSING_STEPS: ProcessingStep[] = [
+  { id: 'parse', label: i18n.t('app.processing.parseSubtitles'), status: 'pending' },
+  { id: 'media', label: i18n.t('app.processing.cutAudioScreenshots'), status: 'pending' },
+];
+
+const PACK_PROCESSING_STEPS: ProcessingStep[] = [
+  { id: 'pack', label: i18n.t('app.processing.packAnkiDeck'), status: 'pending' },
+];
+
 const LANGUAGE_CODES = ['zh', 'en', 'ja', 'ko', 'fr', 'de', 'es', 'it', 'pt', 'ru', 'ar', 'th', 'vi', 'nl', 'sv', 'pl', 'tr', 'hi', 'id'] as const;
 
 function getLangName(code: string): string {
@@ -162,7 +175,6 @@ function App() {
   const [subtitles, setSubtitles] = useState<SubtitleItem[]>([]);
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
 
-  const [isProcessing, setIsProcessing] = useState(false);
   const [processingSteps, setProcessingSteps] = useState(PROCESSING_STEPS);
   const [currentStep, setCurrentStep] = useState(-1);
   const [processingMessage, setProcessingMessage] = useState('');
@@ -171,6 +183,10 @@ function App() {
   const [apkgPath, setApkgPath] = useState<string | null>(null);
   const [apkgUrl, setApkgUrl] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
+
+  // 两阶段处理流程
+  const [processingPhase, setProcessingPhase] = useState<'idle' | 'media_processing' | 'awaiting_styles' | 'packing' | 'completed'>('idle');
+  const [processedCards, setProcessedCards] = useState<ProcessedCard[] | null>(null);
 
   const [previewIndex, setPreviewIndex] = useState(0);
   const [showHelp, setShowHelp] = useState(false);
@@ -208,16 +224,15 @@ function App() {
   const [annotationPrompt, setAnnotationPrompt] = useState<string>(buildAnnotationPrompt(t('app.prompt.grammarAnnotateBody'), savedConfig?.sourceLanguage || 'en', savedConfig?.targetLanguage || 'zh'));
   const [annotationPreset, setAnnotationPreset] = useState<AnnotationPresetKey>('grammar');
   const [showAnnotationPromptEditor, setShowAnnotationPromptEditor] = useState(false);
+  const [selectRecommendedOnly, setSelectRecommendedOnly] = useState(false);
   const [cardStyles, setCardStyles] = useState<Set<CardStyle>>(new Set(['sentence']));
   const [cardTheme, setCardTheme] = useState<CardTheme>('default');
-  const dummyPreviewCard = useMemo<ProcessedCard>(() => ({
-    sentence: 'You\'re watching a great movie scene here.',
-    translation: '',
-    notes: '',
-    word: 'vocabulary',
-    definition: '',
-    start_sec: 0, end_sec: 0,
-  }), []);
+  const [themeOverrides, setThemeOverrides] = useState<Record<string, ThemeOverrides>>({});
+  const [editingStyles, setEditingStyles] = useState(false);
+  const [pendingOverrides, setPendingOverrides] = useState<ThemeOverrides>({});
+  const [hasUnsavedOverrides, setHasUnsavedOverrides] = useState(false);
+  const [customThemes, setCustomThemes] = useState<ThemeListItem[]>([]);
+  const [showThemeImporter, setShowThemeImporter] = useState(false);
   const [showPromptEditor, setShowPromptEditor] = useState(false);
   const recommendBatchSize = 30;
   const [ffmpegInstalled, setFFmpegInstalled] = useState<boolean | null>(null);
@@ -423,6 +438,83 @@ function App() {
     };
   }, [isTranscribing, transcribeStep]);
 
+  // ── 主题覆盖：加载 + 实时预览 ──
+  useEffect(() => {
+    themeAPI.loadOverrides(cardTheme).then(ov => {
+      setThemeOverrides(prev => ({ ...prev, [cardTheme]: ov }));
+      setPendingOverrides(ov);
+      setHasUnsavedOverrides(false);
+    });
+  }, [cardTheme]);
+
+  // 加载自定义主题列表
+  useEffect(() => {
+    themeAPI.listThemes().then(themes => {
+      setCustomThemes(themes.filter(t => !t.isBuiltin));
+    });
+  }, []);
+
+  const refreshCustomThemes = async () => {
+    const themes = await themeAPI.listThemes();
+    setCustomThemes(themes.filter(t => !t.isBuiltin));
+  };
+
+  const handleImportTheme = async (zipFile: File) => {
+    await themeAPI.importZip(zipFile);
+    await refreshCustomThemes();
+  };
+
+  const handleDeleteTheme = async (name: string) => {
+    await themeAPI.deleteTheme(name);
+    // 如果正选中被删除的主题，切回 default
+    if (cardTheme === name) setCardTheme('default');
+    await refreshCustomThemes();
+  };
+
+  useEffect(() => {
+    const vars = themeOverrides[cardTheme] || {};
+    const root = document.documentElement;
+    Object.entries(vars).forEach(([k, v]) => {
+      if (v) root.style.setProperty(k, v);
+      else root.style.removeProperty(k);
+    });
+  }, [cardTheme, themeOverrides]);
+
+  // 切换编辑器
+  const handleToggleEditor = () => {
+    if (editingStyles) {
+      setEditingStyles(false);
+    } else {
+      setPendingOverrides(themeOverrides[cardTheme] || {});
+      setHasUnsavedOverrides(false);
+      setEditingStyles(true);
+    }
+  };
+
+  const handleOverrideChange = (overrides: ThemeOverrides) => {
+    setPendingOverrides(overrides);
+    setHasUnsavedOverrides(true);
+    // 即时预览：把变量应用到 document
+    const root = document.documentElement;
+    Object.entries(overrides).forEach(([k, v]) => {
+      if (v) root.style.setProperty(k, v);
+      else root.style.removeProperty(k);
+    });
+  };
+
+  const handleSaveOverrides = async () => {
+    await themeAPI.saveOverrides(cardTheme, pendingOverrides);
+    setThemeOverrides(prev => ({ ...prev, [cardTheme]: { ...pendingOverrides } }));
+    setHasUnsavedOverrides(false);
+  };
+
+  const handleResetOverrides = () => {
+    setPendingOverrides({});
+    setHasUnsavedOverrides(true);
+    const root = document.documentElement;
+    Object.keys(themeOverrides[cardTheme] || {}).forEach(k => root.style.removeProperty(k));
+  };
+
   // 测试 AI 连接
   const handleTestConnection = async () => {
     if (!apiKey) return;
@@ -529,7 +621,7 @@ function App() {
               const s = Math.floor(sec % 60);
               return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
             };
-            setTranscribeMessage(t('app.error.transcribing', { transcribed: fmtTime(wp.transcribed_sec), duration: fmtTime(wp.duration_sec), pct: `${pct}%` }));
+            setTranscribeMessage(t('app.error.transcribing', { transcribed: fmtTime(wp.transcribed_sec), duration: fmtTime(wp.duration_sec), pct: `${pct}` }));
           } else {
             setTranscribeMessage(progress.message);
           }
@@ -632,6 +724,7 @@ function App() {
 
     setWorkflowPhase('screening');
     setIsRecommending(true);
+    setSelectRecommendedOnly(false);
     setRecommendations(new Map());
     setFailedIndices(new Set());
     setRecommendBatch(0);
@@ -800,6 +893,7 @@ function App() {
   // 仅选推荐
   const selectRecommended = () => {
     if (!recommendations) return;
+    setSelectRecommendedOnly(true);
     const recommendedIndices = Array.from(recommendations.values())
       .filter(r => r.include && !r.reason?.startsWith(t('app.error.processingFailed')))
       .map(r => r.index);
@@ -876,180 +970,152 @@ function App() {
     }
   };
 
-  // 处理选中的字幕
-  const handleProcess = async () => {
-    if (videoFiles.length === 0) {
-      alert(t('app.error.needUploadVideo'));
-      return;
-    }
-    if (subtitles.length === 0) {
-      alert(t('app.error.needLoadSubtitles'));
-      return;
-    }
-    if (selectedIndices.size === 0) {
-      alert(t('app.error.needSelectOne'));
-      return;
-    }
-    if (isRecommending || workflowPhase === 'screening' || workflowPhase === 'annotating') {
-      return;
-    }
+  // ── Phase 1: 处理媒体（不打包） ──
+  const handleProcessMedia = async () => {
+    if (videoFiles.length === 0) { alert(t('app.error.needUploadVideo')); return; }
+    if (subtitles.length === 0) { alert(t('app.error.needLoadSubtitles')); return; }
+    if (selectedIndices.size === 0) { alert(t('app.error.needSelectOne')); return; }
+    if (isRecommending || workflowPhase === 'screening' || workflowPhase === 'annotating') return;
 
-    setIsProcessing(true);
-    setProcessingSteps(PROCESSING_STEPS.map(s => ({ ...s, status: 'pending' as const })));
+    setProcessingPhase('media_processing');
+    setProcessingSteps(MEDIA_PROCESSING_STEPS.map(s => ({ ...s, status: 'pending' as const })));
     setCurrentStep(0);
     setProcessingMessage('');
 
-    // ── 构建预处理数据（全量，保持视频顺序） ──
+    // 构建预处理数据（同 handleProcess）
     const allPreProcessed = subtitles
       .filter(s => selectedIndices.has(s.index))
       .map(s => {
         const rec = recommendations?.get(s.index);
         return {
-          index: s.index,
-          text: rec?.corrected_text || s.text,
-          translation: rec?.translation || '',
-          notes: rec?.notes || '',
-          reason: rec?.reason || '',
-          word: rec?.word || '',
-          definition: rec?.definition || ''
+          index: s.index, text: rec?.corrected_text || s.text,
+          translation: rec?.translation || '', notes: rec?.notes || '',
+          reason: rec?.reason || '', word: rec?.word || '', definition: rec?.definition || ''
         };
       });
 
-    // ── 按视频分组：生成独立 SRT + 独立 pre_processed ──
+    // 按视频分组
     const perVideoSRTFiles: (File | null)[] = [];
     const perVideoPreProcessed: any[][] = videoFiles.map(() => []);
-    let ppIdx = 0; // 在 allPreProcessed 中的游标
-
+    let ppIdx = 0;
     let globalPos = 0;
     for (let vi = 0; vi < videoFiles.length; vi++) {
       const count = subtitleCounts[vi] || 0;
       const videoSubs = subtitles.slice(globalPos, globalPos + count);
       globalPos += count;
-
-      // 本视频被选中的字幕
       const selectedSubs = videoSubs.filter(s => selectedIndices.has(s.index));
-
       if (selectedSubs.length === 0) {
-        // 无选中字幕 → 发送空文件，后端走 Whisper 转录
         perVideoSRTFiles.push(new File([], `_auto_transcribe_${vi}.srt`, { type: 'text/plain' }));
         perVideoPreProcessed[vi] = [];
       } else {
-        // 生成该视频的 SRT（重新编号 1..N）
         let srtContent = '';
         const videoPP: any[] = [];
         selectedSubs.forEach((sub, newIdx) => {
-          srtContent += `${newIdx + 1}\n`;
-          srtContent += `${formatSRTTime(sub.start_sec)} --> ${formatSRTTime(sub.end_sec)}\n`;
-          srtContent += `${sub.text}\n\n`;
-
-          // 从 allPreProcessed 按序取对应条目
-          if (ppIdx < allPreProcessed.length) {
-            videoPP.push(allPreProcessed[ppIdx]);
-            ppIdx++;
-          }
+          srtContent += `${newIdx + 1}\n${formatSRTTime(sub.start_sec)} --> ${formatSRTTime(sub.end_sec)}\n${sub.text}\n\n`;
+          if (ppIdx < allPreProcessed.length) { videoPP.push(allPreProcessed[ppIdx]); ppIdx++; }
         });
-
         perVideoSRTFiles.push(new File([srtContent], `video_${vi}_selected.srt`, { type: 'text/plain' }));
         perVideoPreProcessed[vi] = videoPP;
       }
     }
 
     try {
-      // 发送多 SRT + 嵌套的 pre_processed
-      const { task_id } = await processAPI.uploadAndProcess(
-        videoFiles,
-        perVideoSRTFiles,
-        mergeMode,
-        minDuration,
-        apiKey || undefined,
-        perVideoPreProcessed,
-        apiBase || undefined,
-        modelName || undefined,
-        paddingStartMs,
-        paddingEndMs,
-        Array.from(cardStyles),
-        cardTheme,
-        sourceLanguage,
-        targetLanguage
+      const { task_id } = await processAPI.uploadAndProcessMedia(
+        videoFiles, perVideoSRTFiles, mergeMode, minDuration,
+        apiKey || undefined, perVideoPreProcessed, apiBase || undefined, modelName || undefined,
+        paddingStartMs, paddingEndMs, sourceLanguage, targetLanguage,
+        customPrompt || undefined, annotationPurpose || undefined, annotationPrompt || undefined,
+        selectRecommendedOnly
       );
-
       setTaskId(task_id);
 
-      // 轮询进度
       const pollInterval = setInterval(async () => {
         try {
           const progress = await processAPI.getProgress(task_id);
-
           setProcessingMessage(progress.message || '');
-
-          // 更新步骤状态（后端 step 1-4 映射到前端 index 0-2）
-          // 后端: 1=解析, 2=AI注释(跳过), 3=媒体切割, 4=打包
-          // 前端: 0=解析, 1=媒体切割, 2=打包
-          const stepIndex = progress.step <= 1 ? 0 : progress.step - 2;
+          // 映射后端 step 到前端 MEDIA_PROCESSING_STEPS (2 steps)
+          const stepIndex = progress.step <= 1 ? 0 : Math.min(1, progress.step - 2);
           setCurrentStep(stepIndex);
           setProcessingSteps(steps => {
             const newSteps = [...steps];
             for (let i = 0; i < newSteps.length; i++) {
-              if (i < stepIndex) {
-                newSteps[i] = { ...newSteps[i], status: 'completed' as const };
-              } else if (i === stepIndex) {
-                newSteps[i] = { ...newSteps[i], status: 'processing' as const };
-              }
+              if (i < stepIndex) newSteps[i] = { ...newSteps[i], status: 'completed' as const };
+              else if (i === stepIndex) newSteps[i] = { ...newSteps[i], status: 'processing' as const };
             }
             return newSteps;
           });
 
+          if (progress.status === 'awaiting_styles' && progress.result?.cards) {
+            clearInterval(pollInterval);
+            setProcessedCards(progress.result.cards);
+            setPreviewIndex(0);
+            setProcessingPhase('awaiting_styles');
+            setProcessingMessage(progress.message || '');
+            setProcessingSteps(s => s.map(step => ({ ...step, status: 'completed' as const })));
+          }
+          if (progress.status === 'error') {
+            clearInterval(pollInterval);
+            const errMsg = getFriendlyMessage(progress.error_code, progress.error || undefined);
+            alert(t('app.error.processingFailedPoll', { error: errMsg }));
+            setProcessingSteps(s => s.map(step => step.status === 'processing' ? { ...step, status: 'error' as const, error: errMsg } : step));
+            setProcessingPhase('idle');
+          }
+        } catch (e) { /* polling error, ignore */ }
+      }, 1000);
+    } catch (error) {
+      console.error('媒体处理失败:', error);
+      alert(t('app.error.processingFailedPoll', { error: getApiErrorMessage(error) }));
+      setProcessingPhase('idle');
+    }
+  };
+
+  // ── Phase 2: 生成牌组 ──
+  const handleGenerateApkg = async () => {
+    if (!taskId) return;
+    setProcessingPhase('packing');
+    setProcessingSteps(PACK_PROCESSING_STEPS.map(s => ({ ...s, status: 'pending' as const })));
+    setCurrentStep(0);
+    setProcessingMessage(t('app.processing.packingApkg'));
+
+    try {
+      await processAPI.generateApkg(
+        taskId,
+        Array.from(cardStyles),
+        cardTheme,
+        JSON.stringify(themeOverrides[cardTheme] || {}),
+      );
+
+      const pollInterval = setInterval(async () => {
+        try {
+          const progress = await processAPI.getProgress(taskId);
+          setProcessingMessage(progress.message || '');
+          setCurrentStep(progress.step);
+
           if (progress.status === 'completed' && progress.result) {
             clearInterval(pollInterval);
-            setIsProcessing(false);
+            setProcessingPhase('completed');
             setProcessingSteps(s => s.map(step => ({ ...step, status: 'completed' as const })));
-
             const r = progress.result;
             setApkgPath(r.apkg_path);
             setApkgUrl(r.apkg_url || null);
-
             if (r.cards && r.cards.length > 0) {
               setResult(r.cards);
               setPreviewIndex(0);
-            } else {
-              alert(t('app.error.processingDone', { count: r.cards_count }));
             }
           }
-
           if (progress.status === 'error') {
             clearInterval(pollInterval);
-            setIsProcessing(false);
             const errMsg = getFriendlyMessage(progress.error_code, progress.error || undefined);
             alert(t('app.error.processingFailedPoll', { error: errMsg }));
-            setProcessingSteps(s =>
-              s.map((step) =>
-                step.status === 'processing'
-                  ? { ...step, status: 'error' as const, error: errMsg }
-                  : step
-              )
-            );
+            setProcessingSteps(s => s.map(step => step.status === 'processing' ? { ...step, status: 'error' as const, error: errMsg } : step));
+            setProcessingPhase('awaiting_styles');
           }
-        } catch (e) {
-          // 轮询失败不中断
-        }
+        } catch (e) { /* ignore */ }
       }, 1000);
-
-      // 保存 interval ID 以便清理
-      (window as any).__pollInterval = pollInterval;
-
     } catch (error) {
-      console.error('处理失败:', error);
-      const errorMessage = getApiErrorMessage(error);
-      alert(t('app.error.processingFailedPoll', { error: errorMessage }));
-
-      setProcessingSteps(s =>
-        s.map((step) =>
-          step.status === 'processing'
-            ? { ...step, status: 'error' as const, error: errorMessage }
-            : step
-        )
-      );
-      setIsProcessing(false);
+      console.error('打包失败:', error);
+      alert(t('app.error.processingFailedPoll', { error: getApiErrorMessage(error) }));
+      setProcessingPhase('awaiting_styles');
     }
   };
 
@@ -1332,6 +1398,8 @@ function App() {
                       <li>{t('app.help.advancedTheme1')}</li>
                       <li>{t('app.help.advancedTheme2')}</li>
                       <li>{t('app.help.advancedTheme3')}</li>
+                      <li>{t('app.help.advancedTheme4')}</li>
+                      <li>{t('app.help.advancedTheme5')}</li>
                     </ul>
                   </div>
                   <div>
@@ -1399,7 +1467,7 @@ function App() {
               )}
 
               {/* 合并/独立模式切换 */}
-              {!isProcessing && (
+              {processingPhase === "idle" && (
                 <div className="flex items-center gap-2 mb-4">
                   <span className="text-xs text-gray-500 dark:text-gray-400">{t('app.step1.outputMode') || '输出模式'}:</span>
                   <button
@@ -1612,8 +1680,41 @@ function App() {
                   </div>
                 </div>
 
-                {/* 右侧：AI 配置 */}
-                <div className="space-y-4">
+                {/* 右侧：内容语言 + AI 配置 */}
+                <div className="space-y-6">
+                  {/* 内容语言（始终可见） */}
+                  <div className="space-y-3">
+                    <div className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('app.step1.languageSettings')}</div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">{t('app.step1.sourceLanguage')}</label>
+                        <select
+                          value={sourceLanguage}
+                          onChange={(e) => setSourceLanguage(e.target.value)}
+                          className="w-full px-2 py-1.5 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                        >
+                          {LANGUAGE_CODES.map(code => (
+                            <option key={code} value={code}>{t(`app.lang.${code}`)}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">{t('app.step1.targetLanguage')}</label>
+                        <select
+                          value={targetLanguage}
+                          onChange={(e) => setTargetLanguage(e.target.value)}
+                          className="w-full px-2 py-1.5 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                        >
+                          {LANGUAGE_CODES.map(code => (
+                            <option key={code} value={code}>{t(`app.lang.${code}`)}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* AI 配置 */}
+                  <div className="space-y-4">
                   <div className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('app.step1.aiConfigTitle')}</div>
                   {/* 折叠时显示摘要 */}
                   {!configExpanded && (
@@ -1622,7 +1723,7 @@ function App() {
                       onClick={() => setConfigExpanded(true)}
                     >
                       <span className="text-sm text-gray-600 truncate dark:text-gray-400">
-                        {getLangName(sourceLanguage)} → {getLangName(targetLanguage)} / {modelName}
+                        {modelName}
                         {apiKey ? ` / ***${apiKey.slice(-4)}` : ` / ${t('app.step1.noApiKey')}`}
                       </span>
                       <ChevronDown className="w-4 h-4 text-gray-400 shrink-0 dark:text-gray-500" />
@@ -1660,32 +1761,6 @@ function App() {
                           placeholder={t('app.step1.apiKeyPlaceholder')}
                           className="w-full px-2 py-1.5 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                         />
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">{t('app.step1.sourceLanguage')}</label>
-                          <select
-                            value={sourceLanguage}
-                            onChange={(e) => setSourceLanguage(e.target.value)}
-                            className="w-full px-2 py-1.5 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                          >
-                            {LANGUAGE_CODES.map(code => (
-                              <option key={code} value={code}>{t(`app.lang.${code}`)}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">{t('app.step1.targetLanguage')}</label>
-                          <select
-                            value={targetLanguage}
-                            onChange={(e) => setTargetLanguage(e.target.value)}
-                            className="w-full px-2 py-1.5 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                          >
-                            {LANGUAGE_CODES.map(code => (
-                              <option key={code} value={code}>{t(`app.lang.${code}`)}</option>
-                            ))}
-                          </select>
-                        </div>
                       </div>
                       <div className="flex gap-2">
                         <Button
@@ -1757,6 +1832,7 @@ function App() {
                     </div>
                   )}
                 </div>
+                </div>
               </div>
 
               {/* 确认操作行 */}
@@ -1790,7 +1866,7 @@ function App() {
                       variant="primary"
                       size="sm"
                       onClick={handleLoadSubtitles}
-                      disabled={isProcessing}
+                      disabled={processingPhase !== "idle"}
                     >
                       {t('app.step1.loadSubtitles')}
                     </Button>
@@ -1799,7 +1875,7 @@ function App() {
                       variant="primary"
                       size="sm"
                       onClick={handleTranscribe}
-                      disabled={isProcessing || isTranscribing || checkingEmbedded}
+                      disabled={processingPhase !== "idle" || isTranscribing || checkingEmbedded}
                     >
                       {checkingEmbedded ? t('app.step1.checkingEmbedded') : isTranscribing ? t('app.step1.transcribingStatus') : t('app.step1.generateSubtitles')}
                     </Button>
@@ -1811,14 +1887,14 @@ function App() {
             </CardContent>
           </Card>
 
-          {/* Step 2 · AI 筛选 */}
+          {/* Step 2 · 筛选字幕 */}
           {subtitles.length > 0 && (
             <div ref={step2Ref}>
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <span className="bg-primary-100 text-primary-700 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold dark:bg-primary-900/40 dark:text-primary-300">2</span>
-                  {t('app.step2.title')}
+                  {apiKey ? t('app.step2.title') : t('app.step2.titleNoAI')}
                   <span className="text-sm font-normal text-gray-500 ml-2 dark:text-gray-400">
                     ({t('app.step2.countInfo', { selected: filteredSubtitles.filter(s => selectedIndices.has(s.index)).length, total: filteredSubtitles.length, grandTotal: subtitles.length })})
                   </span>
@@ -1896,19 +1972,21 @@ function App() {
 
                 {/* 工具栏 */}
                 <div className="flex items-center gap-2 mb-4">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={handleAIScreen}
-                    disabled={isRecommending || isProcessing || workflowPhase === 'annotating'}
-                  >
-                    <Sparkles className="w-4 h-4 mr-2" />
-                    {workflowPhase === 'screening'
-                      ? recommendTotalBatches > 0
-                        ? t('app.step2.aiScreeningBatch', { batch: recommendBatch, total: recommendTotalBatches })
-                        : t('app.step2.aiScreening')
-                      : t('app.step2.aiScreenButton')}
-                  </Button>
+                  {!!apiKey && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={handleAIScreen}
+                      disabled={isRecommending || processingPhase !== "idle" || workflowPhase === 'annotating'}
+                    >
+                      <Sparkles className="w-4 h-4 mr-2" />
+                      {workflowPhase === 'screening'
+                        ? recommendTotalBatches > 0
+                          ? t('app.step2.aiScreeningBatch', { batch: recommendBatch, total: recommendTotalBatches })
+                          : t('app.step2.aiScreening')
+                        : t('app.step2.aiScreenButton')}
+                    </Button>
+                  )}
                   {workflowPhase === 'screening' && (
                     <Button
                       variant="ghost"
@@ -1947,28 +2025,32 @@ function App() {
                       {t('app.step2.retryFailed', { count: failedIndices.size })}
                     </Button>
                   )}
-                  <label className="flex items-center gap-1.5 cursor-pointer ml-2">
-                    <input
-                      type="checkbox"
-                      checked={correctText}
-                      onChange={e => setCorrectText(e.target.checked)}
-                      disabled={isRecommending}
-                      className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                    />
-                    <span className="text-xs text-gray-600 dark:text-gray-400">{t('app.step2.correctText')}</span>
-                  </label>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setShowPromptEditor(!showPromptEditor)}
-                  >
-                    {showPromptEditor ? (
-                      <ChevronUp className="w-4 h-4 mr-1" />
-                    ) : (
-                      <ChevronDown className="w-4 h-4 mr-1" />
-                    )}
-                    {t('app.step2.promptToggle')}
-                  </Button>
+                  {!!apiKey && (
+                    <label className="flex items-center gap-1.5 cursor-pointer ml-2">
+                      <input
+                        type="checkbox"
+                        checked={correctText}
+                        onChange={e => setCorrectText(e.target.checked)}
+                        disabled={isRecommending}
+                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      />
+                      <span className="text-xs text-gray-600 dark:text-gray-400">{t('app.step2.correctText')}</span>
+                    </label>
+                  )}
+                  {!!apiKey && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowPromptEditor(!showPromptEditor)}
+                    >
+                      {showPromptEditor ? (
+                        <ChevronUp className="w-4 h-4 mr-1" />
+                      ) : (
+                        <ChevronDown className="w-4 h-4 mr-1" />
+                      )}
+                      {t('app.step2.promptToggle')}
+                    </Button>
+                  )}
                 </div>
 
                 {/* 提示词编辑器（仅筛选标准） */}
@@ -2037,8 +2119,8 @@ function App() {
             </div>
           )}
 
-          {/* Step 3 · AI 注释（有已选字幕即可用，不依赖 AI 筛选） */}
-          {selectedIndices.size > 0 && (
+          {/* Step 3 · AI 注释（需要 API Key） */}
+          {selectedIndices.size > 0 && !!apiKey && (
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -2106,7 +2188,7 @@ function App() {
                   <div className="grid grid-cols-2 gap-4">
                     <button
                       onClick={() => handleAIAnnotate('grammar')}
-                      disabled={isProcessing}
+                      disabled={processingPhase !== "idle"}
                       className="p-4 rounded-lg border-2 text-left transition-all border-gray-200 hover:border-primary-300 cursor-pointer dark:border-gray-700 dark:hover:border-primary-600"
                     >
                       <div className="flex items-center gap-2 mb-1">
@@ -2119,7 +2201,7 @@ function App() {
                     </button>
                     <button
                       onClick={() => handleAIAnnotate('vocab')}
-                      disabled={isProcessing}
+                      disabled={processingPhase !== "idle"}
                       className="p-4 rounded-lg border-2 text-left transition-all border-gray-200 hover:border-primary-300 cursor-pointer dark:border-gray-700 dark:hover:border-primary-600"
                     >
                       <div className="flex items-center gap-2 mb-1">
@@ -2134,111 +2216,32 @@ function App() {
                   </>
                 )}
 
-                {/* 3b: 注释进行中 + 主题/结构选择（等待时可配置） */}
+                {/* 3b: 注释进行中 */}
                 {workflowPhase === 'annotating' && (
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    {/* 左：进度 */}
-                    <div>
-                      <div className="flex items-center gap-2 mb-3">
-                        <div className="animate-spin w-4 h-4 border-2 border-primary-500 border-t-transparent rounded-full" />
-                        <span className="text-sm text-gray-600 dark:text-gray-400">
-                          {t('app.step3.annotating', {
-                            mode: annotationPurpose === 'grammar' ? t('app.step3.modeGrammar') : t('app.step3.modeVocab'),
-                            batch: annotateBatch,
-                            total: annotateTotalBatches,
-                          })}
-                        </span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => abortControllerRef.current?.abort()}
-                        >
-                          {t('app.step3.stop')}
-                        </Button>
-                      </div>
-                      {annotateTotalBatches > 0 && (
-                        <ProgressBar progress={(annotateBatch / annotateTotalBatches) * 100} />
-                      )}
-                      <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">
-                        {t('app.step3.annotatingHint')}
-                      </p>
+                  <div>
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="animate-spin w-4 h-4 border-2 border-primary-500 border-t-transparent rounded-full" />
+                      <span className="text-sm text-gray-600 dark:text-gray-400">
+                        {t('app.step3.annotating', {
+                          mode: annotationPurpose === 'grammar' ? t('app.step3.modeGrammar') : t('app.step3.modeVocab'),
+                          batch: annotateBatch,
+                          total: annotateTotalBatches,
+                        })}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => abortControllerRef.current?.abort()}
+                      >
+                        {t('app.step3.stop')}
+                      </Button>
                     </div>
-                    {/* 右：主题/结构选择（等待时配置） */}
-                    <div className="space-y-3">
-                      <div className="p-3 bg-gray-50 rounded-lg dark:bg-gray-800">
-                        <label className="block text-xs font-medium text-gray-600 mb-1.5 dark:text-gray-400">{t('app.step3.cardStructure')}</label>
-                        <div className="flex gap-2">
-                          {([
-                            { key: 'sentence' as CardStyle, label: t('app.cardStyle.sentence.label'), desc: t('app.cardStyle.sentence.desc') },
-                            { key: 'vocab' as CardStyle, label: t('app.cardStyle.vocab.label'), desc: t('app.cardStyle.vocab.desc') },
-                          ]).map(({ key, label, desc }) => (
-                            <label
-                              key={key}
-                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border cursor-pointer transition-colors ${
-                                cardStyles.has(key)
-                                  ? 'bg-primary-500 text-white border-primary-500'
-                                  : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-600'
-                              }`}
-                              title={desc}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={cardStyles.has(key)}
-                                onChange={() => {
-                                  setCardStyles(prev => {
-                                    const next = new Set(prev);
-                                    if (next.has(key)) {
-                                      if (next.size > 1) next.delete(key);
-                                    } else {
-                                      next.add(key);
-                                    }
-                                    return next;
-                                  });
-                                }}
-                                className="sr-only"
-                              />
-                              {label}
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="p-3 bg-gray-50 rounded-lg dark:bg-gray-800">
-                        <label className="block text-xs font-medium text-gray-600 mb-1.5 dark:text-gray-400">{t('app.step3.visualTheme')}</label>
-                        <div className="grid grid-cols-4 gap-1.5">
-                          {([
-                            { key: 'default' as CardTheme, label: t('app.theme.default.label'), desc: t('app.theme.default.desc') },
-                            { key: 'minimal' as CardTheme, label: t('app.theme.minimal.label'), desc: t('app.theme.minimal.desc') },
-                            { key: 'netflix' as CardTheme, label: t('app.theme.netflix.label'), desc: t('app.theme.netflix.desc') },
-                            { key: 'dictionary' as CardTheme, label: t('app.theme.dictionary.label'), desc: t('app.theme.dictionary.desc') },
-                          ]).map(({ key, label, desc }) => (
-                            <button
-                              key={key}
-                              onClick={() => setCardTheme(key)}
-                              title={desc}
-                              className={`px-2 py-1.5 rounded text-xs font-medium border transition-colors ${
-                                cardTheme === key
-                                  ? 'bg-primary-500 text-white border-primary-500'
-                                  : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-600'
-                              }`}
-                            >
-                              {label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                    {/* 等待时预览空模板，切换样式即时可见 */}
-                    <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                      <p className="text-xs text-gray-400 mb-2 dark:text-gray-500">{t('app.step3.previewHint')}</p>
-                      <CardPreview
-                        cards={[dummyPreviewCard]}
-                        cardStyles={Array.from(cardStyles)}
-                        currentIndex={0}
-                        onPrevious={() => {}}
-                        onNext={() => {}}
-                        theme={cardTheme}
-                      />
-                    </div>
+                    {annotateTotalBatches > 0 && (
+                      <ProgressBar progress={(annotateBatch / annotateTotalBatches) * 100} />
+                    )}
+                    <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">
+                      {t('app.step3.annotatingHint')}
+                    </p>
                   </div>
                 )}
 
@@ -2266,70 +2269,6 @@ function App() {
                       </Button>
                     </div>
 
-                    {/* 主题/结构选择 */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="p-3 bg-gray-50 rounded-lg dark:bg-gray-800">
-                        <label className="block text-xs font-medium text-gray-600 mb-1.5 dark:text-gray-400">{t('app.step3.cardStructure')}</label>
-                        <div className="flex gap-2">
-                          {([
-                            { key: 'sentence' as CardStyle, label: t('app.cardStyle.sentence.label'), desc: t('app.cardStyle.sentence.desc') },
-                            { key: 'vocab' as CardStyle, label: t('app.cardStyle.vocab.label'), desc: t('app.cardStyle.vocab.desc') },
-                          ]).map(({ key, label, desc }) => (
-                            <label
-                              key={key}
-                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border cursor-pointer transition-colors ${
-                                cardStyles.has(key)
-                                  ? 'bg-primary-500 text-white border-primary-500'
-                                  : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-600'
-                              }`}
-                              title={desc}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={cardStyles.has(key)}
-                                onChange={() => {
-                                  setCardStyles(prev => {
-                                    const next = new Set(prev);
-                                    if (next.has(key)) {
-                                      if (next.size > 1) next.delete(key);
-                                    } else {
-                                      next.add(key);
-                                    }
-                                    return next;
-                                  });
-                                }}
-                                className="sr-only"
-                              />
-                              {label}
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="p-3 bg-gray-50 rounded-lg dark:bg-gray-800">
-                        <label className="block text-xs font-medium text-gray-600 mb-1.5 dark:text-gray-400">{t('app.step3.visualTheme')}</label>
-                        <div className="grid grid-cols-4 gap-1.5">
-                          {([
-                            { key: 'default' as CardTheme, label: t('app.theme.default.label'), desc: t('app.theme.default.desc') },
-                            { key: 'minimal' as CardTheme, label: t('app.theme.minimal.label'), desc: t('app.theme.minimal.desc') },
-                            { key: 'netflix' as CardTheme, label: t('app.theme.netflix.label'), desc: t('app.theme.netflix.desc') },
-                            { key: 'dictionary' as CardTheme, label: t('app.theme.dictionary.label'), desc: t('app.theme.dictionary.desc') },
-                          ]).map(({ key, label, desc }) => (
-                            <button
-                              key={key}
-                              onClick={() => setCardTheme(key)}
-                              title={desc}
-                              className={`px-2 py-1.5 rounded text-xs font-medium border transition-colors ${
-                                cardTheme === key
-                                  ? 'bg-primary-500 text-white border-primary-500'
-                                  : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-600'
-                              }`}
-                            >
-                              {label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
                   </div>
                 )}
 
@@ -2337,8 +2276,8 @@ function App() {
             </Card>
           )}
 
-          {/* Step 4 · 预览、生成与下载 */}
-          {((selectedIndices.size > 0 && !['screening', 'annotating'].includes(workflowPhase)) || isProcessing || (result && result.length > 0)) && (
+          {/* Step 4 · 样式选择与处理 */}
+          {((workflowPhase === 'annotated' || (workflowPhase === 'idle' && !recommendations && subtitles.length > 0)) || processingPhase !== 'idle' || (result && result.length > 0)) && (
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -2347,178 +2286,120 @@ function App() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                {/* 注释后预览 + 处理按钮 */}
-                {(workflowPhase === 'annotated' || (workflowPhase === 'idle' && !recommendations)) && !isProcessing && !(result && result.length > 0) && (
+                {/* 4a: 处理媒体按钮 */}
+                {processingPhase === 'idle' && !(result && result.length > 0) && (
                   <div className="space-y-4">
-                    {recommendations && (
-                      <CardPreview
-                        cards={Array.from(recommendations.values())
-                          .filter(r => r.include && r.translation && selectedIndices.has(r.index))
-                          .map(r => ({
-                            sentence: subtitles.find(s => s.index === r.index)?.text || '',
-                            translation: r.translation || '',
-                            notes: r.notes || '',
-                            word: r.word,
-                            definition: r.definition,
-                            start_sec: subtitles.find(s => s.index === r.index)?.start_sec || 0,
-                            end_sec: subtitles.find(s => s.index === r.index)?.end_sec || 0,
-                          }))}
-                        cardStyles={Array.from(cardStyles)}
-                        theme={cardTheme}
-                        currentIndex={previewIndex}
-                        onPrevious={() => setPreviewIndex(Math.max(0, previewIndex - 1))}
-                        onNext={() => {
-                          const maxIndex = Array.from(recommendations.values())
-                            .filter(r => r.include && r.translation && selectedIndices.has(r.index)).length - 1;
-                          setPreviewIndex(Math.min(maxIndex, previewIndex + 1));
-                        }}
-                      />
-                    )}
                     {!recommendations && (
-                      <>
-                        <div className="p-3 bg-gray-50 rounded-lg dark:bg-gray-800">
-                          <label className="block text-xs font-medium text-gray-600 mb-1.5 dark:text-gray-400">{t('app.step3.cardStructure')}</label>
-                          <div className="flex gap-2">
-                            {([
-                              { key: 'sentence' as CardStyle, label: t('app.cardStyle.sentence.label'), desc: t('app.cardStyle.sentence.desc') },
-                              { key: 'vocab' as CardStyle, label: t('app.cardStyle.vocab.label'), desc: t('app.cardStyle.vocab.desc') },
-                            ]).map(({ key, label, desc }) => (
-                              <label
-                                key={key}
-                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border cursor-pointer transition-colors ${
-                                  cardStyles.has(key)
-                                    ? 'bg-primary-500 text-white border-primary-500'
-                                    : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-600'
-                                }`}
-                                title={desc}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={cardStyles.has(key)}
-                                  onChange={() => {
-                                    setCardStyles(prev => {
-                                      const next = new Set(prev);
-                                      if (next.has(key)) {
-                                        if (next.size > 1) next.delete(key);
-                                      } else {
-                                        next.add(key);
-                                      }
-                                      return next;
-                                    });
-                                  }}
-                                  className="sr-only"
-                                />
-                                {label}
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="p-3 bg-gray-50 rounded-lg dark:bg-gray-800">
-                          <label className="block text-xs font-medium text-gray-600 mb-1.5 dark:text-gray-400">{t('app.step3.visualTheme')}</label>
-                          <div className="grid grid-cols-4 gap-1.5">
-                            {([
-                              { key: 'default' as CardTheme, label: t('app.theme.default.label'), desc: t('app.theme.default.desc') },
-                              { key: 'minimal' as CardTheme, label: t('app.theme.minimal.label'), desc: t('app.theme.minimal.desc') },
-                              { key: 'netflix' as CardTheme, label: t('app.theme.netflix.label'), desc: t('app.theme.netflix.desc') },
-                              { key: 'dictionary' as CardTheme, label: t('app.theme.dictionary.label'), desc: t('app.theme.dictionary.desc') },
-                            ]).map(({ key, label, desc }) => (
-                              <button
-                                key={key}
-                                onClick={() => setCardTheme(key)}
-                                title={desc}
-                                className={`px-2 py-1.5 rounded text-xs font-medium border transition-colors ${
-                                  cardTheme === key
-                                    ? 'bg-primary-500 text-white border-primary-500'
-                                    : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-600'
-                                }`}
-                              >
-                                {label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                        <p className="text-xs text-gray-400 dark:text-gray-500">
-                          {t('app.step4.noAiNote')}
-                        </p>
-                      </>
+                      <p className="text-xs text-gray-400 dark:text-gray-500">{t('app.step4.noAiNote')}</p>
                     )}
                     <Button
                       variant="primary"
                       className="w-full"
-                      onClick={handleProcess}
+                      onClick={handleProcessMedia}
                       disabled={selectedIndices.size === 0 || videoFiles.length === 0}
                     >
-                      {t('app.step4.startProcessing', { count: selectedIndices.size })}
+                      {t('app.step4.processMedia', { count: selectedIndices.size })}
                     </Button>
                   </div>
                 )}
 
-                {/* 处理进度 */}
-                {isProcessing && (
+                {/* 4b: 媒体处理进度 */}
+                {processingPhase === 'media_processing' && (
                   <div className="space-y-3">
                     <ProcessingStatus
                       steps={processingSteps}
                       currentStepIndex={currentStep}
                       message={processingMessage}
                     />
-                    <ProgressBar
-                      progress={(currentStep + 1) / PROCESSING_STEPS.length * 100}
-                    />
+                    <ProgressBar progress={(currentStep + 1) / MEDIA_PROCESSING_STEPS.length * 100} />
                   </div>
                 )}
 
-                {/* 处理完成：卡片预览 + 下载 */}
-                {result && result.length > 0 && (
+                {/* 4c: 样式预览（真实截图）+ 生成牌组按钮 */}
+                {processingPhase === 'awaiting_styles' && (
+                  <div className="space-y-4">
+                    <StyleThemeSelector cardStyles={cardStyles} setCardStyles={setCardStyles} cardTheme={cardTheme} setCardTheme={setCardTheme} showEditor={editingStyles} onToggleEditor={handleToggleEditor} customThemes={customThemes} onImportClick={() => setShowThemeImporter(true)} onDeleteTheme={handleDeleteTheme} />
+                    {editingStyles && (
+                      <CssVariableEditor
+                        theme={cardTheme}
+                        overrides={pendingOverrides}
+                        onChange={handleOverrideChange}
+                        onSave={handleSaveOverrides}
+                        onReset={handleResetOverrides}
+                        onClose={handleToggleEditor}
+                        hasUnsaved={hasUnsavedOverrides}
+                      />
+                    )}
+                    {processedCards && processedCards.length > 0 && (
+                      <CardPreview
+                        cards={processedCards}
+                        cardStyles={Array.from(cardStyles)}
+                        theme={cardTheme}
+                        themeOverrides={themeOverrides[cardTheme]}
+                        currentIndex={previewIndex}
+                        onPrevious={() => setPreviewIndex(Math.max(0, previewIndex - 1))}
+                        onNext={() => setPreviewIndex(Math.min(processedCards.length - 1, previewIndex + 1))}
+                      />
+                    )}
+                    <Button
+                      variant="primary"
+                      className="w-full"
+                      onClick={handleGenerateApkg}
+                    >
+                      {t('app.step4.generateApkg', { count: processedCards?.length || 0 })}
+                    </Button>
+                  </div>
+                )}
+
+                {/* 4d: 打包进度 */}
+                {processingPhase === 'packing' && (
+                  <div className="space-y-3">
+                    <ProcessingStatus
+                      steps={processingSteps}
+                      currentStepIndex={currentStep}
+                      message={processingMessage}
+                    />
+                    <ProgressBar progress={(currentStep + 1) / PACK_PROCESSING_STEPS.length * 100} />
+                  </div>
+                )}
+
+                {/* 4e: 处理完成：卡片预览 + 下载（两阶段模式） */}
+                {processingPhase === 'completed' && result && result.length > 0 && (
                   <div className="space-y-4">
                     <CardPreview
                       cards={result}
                       cardStyles={Array.from(cardStyles)}
                       theme={cardTheme}
+                      themeOverrides={themeOverrides[cardTheme]}
                       currentIndex={previewIndex}
                       onPrevious={() => setPreviewIndex(Math.max(0, previewIndex - 1))}
                       onNext={() => setPreviewIndex(Math.min(result.length - 1, previewIndex + 1))}
                     />
-                    <Button
-                      variant="primary"
-                      className="w-full"
-                      onClick={handleDownload}
-                    >
+                    <Button variant="primary" className="w-full" onClick={handleDownload}>
                       <Download className="w-4 h-4 mr-2" />
                       {t('app.step4.downloadApkg')}
                     </Button>
                     {taskId && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="w-full"
-                        onClick={() => downloadUrl(processAPI.exportZipUrl(taskId), `ClipLingo_${taskId}_Media.zip`)}
-                      >
+                      <Button variant="outline" size="sm" className="w-full"
+                        onClick={() => downloadUrl(processAPI.exportZipUrl(taskId), `ClipLingo_${taskId}_Media.zip`)}>
                         <FolderOpen className="w-4 h-4 mr-1" />
                         {t('app.step4.exportMediaZip')}
                       </Button>
                     )}
                     <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="flex-1"
+                      <Button variant="outline" size="sm" className="flex-1"
                         onClick={() => {
                           const filename = videoFiles[0]?.name?.replace(/\.[^.]+$/, '') || 'ClipLingo';
                           downloadString(generateCSVContent(result), `${filename}.csv`, 'text/csv');
-                        }}
-                      >
+                        }}>
                         <FileSpreadsheet className="w-4 h-4 mr-1" />
                         {t('app.step4.exportCsv')}
                       </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="flex-1"
+                      <Button variant="outline" size="sm" className="flex-1"
                         onClick={() => {
                           const filename = videoFiles[0]?.name?.replace(/\.[^.]+$/, '') || 'ClipLingo';
                           downloadString(generateJSONContent(result), `${filename}.json`, 'application/json');
-                        }}
-                      >
+                        }}>
                         <FileJson className="w-4 h-4 mr-1" />
                         {t('app.step4.exportJson')}
                       </Button>
@@ -2530,6 +2411,7 @@ function App() {
                         apiBase={API_BASE_URL}
                         cardStyles={Array.from(cardStyles)}
                         theme={cardTheme}
+                        themeOverrides={themeOverrides[cardTheme]}
                       />
                     </div>
                   </div>
@@ -2539,6 +2421,14 @@ function App() {
           )}
         </div>
       </main>
+
+      {/* 自定义主题导入对话框 */}
+      {showThemeImporter && (
+        <ThemeImporter
+          onImport={handleImportTheme}
+          onClose={() => setShowThemeImporter(false)}
+        />
+      )}
     </div>
   );
 }

@@ -189,6 +189,87 @@ def process_subtitles_with_ai(subtitles: list, api_key: str = None,
     return processed
 
 
+def process_subtitles_two_phase(
+    subtitles: list,
+    api_key: str,
+    screen_system_prompt: str,
+    annotation_system_prompt: str,
+    api_base: str = None,
+    model_name: str = None,
+    source_language: str = "en",
+    target_language: str = "zh",
+) -> list[dict]:
+    """
+    两阶段 AI 处理：先筛选（include/skip），再注释（translation + notes）
+
+    与前端两阶段工作流对应：
+    - 阶段 1：AI 筛选 — 判断每条字幕是否值得学习
+    - 阶段 2：AI 注释 — 为筛选通过的条目生成翻译和注释（include 始终为 true）
+
+    Args:
+        subtitles: Subtitle 对象列表
+        api_key: API Key
+        screen_system_prompt: 筛选阶段的完整 system prompt
+        annotation_system_prompt: 注释阶段的完整 system prompt
+        api_base: API 地址
+        model_name: 模型名称
+        source_language: 源语言代码
+        target_language: 目标语言代码
+
+    Returns:
+        两阶段处理后的完整数据列表（仅包含筛选通过 + 注释成功的条目）
+    """
+    processor = AIProcessor(api_key, api_base, model_name, source_language, target_language)
+
+    subtitle_dicts = [
+        {"index": s.index, "start_sec": s.start_sec, "end_sec": s.end_sec, "text": s.text}
+        for s in subtitles
+    ]
+
+    # ── 阶段 1：AI 筛选 ──
+    print(f"开始 AI 筛选，共 {len(subtitle_dicts)} 条字幕...")
+    screen_results = processor.process_batch(subtitle_dicts, system_prompt=screen_system_prompt)
+
+    included: list[tuple] = []
+    skipped = 0
+    for sub, result in zip(subtitle_dicts, screen_results):
+        if isinstance(result, dict) and result.get("include"):
+            included.append((sub, result))
+        else:
+            skipped += 1
+            reason = result.get("reason", "") if isinstance(result, dict) else "无结果"
+            print(f"  [筛选跳过] 第 {sub['index']} 条: {reason}")
+
+    if skipped:
+        print(f"AI 筛选完成，保留 {len(included)} 条，跳过 {skipped} 条")
+
+    if not included:
+        return []
+
+    # ── 阶段 2：AI 注释 ──
+    included_subs = [s for s, _ in included]
+    print(f"开始 AI 注释，共 {len(included_subs)} 条字幕...")
+    annotate_results = processor.process_batch(included_subs, system_prompt=annotation_system_prompt)
+
+    processed = []
+    for (sub, screen_result), annotate_result in zip(included, annotate_results):
+        if isinstance(annotate_result, dict) and not annotate_result.get("skip"):
+            processed.append({
+                "index": sub["index"],
+                "start_sec": sub["start_sec"],
+                "end_sec": sub["end_sec"],
+                "text": annotate_result.get("corrected_text") or sub["text"],
+                "translation": annotate_result.get("translation", ""),
+                "notes": annotate_result.get("notes", ""),
+                "word": annotate_result.get("word", ""),
+                "definition": annotate_result.get("definition", ""),
+                "reason": screen_result.get("reason", "") if isinstance(screen_result, dict) else "",
+            })
+
+    print(f"AI 两阶段处理完成，共 {len(processed)} 条")
+    return processed
+
+
 if __name__ == '__main__':
     # 测试
     import os

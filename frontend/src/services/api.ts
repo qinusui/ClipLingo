@@ -344,8 +344,13 @@ export const processAPI = {
     paddingEndMs?: number,
     cardStyles?: string[],
     theme?: string,
+    themeOverrides?: string,
     sourceLanguage?: string,
-    targetLanguage?: string
+    targetLanguage?: string,
+    screenPrompt?: string,
+    annotationPurpose?: string,
+    annotationPrompt?: string,
+    selectRecommendedOnly?: boolean
   ): Promise<{ task_id: string; status: string; merge: boolean }> => {
     const formData = new FormData();
     videoFiles.forEach(f => formData.append('videos', f));
@@ -376,11 +381,26 @@ export const processAPI = {
     if (theme) {
       formData.append('theme', theme);
     }
+    if (themeOverrides) {
+      formData.append('theme_overrides', themeOverrides);
+    }
     if (sourceLanguage) {
       formData.append('source_language', sourceLanguage);
     }
     if (targetLanguage) {
       formData.append('target_language', targetLanguage);
+    }
+    if (screenPrompt) {
+      formData.append('screen_prompt_criteria', screenPrompt);
+    }
+    if (annotationPurpose) {
+      formData.append('annotation_purpose', annotationPurpose);
+    }
+    if (annotationPrompt) {
+      formData.append('annotation_prompt_criteria', annotationPrompt);
+    }
+    if (selectRecommendedOnly !== undefined) {
+      formData.append('select_recommended_only', selectRecommendedOnly.toString());
     }
 
     const response = await api.post<{ task_id: string; status: string; merge: boolean }>(
@@ -389,6 +409,73 @@ export const processAPI = {
       { headers: { 'Content-Type': 'multipart/form-data' } }
     );
 
+    return response.data;
+  },
+
+  // Phase 1: 上传文件并仅处理媒体（不打包）
+  uploadAndProcessMedia: async (
+    videoFiles: File[],
+    subtitleFiles: (File | null)[],
+    merge: boolean = true,
+    minDuration: number = 1.0,
+    apiKey?: string,
+    preProcessed?: object[],
+    apiBase?: string,
+    modelName?: string,
+    paddingStartMs?: number,
+    paddingEndMs?: number,
+    sourceLanguage?: string,
+    targetLanguage?: string,
+    screenPrompt?: string,
+    annotationPurpose?: string,
+    annotationPrompt?: string,
+    selectRecommendedOnly?: boolean
+  ): Promise<{ task_id: string; status: string; merge: boolean }> => {
+    const formData = new FormData();
+    videoFiles.forEach(f => formData.append('videos', f));
+    subtitleFiles.forEach(f => { if (f) formData.append('subtitles', f); });
+    formData.append('merge', merge.toString());
+    formData.append('min_duration', minDuration.toString());
+    formData.append('stop_after_media', 'true');
+    if (apiKey) formData.append('api_key', apiKey);
+    if (apiBase) formData.append('api_base', apiBase);
+    if (modelName) formData.append('model_name', modelName);
+    if (paddingStartMs !== undefined) formData.append('padding_start_ms', paddingStartMs.toString());
+    if (paddingEndMs !== undefined) formData.append('padding_end_ms', paddingEndMs.toString());
+    if (preProcessed && preProcessed.length > 0) formData.append('pre_processed', JSON.stringify(preProcessed));
+    if (sourceLanguage) formData.append('source_language', sourceLanguage);
+    if (targetLanguage) formData.append('target_language', targetLanguage);
+    if (screenPrompt) formData.append('screen_prompt_criteria', screenPrompt);
+    if (annotationPurpose) formData.append('annotation_purpose', annotationPurpose);
+    if (annotationPrompt) formData.append('annotation_prompt_criteria', annotationPrompt);
+    if (selectRecommendedOnly !== undefined) formData.append('select_recommended_only', selectRecommendedOnly.toString());
+
+    const response = await api.post<{ task_id: string; status: string; merge: boolean }>(
+      '/api/process/upload-and-process',
+      formData,
+      { headers: { 'Content-Type': 'multipart/form-data' } }
+    );
+    return response.data;
+  },
+
+  // Phase 2: 从已处理的媒体生成 .apkg
+  generateApkg: async (
+    taskId: string,
+    cardStyles?: string[],
+    theme?: string,
+    themeOverrides?: string,
+  ): Promise<{ task_id: string; status: string }> => {
+    const formData = new FormData();
+    formData.append('task_id', taskId);
+    if (cardStyles && cardStyles.length > 0) formData.append('card_styles', JSON.stringify(cardStyles));
+    if (theme) formData.append('theme', theme);
+    if (themeOverrides) formData.append('theme_overrides', themeOverrides);
+
+    const response = await api.post<{ task_id: string; status: string }>(
+      '/api/process/generate-apkg',
+      formData,
+      { headers: { 'Content-Type': 'multipart/form-data' } }
+    );
     return response.data;
   },
 

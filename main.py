@@ -29,7 +29,7 @@ if "--version" in sys.argv:
     sys.exit(0)
 
 from core.parse_srt import parse_srt, filter_short_subtitles, Subtitle
-from core.ai_process import process_subtitles_with_ai
+from core.ai_process import process_subtitles_with_ai, process_subtitles_two_phase
 from core.media_cut import process_media_items
 from core.pack_apkg import create_apkg
 
@@ -64,6 +64,9 @@ def _process_video_to_media(
     total_videos: int = 1,
     source_language: str = "en",
     target_language: str = "zh",
+    screen_system_prompt: str = None,
+    annotation_system_prompt: str = None,
+    select_recommended_only: bool = False,
 ) -> tuple[list[dict], str]:
     """
     处理单个视频的字幕解析 + AI + 媒体切割，返回 (processed_items, video_stem)
@@ -149,8 +152,16 @@ def _process_video_to_media(
     else:
         api_key = api_key or os.getenv("DEEPSEEK_API_KEY")
         if api_key:
-            progress(2, f"AI 注释 {len(subtitles)} 条字幕中...")
-            processed = process_subtitles_with_ai(subtitles, api_key, api_base, model_name, source_language, target_language)
+            if select_recommended_only and screen_system_prompt and annotation_system_prompt:
+                # 两阶段 AI：先筛选再注释（用户启用了"仅选推荐"）
+                progress(2, f"AI 筛选 + 注释 {len(subtitles)} 条字幕中...")
+                processed = process_subtitles_two_phase(
+                    subtitles, api_key, screen_system_prompt, annotation_system_prompt,
+                    api_base, model_name, source_language, target_language
+                )
+            else:
+                progress(2, f"AI 注释 {len(subtitles)} 条字幕中...")
+                processed = process_subtitles_with_ai(subtitles, api_key, api_base, model_name, source_language, target_language)
 
             if not processed:
                 raise ValueError(f"视频 {video_stem} AI 处理后没有保留的字幕")
@@ -224,8 +235,13 @@ def run(
     padding_end_ms: int = 200,
     card_styles: list = None,
     theme: str = "default",
+    theme_overrides: dict = None,
     source_language: str = "en",
     target_language: str = "zh",
+    screen_system_prompt: str = None,
+    annotation_system_prompt: str = None,
+    select_recommended_only: bool = False,
+    stop_after_media: bool = False,  # True=仅处理媒体不打包, False=完整流程
 ) -> dict:
     """
     运行完整流程
@@ -290,6 +306,9 @@ def run(
         padding_end_ms=padding_end_ms,
         source_language=source_language,
         target_language=target_language,
+        screen_system_prompt=screen_system_prompt,
+        annotation_system_prompt=annotation_system_prompt,
+        select_recommended_only=select_recommended_only,
     )
 
     print("=" * 50)
@@ -300,12 +319,13 @@ def run(
     import shutil
     audio_dir = output_dir / "audio"
     screenshot_dir = output_dir / "screenshots"
-    if audio_dir.exists():
-        shutil.rmtree(audio_dir)
-        print(f"已清理旧音频目录: {audio_dir}")
-    if screenshot_dir.exists():
-        shutil.rmtree(screenshot_dir)
-        print(f"已清理旧截图目录: {screenshot_dir}")
+    if not stop_after_media:
+        if audio_dir.exists():
+            shutil.rmtree(audio_dir)
+            print(f"已清理旧音频目录: {audio_dir}")
+        if screenshot_dir.exists():
+            shutil.rmtree(screenshot_dir)
+            print(f"已清理旧截图目录: {screenshot_dir}")
 
     # ── 处理每个视频的 Step 0-3 ──
     all_processed = []  # 合并模式收集所有视频的卡片
@@ -332,6 +352,13 @@ def run(
 
         if merge:
             all_processed.extend(processed)
+        elif stop_after_media:
+            # 两阶段模式：跳过打包，收集结果
+            results.append({
+                "video_name": video_stem,
+                "cards_count": len(processed),
+                "processed": processed,
+            })
         else:
             # 独立模式：每个视频立即打包
             _progress = common_kwargs.get("progress_callback")
@@ -347,7 +374,8 @@ def run(
                 str(audio_dir),
                 str(screenshot_dir),
                 card_styles=card_styles,
-                theme=theme
+                theme=theme,
+                theme_overrides=theme_overrides
             )
 
             results.append({
@@ -362,12 +390,35 @@ def run(
             if _progress:
                 _progress(5, 5, done_msg)
 
-    # ── Step 4: 打包（合并模式） ──
+    # ── Step 4: 打包或保存 manifest ──
     if merge:
         if not all_processed:
             raise ValueError("没有生成任何卡片")
 
         progress_callback_obj = common_kwargs.get("progress_callback")
+
+        if stop_after_media:
+            # 两阶段模式：保存 manifest 供 Phase 2 使用
+            video_names = [Path(vp).stem for vp in video_paths]
+            manifest = {
+                "merge": True,
+                "video_names": video_names,
+                "processed": all_processed,
+            }
+            manifest_path = output_dir / "processed_cards.json"
+            manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+            msg = f"媒体处理完成，共 {len(all_processed)} 张卡片，等待样式选择"
+            print(msg)
+            if progress_callback_obj:
+                progress_callback_obj(3, 5, msg)
+
+            return {
+                "status": "media_done",
+                "merge": True,
+                "cards_count": len(all_processed),
+                "processed": all_processed,
+            }
+
         pack_msg = f"打包 Anki 牌组中 ({len(all_processed)} 张卡片)..."
         print(pack_msg)
         if progress_callback_obj:
@@ -387,7 +438,8 @@ def run(
             str(audio_dir),
             str(screenshot_dir),
             card_styles=card_styles,
-            theme=theme
+            theme=theme,
+            theme_overrides=theme_overrides
         )
 
         print(f"\n[5/5] 完成!")
@@ -399,12 +451,131 @@ def run(
             "cards_count": len(all_processed),
             "processed": all_processed
         }
+    elif stop_after_media:
+        # 两阶段独立模式：保存 manifest
+        total_cards = sum(r["cards_count"] for r in results)
+        manifest = {
+            "merge": False,
+            "total_cards": total_cards,
+            "results": results,
+        }
+        manifest_path = output_dir / "processed_cards.json"
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"\n媒体处理完成! 共 {total_videos} 个视频, {total_cards} 张卡片，等待样式选择")
+
+        return {
+            "status": "media_done",
+            "merge": False,
+            "total_cards": total_cards,
+            "results": results,
+        }
     else:
         total_cards = sum(r["cards_count"] for r in results)
         print(f"\n全部完成! 共 {total_videos} 个视频, {total_cards} 张卡片")
         return {
             "results": results,
             "apkg_paths": [r["apkg_path"] for r in results],
+            "total_cards": total_cards,
+        }
+
+
+def generate_apkg(
+    output_dir: str,
+    card_styles: list = None,
+    theme: str = "default",
+    theme_overrides: dict = None,
+    progress_callback=None,
+) -> dict:
+    """
+    Phase 2: 从已处理的媒体文件生成 .apkg
+
+    读取 processed_cards.json manifest，调用 create_apkg() 打包。
+
+    Args:
+        output_dir: Phase 1 的输出目录（含 processed_cards.json + audio/ + screenshots/）
+        card_styles: 卡片风格列表
+        theme: 卡片主题
+        theme_overrides: CSS 变量覆盖
+        progress_callback: callback(step, total_steps, message)
+
+    Returns:
+        与 run() 合并/独立模式相同格式的 dict
+    """
+    output_dir = Path(output_dir)
+    manifest_path = output_dir / "processed_cards.json"
+
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"找不到处理数据: {manifest_path}")
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    audio_dir = output_dir / "audio"
+    screenshot_dir = output_dir / "screenshots"
+
+    def progress(step, message):
+        print(message)
+        if progress_callback:
+            progress_callback(step, 2, message)
+
+    if manifest.get("merge", True):
+        all_processed = manifest["processed"]
+        video_names = manifest.get("video_names", ["output"])
+        first_name = video_names[0]
+        if len(video_names) > 1:
+            deck_name = f"{first_name}_等{len(video_names)}个"
+        else:
+            deck_name = first_name
+
+        progress(0, f"打包 Anki 牌组中 ({len(all_processed)} 张卡片)...")
+
+        apkg_path = create_apkg(
+            deck_name,
+            all_processed,
+            str(output_dir),
+            str(audio_dir),
+            str(screenshot_dir),
+            card_styles=card_styles,
+            theme=theme,
+            theme_overrides=theme_overrides
+        )
+
+        progress(1, "完成!")
+        return {
+            "apkg_path": str(apkg_path),
+            "cards_count": len(all_processed),
+            "processed": all_processed,
+        }
+    else:
+        results = []
+        apkg_paths = []
+        total_videos = len(manifest["results"])
+
+        for i, r in enumerate(manifest["results"]):
+            progress(0, f"[视频 {i + 1}/{total_videos}] 打包中 ({r['cards_count']} 张卡片)...")
+
+            apkg_path = create_apkg(
+                r["video_name"],
+                r["processed"],
+                str(output_dir),
+                str(audio_dir),
+                str(screenshot_dir),
+                card_styles=card_styles,
+                theme=theme,
+                theme_overrides=theme_overrides
+            )
+
+            results.append({
+                "video_name": r["video_name"],
+                "apkg_path": str(apkg_path),
+                "cards_count": r["cards_count"],
+                "processed": r["processed"],
+            })
+            apkg_paths.append(str(apkg_path))
+
+        total_cards = manifest["total_cards"]
+        progress(1, f"全部完成! 共 {total_cards} 张卡片")
+        return {
+            "results": results,
+            "apkg_paths": apkg_paths,
             "total_cards": total_cards,
         }
 

@@ -64,5 +64,8 @@ build/
 # 测试临时目录
 *测试*/
 
+# Runtime PID tracking
+backend/pids.json
+
 # Binary files
 bin/*.exe

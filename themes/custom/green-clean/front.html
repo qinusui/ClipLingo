@@ -1,0 +1,20 @@
+<div class="card">
+  <!-- 截图区域 -->
+  {{#Screenshot}}
+  <div class="screenshot-box">{{Screenshot}}</div>
+  {{/Screenshot}}
+  {{^Screenshot}}
+  <div class="placeholder-box">
+    <div class="placeholder-icon">&#127795;</div>
+  </div>
+  {{/Screenshot}}
+
+  <!-- 单词模式：正面显示目标词 -->
+  {{#Word}}
+  <div class="word-prompt">
+    <div class="headword">{{Word}}</div>
+  </div>
+  {{/Word}}
+
+  <div class="hint-text">点击翻转查看详情</div>
+</div>

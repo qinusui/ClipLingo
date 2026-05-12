@@ -4,7 +4,7 @@ import { Upload, Square, RefreshCw, CheckCircle, XCircle, Loader2, ExternalLink 
 import { Button } from './Button';
 import { pingAnki } from '../services/ankiConnect';
 import { syncToAnki, type SyncProgress, type SyncResult } from '../services/syncToAnki';
-import type { ProcessedCard } from '../types';
+import type { ProcessedCard, ThemeOverrides } from '../types';
 
 type SyncState = 'idle' | 'checking' | 'offline' | 'syncing' | 'done' | 'error';
 
@@ -14,9 +14,10 @@ interface Props {
   apiBase: string;
   cardStyles?: string[];
   theme?: string;
+  themeOverrides?: ThemeOverrides;
 }
 
-export const AnkiSyncButton = ({ cards, deckName, apiBase, cardStyles, theme }: Props) => {
+export const AnkiSyncButton = ({ cards, deckName, apiBase, cardStyles, theme, themeOverrides }: Props) => {
   const { t } = useTranslation();
   const [state, setState] = useState<SyncState>('idle');
   const [progress, setProgress] = useState<SyncProgress | null>(null);
@@ -47,6 +48,7 @@ export const AnkiSyncButton = ({ cards, deckName, apiBase, cardStyles, theme }: 
         apiBase,
         cardStyles,
         theme,
+        themeOverrides,
         (p) => setProgress(p),
         abortRef.current.signal,
       );
@@ -60,7 +62,7 @@ export const AnkiSyncButton = ({ cards, deckName, apiBase, cardStyles, theme }: 
         setState('error');
       }
     }
-  }, [cards, deckName, apiBase, cardStyles, theme]);
+  }, [cards, deckName, apiBase, cardStyles, theme, themeOverrides]);
 
   const handleCancel = () => {
     abortRef.current?.abort();

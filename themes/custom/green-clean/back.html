@@ -1,0 +1,42 @@
+<div class="card">
+  <!-- 截图（小图模式） -->
+  {{#Screenshot}}
+  <div class="screenshot-thumb">{{Screenshot}}</div>
+  {{/Screenshot}}
+
+  <!-- 单词模式标题 -->
+  {{#Word}}
+  <div class="word-section">
+    <div class="headword">{{Word}}</div>
+    {{#Definition}}<div class="definition">{{Definition}}</div>{{/Definition}}
+  </div>
+  {{/Word}}
+
+  <!-- 例句区域 -->
+  {{#Sentence}}
+  <div class="sentence-section">
+    <div class="section-label">&#128172; 例句</div>
+    <div class="original">{{Sentence}}</div>
+  </div>
+  {{/Sentence}}
+
+  {{#Translation}}
+  <div class="translation-section">
+    <div class="section-label">&#128065; 翻译</div>
+    <div class="translation">{{Translation}}</div>
+  </div>
+  {{/Translation}}
+
+  {{#Notes}}
+  <div class="notes-section">
+    <div class="section-label">&#128221; 注释</div>
+    <div class="notes">{{Notes}}</div>
+  </div>
+  {{/Notes}}
+
+  <div class="divider"></div>
+
+  {{#Audio}}
+  <div class="audio-box">{{Audio}}</div>
+  {{/Audio}}
+</div>

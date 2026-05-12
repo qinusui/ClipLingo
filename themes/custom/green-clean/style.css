@@ -1,0 +1,188 @@
+/* ── 清新绿意主题 ── */
+/* 以绿色系为主调，干净清爽，留白充裕 */
+
+.card {
+  font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  font-size: 17px;
+  color: #2e3b2e;
+  background: linear-gradient(160deg, #f8fdf9 0%, #eef7f0 40%, #f5faf6 100%);
+  border-radius: 14px;
+  padding: 24px 20px;
+  max-width: 600px;
+  margin: 0 auto;
+  box-shadow:
+    0 2px 20px rgba(46, 125, 50, 0.07),
+    0 1px 3px rgba(0, 0, 0, 0.04);
+  border: 1px solid #d0ebd2;
+  line-height: 1.6;
+}
+
+/* ── 截图区域（正面全宽） ── */
+.screenshot-box {
+  margin-bottom: 18px;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.08);
+  border: 1px solid #dcedc8;
+}
+
+.screenshot-box img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* ── 占位区域 ── */
+.placeholder-box {
+  height: 140px;
+  background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
+  border-radius: 10px;
+  margin-bottom: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed #a5d6a7;
+}
+
+.placeholder-icon {
+  font-size: 2.4em;
+  opacity: 0.5;
+}
+
+/* ── 提示文字 ── */
+.hint-text {
+  text-align: center;
+  color: #81c784;
+  font-size: 0.85em;
+  margin-top: 18px;
+  letter-spacing: 0.06em;
+  font-weight: 500;
+}
+
+/* ── 分割线 ── */
+.divider {
+  width: 36px;
+  height: 3px;
+  background: linear-gradient(90deg, #66bb6a, #81c784);
+  border-radius: 2px;
+  margin: 20px auto;
+}
+
+/* ── 单词区域 ── */
+.word-section {
+  text-align: center;
+  margin-bottom: 22px;
+}
+
+.word-prompt {
+  text-align: center;
+  margin-top: 10px;
+}
+
+.headword {
+  font-size: 2.4em;
+  font-weight: 700;
+  color: #2e7d32;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  text-shadow: 0 1px 2px rgba(46, 125, 50, 0.08);
+}
+
+.definition {
+  font-size: 1.05em;
+  color: #66bb6a;
+  font-weight: 500;
+  margin-top: 6px;
+}
+
+/* ── 标签行 ── */
+.section-label {
+  font-size: 0.7em;
+  font-weight: 600;
+  color: #81c784;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin-bottom: 4px;
+}
+
+/* ── 截图缩略图（背面小图） ── */
+.screenshot-thumb {
+  float: right;
+  width: 120px;
+  margin: 0 0 10px 14px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid #dcedc8;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.screenshot-thumb img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* ── 内容区域 ── */
+.sentence-section {
+  margin-bottom: 12px;
+}
+
+.original {
+  font-weight: 600;
+  font-size: 1.1em;
+  color: #1b5e20;
+  line-height: 1.65;
+}
+
+.translation-section {
+  margin-bottom: 12px;
+}
+
+.translation {
+  color: #558b2f;
+  font-size: 0.95em;
+  line-height: 1.55;
+}
+
+/* ── 注释 ── */
+.notes-section {
+  margin-bottom: 4px;
+}
+
+.notes {
+  background: #ffffff;
+  border-left: 3px solid #66bb6a;
+  padding: 10px 14px;
+  font-size: 0.85em;
+  color: #4a6741;
+  border-radius: 0 8px 8px 0;
+  line-height: 1.65;
+  white-space: pre-line;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+}
+
+/* ── 音频 ── */
+.audio-box {
+  margin-top: 10px;
+  text-align: center;
+}
+
+.audio-box audio {
+  width: 100%;
+  max-width: 280px;
+  border-radius: 6px;
+}
+
+/* ── 兼容 Anki 夜间模式 ── */
+.card.night_mode {
+  background: linear-gradient(160deg, #1a2e1a 0%, #1e3320 40%, #1c2f1c 100%);
+  color: #c8e6c9;
+  border-color: #2e4a30;
+}
+
+.card.night_mode .headword { color: #81c784; }
+.card.night_mode .original { color: #a5d6a7; }
+.card.night_mode .translation { color: #81c784; }
+.card.night_mode .notes { background: #1e3320; color: #a5d6a7; border-left-color: #4caf50; }
+.card.night_mode .section-label { color: #66bb6a; }
+.card.night_mode .hint-text { color: #4caf50; }

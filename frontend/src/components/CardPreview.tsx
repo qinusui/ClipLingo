@@ -1,8 +1,8 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
-import { ProcessedCard, CardTheme } from '../types';
-import { ChevronLeft, ChevronRight, Play, Pause, Image as ImageIcon } from 'lucide-react';
+import { ProcessedCard, CardTheme, ThemeOverrides } from '../types';
+import { ChevronLeft, ChevronRight, Play, Pause, Loader2 } from 'lucide-react';
 
 interface CardPreviewProps {
   cards: ProcessedCard[];
@@ -11,6 +11,8 @@ interface CardPreviewProps {
   onPrevious: () => void;
   onNext: () => void;
   theme?: CardTheme;
+  themeOverrides?: ThemeOverrides;
+  videoFile?: File;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -124,15 +126,36 @@ const THEMES_CSS: Record<string, string> = {
   dictionary: CSS_DICTIONARY,
 };
 
+/** 将 ThemeOverrides 注入到主题 CSS 前面，CardPreview 中使用 .anki-card 作用域 */
+function buildOverrideCss(baseCss: string, overrides: ThemeOverrides): string {
+  const declarations = Object.entries(overrides)
+    .filter(([, v]) => v !== undefined && v !== '')
+    .map(([k, v]) => `  ${k}: ${v};`)
+    .join('\n');
+  if (!declarations) return baseCss;
+
+  return `/* ── 用户自定义样式覆盖 ── */
+.anki-card :root {
+${declarations}
+}
+.anki-card .card { background-color: var(--card-bg, inherit) !important; color: var(--card-text, inherit) !important; padding: var(--card-padding, inherit) !important; border-radius: var(--card-radius, inherit) !important; box-shadow: var(--card-shadow, none) !important; }
+.anki-card .original, .anki-card .sentence, .anki-card .subtitle-text { font-family: var(--font-sentence, inherit) !important; font-size: var(--font-size-sentence, inherit) !important; }
+.anki-card .translation { color: var(--translation-color, inherit) !important; font-family: var(--font-translation, inherit) !important; font-size: var(--font-size-translation, inherit) !important; }
+.anki-card .notes, .anki-card .annotation { color: var(--annotation-color, inherit) !important; }
+.anki-card .container { border-color: var(--accent-color, inherit) !important; }
+.anki-card hr, .anki-card hr#answer, .anki-card .divider { border-color: var(--accent-color, inherit) !important; }
+${baseCss}`;
+}
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  默认主题卡片组件
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-const DefaultSentenceFront = ({ card }: { card: ProcessedCard }) => (
+const DefaultSentenceFront = ({ card, videoFile }: { card: ProcessedCard; videoFile?: File }) => (
   <div className="anki-card">
     <div className="container">
       <div className="image-box">
-        {card.screenshot_path ? <img src={card.screenshot_path} alt={i18n.t('cardPreview.screenshot')} /> : <Placeholder />}
+        {card.screenshot_path ? <img src={card.screenshot_path} alt={i18n.t('cardPreview.screenshot')} /> : <Placeholder videoFile={videoFile} timestamp={card.start_sec} />}
       </div>
     </div>
   </div>
@@ -180,18 +203,26 @@ const DefaultVocabBack = ({ card }: { card: ProcessedCard }) => (
 //  极简沉浸主题卡片组件
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-const MinimalSentenceFront = ({ card }: { card: ProcessedCard }) => (
+const MinimalSentenceFront = ({ card, videoFile }: CardComponentProps) => (
   <div className="anki-card">
-    {card.screenshot_path && <div className="bg-image" style={{ backgroundImage: `url(${card.screenshot_path})` }} />}
+    {card.screenshot_path ? (
+      <div className="bg-image" style={{ backgroundImage: `url(${card.screenshot_path})` }} />
+    ) : videoFile ? (
+      <div className="bg-image"><Placeholder videoFile={videoFile} timestamp={card.start_sec} /></div>
+    ) : null}
     <div className="container">
       <div className="image-box" />
     </div>
   </div>
 );
 
-const MinimalSentenceBack = ({ card }: { card: ProcessedCard }) => (
+const MinimalSentenceBack = ({ card, videoFile }: CardComponentProps) => (
   <div className="anki-card">
-    {card.screenshot_path && <div className="bg-image" style={{ backgroundImage: `url(${card.screenshot_path})` }} />}
+    {card.screenshot_path ? (
+      <div className="bg-image" style={{ backgroundImage: `url(${card.screenshot_path})` }} />
+    ) : videoFile ? (
+      <div className="bg-image"><Placeholder videoFile={videoFile} timestamp={card.start_sec} /></div>
+    ) : null}
     <div className="container">
       <div className="original">{card.sentence}</div>
       <div className="divider" />
@@ -210,7 +241,7 @@ const MinimalVocabFront = ({ card }: { card: ProcessedCard }) => (
   </div>
 );
 
-const MinimalVocabBack = ({ card }: { card: ProcessedCard }) => (
+const MinimalVocabBack = ({ card, videoFile }: CardComponentProps) => (
   <div className="anki-card">
     <div className="container">
       <div className="target-word">{card.word || card.sentence}</div>
@@ -218,6 +249,11 @@ const MinimalVocabBack = ({ card }: { card: ProcessedCard }) => (
       <div className="divider" />
       <div className="example-box">
         <div className="tag">{i18n.t('ankiCard.exampleTagMinimal')}</div>
+        {card.screenshot_path ? (
+          <div className="image-box"><img src={card.screenshot_path} alt={i18n.t('cardPreview.screenshot')} /></div>
+        ) : videoFile ? (
+          <Placeholder videoFile={videoFile} timestamp={card.start_sec} />
+        ) : null}
         <div className="original">{card.sentence}</div>
       </div>
     </div>
@@ -228,11 +264,11 @@ const MinimalVocabBack = ({ card }: { card: ProcessedCard }) => (
 //  Netflix 剧照主题卡片组件
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-const NetflixSentenceFront = ({ card }: { card: ProcessedCard }) => (
+const NetflixSentenceFront = ({ card, videoFile }: { card: ProcessedCard; videoFile?: File }) => (
   <div className="anki-card">
     <div className="container">
       <div className="image-box">
-        {card.screenshot_path ? <img src={card.screenshot_path} alt={i18n.t('cardPreview.screenshot')} /> : <Placeholder dark />}
+        {card.screenshot_path ? <img src={card.screenshot_path} alt={i18n.t('cardPreview.screenshot')} /> : <Placeholder dark videoFile={videoFile} timestamp={card.start_sec} />}
       </div>
     </div>
   </div>
@@ -287,11 +323,13 @@ const DictSentenceFront = ({ card: _card }: { card: ProcessedCard }) => (
   </div>
 );
 
-const DictSentenceBack = ({ card }: { card: ProcessedCard }) => (
+const DictSentenceBack = ({ card, videoFile }: CardComponentProps) => (
   <div className="anki-card">
     <div className="container clearfix">
       <div className="section-label">{i18n.t('ankiCard.sentenceLabel')}</div>
-      {card.screenshot_path && <div className="thumb"><img src={card.screenshot_path} alt={i18n.t('cardPreview.screenshot')} /></div>}
+      <div className="thumb">
+        {card.screenshot_path ? <img src={card.screenshot_path} alt={i18n.t('cardPreview.screenshot')} /> : <Placeholder videoFile={videoFile} timestamp={card.start_sec} />}
+      </div>
       <div className="original">{card.sentence}</div>
       {card.translation && <><div className="section-label">{i18n.t('ankiCard.translationLabel')}</div><div className="translation">{card.translation}</div></>}
       {card.notes && <><div className="section-label">{i18n.t('ankiCard.notesLabel')}</div><div className="notes">{card.notes}</div></>}
@@ -310,11 +348,13 @@ const DictVocabFront = ({ card }: { card: ProcessedCard }) => (
   </div>
 );
 
-const DictVocabBack = ({ card }: { card: ProcessedCard }) => (
+const DictVocabBack = ({ card, videoFile }: CardComponentProps) => (
   <div className="anki-card">
     <div className="container clearfix">
       <div className="section-label">{i18n.t('ankiCard.entryLabel')}</div>
-      {card.screenshot_path && <div className="thumb"><img src={card.screenshot_path} alt={i18n.t('cardPreview.screenshot')} /></div>}
+      <div className="thumb">
+        {card.screenshot_path ? <img src={card.screenshot_path} alt={i18n.t('cardPreview.screenshot')} /> : <Placeholder videoFile={videoFile} timestamp={card.start_sec} />}
+      </div>
       <div><span className="headword">{card.word || card.sentence}</span></div>
       {card.definition && <div className="word-meaning">{card.definition}</div>}
       <hr className="dict-divider" />
@@ -333,9 +373,11 @@ const DictVocabBack = ({ card }: { card: ProcessedCard }) => (
 //  组件注册表
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+type CardComponentProps = { card: ProcessedCard; videoFile?: File };
+
 const THEME_COMPONENTS: Record<string, {
-  sentence: { front: React.FC<{ card: ProcessedCard }>; back: React.FC<{ card: ProcessedCard }> };
-  vocab: { front: React.FC<{ card: ProcessedCard }>; back: React.FC<{ card: ProcessedCard }> };
+  sentence: { front: React.FC<CardComponentProps>; back: React.FC<CardComponentProps> };
+  vocab: { front: React.FC<CardComponentProps>; back: React.FC<CardComponentProps> };
 }> = {
   default: {
     sentence: { front: DefaultSentenceFront, back: DefaultSentenceBack },
@@ -356,25 +398,224 @@ const THEME_COMPONENTS: Record<string, {
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  视频帧截取组件（客户端实时截帧，用于处理前预览）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+const VideoFrame = ({ file, timestamp }: { file: File; timestamp: number }) => {
+  const [dataUrl, setDataUrl] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const urlRef = useRef('');
+
+  useEffect(() => {
+    let cancelled = false;
+    urlRef.current = URL.createObjectURL(file);
+
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.muted = true;
+    video.playsInline = true;
+    video.crossOrigin = 'anonymous';
+
+    video.onloadedmetadata = () => {
+      if (cancelled) return;
+      video.currentTime = Math.max(0, timestamp - 0.1);
+    };
+
+    video.onseeked = () => {
+      if (cancelled) return;
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 360;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      }
+      setDataUrl(canvas.toDataURL('image/jpeg', 0.85));
+      setLoading(false);
+      URL.revokeObjectURL(urlRef.current);
+    };
+
+    video.onerror = () => {
+      if (!cancelled) {
+        setError(true);
+        setLoading(false);
+        URL.revokeObjectURL(urlRef.current);
+      }
+    };
+
+    video.src = urlRef.current;
+
+    return () => {
+      cancelled = true;
+      video.removeAttribute('src');
+      video.load();
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    };
+  }, [file, timestamp]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center w-full h-40 bg-gray-100 dark:bg-gray-800 rounded-lg">
+        <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+      </div>
+    );
+  }
+
+  if (error || !dataUrl) {
+    return (
+      <div className="flex items-center justify-center w-full h-40 bg-gray-100 dark:bg-gray-800 rounded-lg">
+        <span className="text-xs text-gray-400">...</span>
+      </div>
+    );
+  }
+
+  return <img src={dataUrl} alt="preview frame" className="w-full h-auto rounded-lg" />;
+};
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  占位组件
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-const Placeholder = ({ dark }: { dark?: boolean }) => (
-  <div className={`flex items-center justify-center w-full h-40 rounded-lg ${dark ? 'bg-gray-800' : 'bg-gray-200'}`}>
-    <ImageIcon className={`w-8 h-8 ${dark ? 'text-gray-600' : 'text-gray-400'}`} />
-  </div>
-);
+const PLACEHOLDER_IMG = '/docs/演示图片.png';
+
+const Placeholder = ({ dark, videoFile, timestamp }: { dark?: boolean; videoFile?: File; timestamp?: number }) => {
+  if (videoFile && timestamp !== undefined) {
+    return (
+      <div className="w-full rounded-lg overflow-hidden">
+        <VideoFrame file={videoFile} timestamp={timestamp} />
+      </div>
+    );
+  }
+
+  return (
+    <div className={`flex items-center justify-center w-full rounded-lg overflow-hidden ${dark ? 'bg-gray-800' : 'bg-gray-200'}`}>
+      <img src={PLACEHOLDER_IMG} alt="demo" className="w-full h-auto" />
+    </div>
+  );
+};
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  自定义主题 iframe 面板
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+interface CustomThemeFiles {
+  front: string;
+  back: string;
+  css: string;
+  label: string;
+}
+
+/** 将 Anki 模板变量替换为卡片数据（含条件处理） */
+function renderTemplate(tpl: string, card: ProcessedCard): string {
+  const fields: Record<string, string> = {
+    Sentence: card.sentence || '',
+    Translation: card.translation || '',
+    Notes: card.notes || '',
+    Word: card.word || '',
+    Definition: card.definition || '',
+    Screenshot: card.screenshot_path
+      ? `<img src="${card.screenshot_path}" alt="screenshot">`
+      : '',
+    Audio: card.audio_path
+      ? `<audio controls src="${card.audio_path}"></audio>`
+      : '',
+  };
+
+  let html = tpl;
+
+  // 条件块：{{#Field}}...{{/Field}}
+  for (const [field, value] of Object.entries(fields)) {
+    const re = new RegExp(`{{#${field}}}([\\s\\S]*?){{/${field}}}`, 'g');
+    html = html.replace(re, value ? '$1' : '');
+  }
+
+  // 反向条件块：{{^Field}}...{{/Field}}
+  for (const [field, value] of Object.entries(fields)) {
+    const re = new RegExp(`{{\\^${field}}}([\\s\\S]*?){{/${field}}}`, 'g');
+    html = html.replace(re, value ? '' : '$1');
+  }
+
+  // 简单变量替换
+  for (const [field, value] of Object.entries(fields)) {
+    html = html.replace(new RegExp(`{{${field}}}`, 'g'), value);
+  }
+
+  return html;
+}
+
+const CustomThemePane = ({
+  theme,
+  card,
+  showAnswer,
+}: {
+  theme: string;
+  card: ProcessedCard;
+  showAnswer: boolean;
+}) => {
+  const [files, setFiles] = useState<CustomThemeFiles | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    setLoading(true);
+    setError('');
+    fetch(`/api/themes/custom/${theme}`)
+      .then(r => {
+        if (!r.ok) throw new Error('Theme not found');
+        return r.json();
+      })
+      .then(data => {
+        setFiles(data);
+        setLoading(false);
+      })
+      .catch(err => {
+        setError(err.message);
+        setLoading(false);
+      });
+  }, [theme]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+      </div>
+    );
+  }
+
+  if (error || !files) {
+    return (
+      <div className="text-center py-8 text-sm text-red-500">
+        {error || 'Failed to load theme'}
+      </div>
+    );
+  }
+
+  const filledTpl = renderTemplate(showAnswer ? files.back : files.front, card);
+  const html = `<!DOCTYPE html><html><head><style>${files.css}</style></head><body>${filledTpl}</body></html>`;
+
+  return (
+    <iframe
+      srcDoc={html}
+      sandbox="allow-scripts"
+      className="w-full min-h-[300px] border-0"
+      title="Custom Theme Preview"
+    />
+  );
+};
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  主组件
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-export const CardPreview = ({ cards, cardStyles, currentIndex, onPrevious, onNext, theme = 'default' }: CardPreviewProps) => {
+export const CardPreview = ({ cards, cardStyles, currentIndex, onPrevious, onNext, theme = 'default', themeOverrides, videoFile }: CardPreviewProps) => {
   const { t } = useTranslation();
   const [isPlaying, setIsPlaying] = useState(false);
   const [previewStyle, setPreviewStyle] = useState<string>(cardStyles[0] || 'sentence');
   const [showAnswer, setShowAnswer] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
+
+  const isCustomTheme = theme !== 'default' && theme !== 'minimal' && theme !== 'netflix' && theme !== 'dictionary';
 
   if (cards.length === 0) {
     return (
@@ -386,7 +627,10 @@ export const CardPreview = ({ cards, cardStyles, currentIndex, onPrevious, onNex
 
   const card = cards[currentIndex];
   const themeComponents = THEME_COMPONENTS[theme] || THEME_COMPONENTS.default;
-  const css = THEMES_CSS[theme] || THEMES_CSS.default;
+  const themeCss = THEMES_CSS[theme] || THEMES_CSS.default;
+  const css = themeOverrides && Object.keys(themeOverrides).length > 0
+    ? buildOverrideCss(themeCss, themeOverrides)
+    : themeCss;
 
   const handlePlayPause = () => {
     if (!audioRef.current) return;
@@ -475,10 +719,13 @@ export const CardPreview = ({ cards, cardStyles, currentIndex, onPrevious, onNex
 
       {/* 卡片：正面 → 翻转 → 背面 */}
       <div className="border-2 border-dashed border-gray-300 rounded-lg overflow-hidden dark:border-gray-600">
-        {showAnswer
-          ? <BackComponent card={card} />
-          : <FrontComponent card={card} />
-        }
+        {isCustomTheme ? (
+          <CustomThemePane theme={theme} card={card} showAnswer={showAnswer} />
+        ) : showAnswer ? (
+          <BackComponent card={card} videoFile={videoFile} />
+        ) : (
+          <FrontComponent card={card} videoFile={videoFile} />
+        )}
       </div>
 
       {/* 显示/隐藏答案 */}

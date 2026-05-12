@@ -4,7 +4,7 @@
  */
 
 import i18n from '../i18n';
-import type { ProcessedCard } from '../types';
+import type { ProcessedCard, ThemeOverrides } from '../types';
 import {
   createDeck,
   createModel,
@@ -645,6 +645,23 @@ function getThemeConfig(theme: string): ThemeConfig {
   return THEMES[theme] || THEMES['default'];
 }
 
+/** 从后端加载自定义主题配置 */
+async function loadCustomThemeConfig(name: string): Promise<ThemeConfig | null> {
+  try {
+    const resp = await fetch(`/api/themes/custom/${name}`);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (!data.front || !data.back || !data.css) return null;
+    return {
+      css: data.css,
+      sentence: { front: data.front, back: data.back },
+      vocab: { front: data.front, back: data.back },
+    };
+  } catch {
+    return null;
+  }
+}
+
 // ── 同步接口 ──
 
 export interface SyncProgress {
@@ -672,12 +689,35 @@ export type SyncResult = {
  * @param onProgress 进度回调
  * @param signal 中断信号
  */
+
+/** 将 CSS 变量覆盖注入到 Anki 模型 CSS */
+function _injectSyncOverrides(baseCss: string, overrides?: ThemeOverrides): string {
+  if (!overrides || Object.keys(overrides).length === 0) return baseCss;
+  const declarations = Object.entries(overrides)
+    .filter(([, v]) => v !== undefined && v !== '')
+    .map(([k, v]) => `  ${k}: ${v};`)
+    .join('\n');
+  if (!declarations) return baseCss;
+  return `/* ── 用户自定义样式覆盖 ── */
+:root {
+${declarations}
+}
+.card { background-color: var(--card-bg, inherit) !important; color: var(--card-text, inherit) !important; padding: var(--card-padding, inherit) !important; border-radius: var(--card-radius, inherit) !important; box-shadow: var(--card-shadow, none) !important; }
+.original, .sentence, .subtitle-text { font-family: var(--font-sentence, inherit) !important; font-size: var(--font-size-sentence, inherit) !important; }
+.translation { color: var(--translation-color, inherit) !important; font-family: var(--font-translation, inherit) !important; font-size: var(--font-size-translation, inherit) !important; }
+.notes, .annotation { color: var(--annotation-color, inherit) !important; }
+.container { border-color: var(--accent-color, inherit) !important; }
+hr, hr#answer, .divider { border-color: var(--accent-color, inherit) !important; }
+${baseCss}`;
+}
+
 export async function syncToAnki(
   cards: ProcessedCard[],
   deckName: string,
   apiBase: string,
   cardStyles?: string[],
   theme?: string,
+  themeOverrides?: ThemeOverrides,
   onProgress?: (p: SyncProgress) => void,
   signal?: AbortSignal,
 ): Promise<SyncResult> {
@@ -690,8 +730,14 @@ export async function syncToAnki(
   const uid = Math.random().toString(36).slice(2, 8);
 
   // 获取主题配置
-  const themeConfig = getThemeConfig(theme || 'default');
+  let themeConfig = getThemeConfig(theme || 'default');
+  if (!THEMES[theme || 'default']) {
+    // 可能是自定义主题，尝试从后端加载
+    const custom = await loadCustomThemeConfig(theme || 'default');
+    if (custom) themeConfig = custom;
+  }
   const styles = cardStyles || ['sentence'];
+  const css = _injectSyncOverrides(themeConfig.css, themeOverrides);
 
   // 1. 创建牌组
   await createDeck(fullName);
@@ -726,7 +772,7 @@ export async function syncToAnki(
   await createModel({
     modelName: MODEL_NAME,
     inOrderFields: ['Sentence', 'Screenshot', 'Audio', 'Translation', 'Notes', 'Word', 'Definition'],
-    css: themeConfig.css,
+    css,
     cardTemplates,
   });
 
