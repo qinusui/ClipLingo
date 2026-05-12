@@ -12,6 +12,7 @@ import { CardPreview } from './components/CardPreview';
 import { StyleThemeSelector } from './components/StyleThemeSelector';
 import { CssVariableEditor } from './components/CssVariableEditor';
 import { ThemeImporter } from './components/ThemeImporter';
+import { TemplateMarketplace } from './components/TemplateMarketplace';
 import { AnkiSyncButton } from './components/AnkiSyncButton';
 import { SubtitleItem, ProcessedCard, AIRecommendation, CardStyle, CardTheme, ThemeOverrides, WorkflowPhase, AnnotationPurpose } from './types';
 import { subtitleAPI, processAPI, API_BASE_URL } from './services/api';
@@ -233,6 +234,7 @@ function App() {
   const [hasUnsavedOverrides, setHasUnsavedOverrides] = useState(false);
   const [customThemes, setCustomThemes] = useState<ThemeListItem[]>([]);
   const [showThemeImporter, setShowThemeImporter] = useState(false);
+  const [showMarketplace, setShowMarketplace] = useState(false);
   const [showPromptEditor, setShowPromptEditor] = useState(false);
   const recommendBatchSize = 30;
   const [ffmpegInstalled, setFFmpegInstalled] = useState<boolean | null>(null);
@@ -2318,7 +2320,7 @@ function App() {
                 {/* 4c: 样式预览（真实截图）+ 生成牌组按钮 */}
                 {processingPhase === 'awaiting_styles' && (
                   <div className="space-y-4">
-                    <StyleThemeSelector cardStyles={cardStyles} setCardStyles={setCardStyles} cardTheme={cardTheme} setCardTheme={setCardTheme} showEditor={editingStyles} onToggleEditor={handleToggleEditor} customThemes={customThemes} onImportClick={() => setShowThemeImporter(true)} onDeleteTheme={handleDeleteTheme} />
+                    <StyleThemeSelector cardStyles={cardStyles} setCardStyles={setCardStyles} cardTheme={cardTheme} setCardTheme={setCardTheme} showEditor={editingStyles} onToggleEditor={handleToggleEditor} customThemes={customThemes} onImportClick={() => setShowThemeImporter(true)} onBrowseClick={() => setShowMarketplace(true)} onDeleteTheme={handleDeleteTheme} />
                     {editingStyles && (
                       <CssVariableEditor
                         theme={cardTheme}
@@ -2427,6 +2429,12 @@ function App() {
         <ThemeImporter
           onImport={handleImportTheme}
           onClose={() => setShowThemeImporter(false)}
+        />
+      )}
+      {showMarketplace && (
+        <TemplateMarketplace
+          onClose={() => setShowMarketplace(false)}
+          onInstalled={refreshCustomThemes}
         />
       )}
     </div>

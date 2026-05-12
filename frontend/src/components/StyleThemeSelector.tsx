@@ -11,6 +11,7 @@ interface StyleThemeSelectorProps {
   onToggleEditor: () => void;
   customThemes?: ThemeListItem[];
   onImportClick?: () => void;
+  onBrowseClick?: () => void;
   onDeleteTheme?: (name: string) => void;
 }
 
@@ -35,6 +36,7 @@ export const StyleThemeSelector = ({
   onToggleEditor,
   customThemes = [],
   onImportClick,
+  onBrowseClick,
   onDeleteTheme,
 }: StyleThemeSelectorProps) => {
   const { t } = useTranslation();
@@ -147,6 +149,15 @@ export const StyleThemeSelector = ({
             className="mt-2 w-full px-2 py-1.5 rounded text-xs font-medium border border-dashed border-gray-300 text-gray-400 hover:text-gray-600 hover:border-gray-400 dark:border-gray-600 dark:text-gray-500 dark:hover:text-gray-300 dark:hover:border-gray-500 transition-colors"
           >
             + {t('themeImporter.importTheme')}
+          </button>
+        )}
+        {/* 浏览社区模板 */}
+        {onBrowseClick && (
+          <button
+            onClick={onBrowseClick}
+            className="mt-1 w-full px-2 py-1.5 rounded text-xs font-medium border border-dashed border-primary-300 text-primary-500 hover:text-primary-700 hover:border-primary-400 dark:border-primary-700 dark:text-primary-400 dark:hover:text-primary-300 dark:hover:border-primary-500 transition-colors"
+          >
+            {t('marketplace.browse')}
           </button>
         )}
       </div>

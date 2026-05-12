@@ -395,5 +395,17 @@
     "success": "主题 \"{{name}}\" 导入成功！",
     "customThemes": "自定义主题",
     "confirmDelete": "确定要删除主题 \"{{name}}\" 吗？"
+  },
+  "marketplace": {
+    "title": "模板市场",
+    "browse": "浏览社区模板",
+    "searchPlaceholder": "搜索模板...",
+    "noResults": "没有找到匹配的模板",
+    "empty": "暂无社区模板",
+    "byAuthor": "by {{author}}",
+    "install": "安装",
+    "installed": "已安装",
+    "installing": "安装中...",
+    "submitLink": "提交你的模板 →"
   }
 }

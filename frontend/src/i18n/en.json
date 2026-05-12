@@ -395,5 +395,17 @@
     "success": "Theme \"{{name}}\" imported successfully!",
     "customThemes": "Custom Themes",
     "confirmDelete": "Are you sure you want to delete theme \"{{name}}\"?"
+  },
+  "marketplace": {
+    "title": "Template Marketplace",
+    "browse": "Browse Community Templates",
+    "searchPlaceholder": "Search templates...",
+    "noResults": "No matching templates",
+    "empty": "No community templates yet",
+    "byAuthor": "by {{author}}",
+    "install": "Install",
+    "installed": "Installed",
+    "installing": "Installing...",
+    "submitLink": "Submit your template →"
   }
 }
