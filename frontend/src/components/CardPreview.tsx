@@ -23,7 +23,7 @@ const CSS_DEFAULT = `
 .anki-card {
   font-family: system-ui, -apple-system, sans-serif;
   font-size: 18px; text-align: center; color: #2c3e50;
-  background-color: #f8f9fa; margin: 0; padding: 10px;
+  margin: 0; padding: 10px;
 }
 .anki-card .container { max-width: 600px; margin: 0 auto; }
 .anki-card .image-box img { max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin-bottom: 10px; }
@@ -44,7 +44,7 @@ const CSS_MINIMAL = `
 .anki-card {
   font-family: Georgia, "Noto Serif SC", "Source Han Serif CN", serif;
   font-size: 20px; text-align: center; color: #1a1a2e;
-  background-color: #fafaf8; margin: 0; padding: 0;
+  margin: 0; padding: 0;
   position: relative; min-height: 300px;
   display: flex; align-items: center; justify-content: center;
 }
@@ -96,7 +96,7 @@ const CSS_DICTIONARY = `
 .anki-card {
   font-family: "Palatino Linotype", "Book Antiqua", Georgia, serif;
   font-size: 17px; text-align: left; color: #2d2a26;
-  background-color: #fefcf3; margin: 0; padding: 0; line-height: 1.55;
+  margin: 0; padding: 0; line-height: 1.55;
 }
 .anki-card .container { max-width: 580px; margin: 0 auto; padding: 24px 28px; border: 1px solid #e0dcd0; box-shadow: 2px 2px 8px rgba(0,0,0,0.06); }
 .anki-card .image-box { display: none; }
@@ -718,7 +718,7 @@ export const CardPreview = ({ cards, cardStyles, currentIndex, onPrevious, onNex
       </div>
 
       {/* 卡片：正面 → 翻转 → 背面 */}
-      <div className="border-2 border-dashed border-gray-300 rounded-lg overflow-hidden dark:border-gray-600">
+      <div className="bg-white dark:bg-gray-900 rounded-lg overflow-hidden">
         {isCustomTheme ? (
           <CustomThemePane theme={theme} card={card} showAnswer={showAnswer} />
         ) : showAnswer ? (

@@ -32,23 +32,6 @@
   display: block;
 }
 
-/* ── 占位区域 ── */
-.placeholder-box {
-  height: 140px;
-  background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
-  border-radius: 10px;
-  margin-bottom: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px dashed #a5d6a7;
-}
-
-.placeholder-icon {
-  font-size: 2.4em;
-  opacity: 0.5;
-}
-
 /* ── 提示文字 ── */
 .hint-text {
   text-align: center;
