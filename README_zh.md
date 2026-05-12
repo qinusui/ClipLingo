@@ -165,6 +165,22 @@ AI 筛选（快速，只返回推荐/跳过 + 原因）
 
 主题和结构自由组合（2×4 = 8 种搭配），处理前可实时预览。
 
+### 主题定制
+
+**CSS 变量编辑器**（仅内置主题）：可微调背景色、文字色、强调色、字体、字号、内边距、圆角和阴影，所见即所得。修改按主题独立保存，自动应用到 .apkg 生成和 AnkiConnect 同步。
+
+**自定义主题导入**（ZIP 模板包）：导入完全自定义的 HTML/CSS 卡片模板。详见[自定义卡片模板指南](docs/cliplingo-custom-themes.md)。合法的主题 ZIP 包含：
+
+```
+my-theme.zip
+├── theme.json    # { "name": "my-theme", "label": "我的主题", "version": 1 }
+├── front.html    # 正面模板（使用 {{sentence}}、{{translation}} 等变量）
+├── back.html     # 背面模板
+└── style.css     # 样式表
+```
+
+模板变量使用小写（`{{sentence}}`、`{{translation}}`、`{{annotation}}`、`{{audio}}`、`{{screenshot}}`、`{{word}}`、`{{definition}}`），会自动映射为 Anki 标准字段名。完整支持 Anki 条件语法（`{{#word}}...{{/word}}`、`{{^screenshot}}...{{/screenshot}}`）。
+
 ## 卡片示例
 
 ![卡片格式示例](docs/example.png)

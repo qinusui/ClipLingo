@@ -171,7 +171,7 @@ Themes and structures can be freely combined, with real-time preview before gene
 
 **CSS Variable Editor** (built-in themes only): Tweak individual visual properties — background color, text color, accent color, fonts, font sizes, padding, border radius, and shadow — with instant live preview. Changes are saved per theme and automatically applied to .apkg generation and AnkiConnect sync.
 
-**Custom Theme Import** (ZIP packages): Import fully custom card templates for complete control over HTML/CSS. A valid theme ZIP contains:
+**Custom Theme Import** (ZIP packages): Import fully custom card templates for complete control over HTML/CSS. See the [Custom Card Template Guide](docs/cliplingo-custom-themes-en.md) for a full walkthrough. A valid theme ZIP contains:
 
 ```
 my-theme.zip
