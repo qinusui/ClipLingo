@@ -343,9 +343,13 @@ def _build_screening_prompt(custom_prompt: str = None, source_language: str = "e
 # ─────────────────── 两阶段 AI：注释专用提示词 ───────────────────
 
 # 注释标准（用户可自定义部分）
-ANNOTATION_GRAMMAR_CRITERIA = """你是{source_language}学习教材编写专家。为输入的字幕列表（已筛选为值得学习的内容）提供翻译和语法句型注释。"""
+ANNOTATION_GRAMMAR_CRITERIA = """你是{source_language}学习教材编写专家。为输入的字幕列表（已筛选为值得学习的内容）提供翻译和语法句型注释。
 
-ANNOTATION_VOCAB_CRITERIA = """你是{target_language}词汇教学专家。为输入的字幕列表（已筛选为值得学习的内容）提供翻译和词汇注释。"""
+每条字幕可能附带 prev_text（前一句原文）和 next_text（后一句原文），用于理解语境、解析指代和省略——请参考上下文但只翻译和注释当前句。"""
+
+ANNOTATION_VOCAB_CRITERIA = """你是{target_language}词汇教学专家。为输入的字幕列表（已筛选为值得学习的内容）提供翻译和词汇注释。
+
+每条字幕可能附带 prev_text（前一句原文）和 next_text（后一句原文），用于理解语境、解析指代和省略——请参考上下文但只翻译和注释当前句。"""
 
 # 返回格式（固定，后端自动追加，不暴露给用户修改）
 ANNOTATION_GRAMMAR_RETURN_FORMAT = """
@@ -476,6 +480,19 @@ def _dynamic_batches(subtitle_dicts: list, max_chars: int = 3000) -> list[list]:
         batches.append(current_batch)
 
     return batches
+
+
+def _inject_context(subtitle_dicts: list) -> list:
+    """为每条字幕注入前后各一句的文本作为翻译上下文"""
+    result = []
+    for i, item in enumerate(subtitle_dicts):
+        enriched = dict(item)
+        if i > 0:
+            enriched["prev_text"] = subtitle_dicts[i - 1].get("text", "")
+        if i < len(subtitle_dicts) - 1:
+            enriched["next_text"] = subtitle_dicts[i + 1].get("text", "")
+        result.append(enriched)
+    return result
 
 
 async def _call_ai_batch_async(client, system_prompt: str, batch: list, model_name: str,
@@ -785,10 +802,10 @@ async def ai_annotate_stream(request: AIAnnotateRequest):
         raise HTTPException(status_code=400, detail="需要提供 API Key")
 
     system_prompt = _build_annotation_prompt(request.purpose, request.source_language, request.target_language, request.custom_prompt)
-    subtitle_dicts = [
+    subtitle_dicts = _inject_context([
         {"index": s.index, "start_sec": s.start_sec, "end_sec": s.end_sec, "text": s.text}
         for s in request.subtitles
-    ]
+    ])
     api_base = request.api_base or "https://api.deepseek.com"
     model_name = request.model_name or "deepseek-chat"
 
@@ -798,12 +815,37 @@ async def ai_annotate_stream(request: AIAnnotateRequest):
 
     semaphore = asyncio.Semaphore(3)
 
+    # 预热缓存查找（惰性导入避免循环依赖）
+    cached_lookup = None
+    if request.task_id:
+        from api.annotate import get_cached_items
+        cached_lookup = get_cached_items(request.task_id, request.purpose)
+
     async def event_generator():
         client = AsyncOpenAI(api_key=api_key, base_url=api_base)
         yield f"data: {json.dumps({'type': 'start', 'total_batches': total_batches})}\n\n"
 
         async def run_batch(num: int, batch: list):
+            # 检查预热缓存：该批次全部命中则跳过 AI 调用
+            if cached_lookup:
+                cached_all = []
+                for item in batch:
+                    if item["index"] in cached_lookup:
+                        cached_all.append(cached_lookup[item["index"]])
+                    else:
+                        cached_all = None
+                        break
+                if cached_all is not None:
+                    return num, batch, cached_all, ""
+
             items, error = await _call_ai_batch_async(client, system_prompt, batch, model_name, semaphore)
+
+            # 合并缓存：优先使用预热结果
+            if not error and cached_lookup and items:
+                for i, item in enumerate(items):
+                    if item["index"] in cached_lookup:
+                        items[i] = cached_lookup[item["index"]]
+
             return num, batch, items, error
 
         tasks = [asyncio.create_task(run_batch(num, batch)) for num, batch in numbered_batches]

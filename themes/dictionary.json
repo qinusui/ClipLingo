@@ -1,1 +1,9 @@
-{}
+{
+  "--accent-color": "#00ff00",
+  "--card-bg": "#80ff00",
+  "--font-translation": "Consolas, \"Courier New\", monospace",
+  "--font-sentence": "",
+  "--card-shadow": "0 2px 13px rgba(0,0,0,0.15)",
+  "--card-padding": "26px",
+  "--card-radius": "16px"
+}

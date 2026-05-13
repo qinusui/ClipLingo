@@ -1,0 +1,8 @@
+{
+  "--card-bg": "#ff0080",
+  "--card-shadow": "0 2px 2px rgba(0,0,0,0.15)",
+  "--card-radius": "24px",
+  "--card-padding": "24px",
+  "--font-size-translation": "10px",
+  "--font-sentence": "Georgia, \"Noto Serif\", serif"
+}

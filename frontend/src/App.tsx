@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from './i18n';
-import { Film, Download, Info, Sparkles, ChevronDown, ChevronUp, MessageSquare, Sun, Moon, Monitor, BookOpen, GraduationCap, FolderOpen, X, ExternalLink, RefreshCw, FileSpreadsheet, FileJson } from 'lucide-react';
+import { Film, Download, Info, Sparkles, ChevronDown, ChevronUp, MessageSquare, Sun, Moon, Monitor, BookOpen, GraduationCap, FolderOpen, X, ExternalLink, RefreshCw, RotateCcw, FileSpreadsheet, FileJson } from 'lucide-react';
 import { Button } from './components/Button';
 import { Card, CardContent, CardHeader, CardTitle } from './components/Card';
 import { ProgressBar } from './components/ProgressBar';
@@ -14,6 +14,7 @@ import { CssVariableEditor } from './components/CssVariableEditor';
 import { ThemeImporter } from './components/ThemeImporter';
 import { TemplateMarketplace } from './components/TemplateMarketplace';
 import { AnkiSyncButton } from './components/AnkiSyncButton';
+import { PreheatIndicator } from './components/PreheatIndicator';
 import { SubtitleItem, ProcessedCard, AIRecommendation, CardStyle, CardTheme, ThemeOverrides, WorkflowPhase, AnnotationPurpose } from './types';
 import { subtitleAPI, processAPI, API_BASE_URL } from './services/api';
 import { themeAPI, type ThemeListItem } from './services/themeAPI';
@@ -220,9 +221,13 @@ function App() {
   const [annotationPurpose, setAnnotationPurpose] = useState<AnnotationPurpose | null>(null);
   const [annotateBatch, setAnnotateBatch] = useState(0);
   const [annotateTotalBatches, setAnnotateTotalBatches] = useState(0);
-  const [customPrompt, setCustomPrompt] = useState<string>(buildPresetPrompt(t('app.prompt.grammarScreenBody'), savedConfig?.sourceLanguage || 'en'));
+  const [customPrompt, setCustomPrompt] = useState<string>(
+    savedConfig?.customPrompt || buildPresetPrompt(t('app.prompt.grammarScreenBody'), savedConfig?.sourceLanguage || 'en')
+  );
   const [promptPreset, setPromptPreset] = useState<PresetKey>('grammar');
-  const [annotationPrompt, setAnnotationPrompt] = useState<string>(buildAnnotationPrompt(t('app.prompt.grammarAnnotateBody'), savedConfig?.sourceLanguage || 'en', savedConfig?.targetLanguage || 'zh'));
+  const [annotationPrompt, setAnnotationPrompt] = useState<string>(
+    savedConfig?.annotationPrompt || buildAnnotationPrompt(t('app.prompt.grammarAnnotateBody'), savedConfig?.sourceLanguage || 'en', savedConfig?.targetLanguage || 'zh')
+  );
   const [annotationPreset, setAnnotationPreset] = useState<AnnotationPresetKey>('grammar');
   const [showAnnotationPromptEditor, setShowAnnotationPromptEditor] = useState(false);
   const [selectRecommendedOnly, setSelectRecommendedOnly] = useState(false);
@@ -259,20 +264,13 @@ function App() {
   const [correctText, setCorrectText] = useState(false);
   const [filterBlacklist, setFilterBlacklist] = useState('');
 
-  // 页面关闭时通知后端退出
+  // 心跳：每 30 秒 ping 一次，后端超时 2 分钟无心跳自动关闭
   useEffect(() => {
-    const handleUnload = () => {
-      navigator.sendBeacon('/api/shutdown');
-    };
-    window.addEventListener('beforeunload', handleUnload);
-
-    // 心跳：每 30 秒 ping 一次，后端超时 2 分钟无心跳自动关闭
     const heartbeatInterval = setInterval(() => {
       fetch('/api/heartbeat', { method: 'POST' }).catch(() => {});
     }, 30000);
 
     return () => {
-      window.removeEventListener('beforeunload', handleUnload);
       clearInterval(heartbeatInterval);
     };
   }, []);
@@ -371,8 +369,8 @@ function App() {
 
   // AI 配置变化时自动保存到 localStorage
   useEffect(() => {
-    localStorage.setItem('anki_ai_config', JSON.stringify({ apiBase, modelName, apiKey, sourceLanguage, targetLanguage }));
-  }, [apiBase, modelName, apiKey, sourceLanguage, targetLanguage]);
+    localStorage.setItem('anki_ai_config', JSON.stringify({ apiBase, modelName, apiKey, sourceLanguage, targetLanguage, customPrompt, annotationPrompt }));
+  }, [apiBase, modelName, apiKey, sourceLanguage, targetLanguage, customPrompt, annotationPrompt]);
 
   // 源语言变化时，同步更新预设提示词中的语言名称
   useEffect(() => {
@@ -481,6 +479,38 @@ function App() {
       else root.style.removeProperty(k);
     });
   }, [cardTheme, themeOverrides]);
+
+  // 后台预热：筛选完成后静默启动注释预计算
+  const preheatTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (workflowPhase === 'screened' && taskId && apiKey && !preheatTriggeredRef.current) {
+      preheatTriggeredRef.current = true;
+      const recommendedSubs = subtitles.filter(s => selectedIndices.has(s.index));
+      if (recommendedSubs.length > 0) {
+        for (const purpose of ['grammar', 'vocab'] as AnnotationPurpose[]) {
+          fetch(`${API_BASE_URL}/api/annotate/preheat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              task_id: taskId,
+              subtitles: recommendedSubs,
+              purpose,
+              api_key: apiKey,
+              api_base: apiBase || undefined,
+              model_name: modelName || undefined,
+              custom_prompt: annotationPrompt || undefined,
+              batch_size: recommendBatchSize,
+              source_language: sourceLanguage,
+              target_language: targetLanguage,
+            }),
+          }).catch(() => {});
+        }
+      }
+    }
+    if (workflowPhase === 'screening' || workflowPhase === 'idle') {
+      preheatTriggeredRef.current = false;
+    }
+  }, [workflowPhase, taskId, apiKey]);
 
   // 切换编辑器
   const handleToggleEditor = () => {
@@ -855,7 +885,8 @@ function App() {
         modelName || undefined,
         sourceLanguage,
         targetLanguage,
-        controller.signal
+        controller.signal,
+        taskId || undefined
       );
 
       for await (const event of stream) {
@@ -2078,6 +2109,14 @@ function App() {
                             {presetTemplates[key].label}
                           </button>
                         ))}
+                        <button
+                          onClick={() => setCustomPrompt(buildPresetPrompt(presetTemplates[promptPreset].prompt, sourceLanguage))}
+                          disabled={isRecommending}
+                          className="ml-auto px-2 py-1.5 text-xs text-gray-400 hover:text-gray-600 border border-gray-200 rounded hover:bg-gray-50 dark:text-gray-500 dark:hover:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700 disabled:opacity-50"
+                          title={t('app.step2.resetDefault')}
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                        </button>
                       </div>
                     </div>
                     <div>
@@ -2114,6 +2153,7 @@ function App() {
                     <p className="text-sm text-green-700 dark:text-green-300">
                       {t('app.step2.screeningDone', { count: Array.from(recommendations.values()).filter(r => r.include).length })}
                     </p>
+                    <PreheatIndicator taskId={taskId} />
                   </div>
                 )}
               </CardContent>
@@ -2172,6 +2212,13 @@ function App() {
                                 {annotationTemplates[key].label}
                               </button>
                             ))}
+                            <button
+                              onClick={() => setAnnotationPrompt(buildAnnotationPrompt(annotationTemplates[annotationPreset].prompt, sourceLanguage, targetLanguage))}
+                              className="ml-auto px-2 py-1.5 text-xs text-gray-400 hover:text-gray-600 border border-gray-200 rounded hover:bg-gray-50 dark:text-gray-500 dark:hover:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700"
+                              title={t('app.step2.resetDefault')}
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                            </button>
                           </div>
                         </div>
                         <div>

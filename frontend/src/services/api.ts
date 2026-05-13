@@ -233,7 +233,8 @@ export const subtitleAPI = {
     modelName?: string,
     sourceLanguage?: string,
     targetLanguage?: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    taskId?: string
   ): AsyncGenerator<{ type: string; total_batches?: number; batch?: number; items?: any[] }> {
     const response = await fetch(`${API_BASE_URL}/api/subtitles/ai-annotate-stream`, {
       method: 'POST',
@@ -247,7 +248,8 @@ export const subtitleAPI = {
         api_base: apiBase || undefined,
         model_name: modelName || undefined,
         source_language: sourceLanguage || 'en',
-        target_language: targetLanguage || 'zh'
+        target_language: targetLanguage || 'zh',
+        task_id: taskId || undefined
       }),
       signal
     });

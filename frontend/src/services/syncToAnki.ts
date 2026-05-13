@@ -16,653 +16,57 @@ import {
 const MODEL_NAME = 'ClipLingo';
 const DECK_PREFIX = 'ClipLingo';
 
-// ── 主题配置（复用 pack_apkg.py） ──
+// ── 模板缓存 ────────────────────────────────────────────
 
-type ThemeConfig = {
+type ThemeTemplate = {
   css: string;
   sentence: { front: string; back: string };
   vocab: { front: string; back: string };
 };
 
-const THEMES: Record<string, ThemeConfig> = {
-  default: {
-    css: `.card {
-  font-family: system-ui, -apple-system, sans-serif;
-  font-size: 18px;
-  text-align: center;
-  color: #2c3e50;
-  background-color: #f8f9fa;
-  margin: 0;
-  padding: 10px;
-}
-.container { max-width: 600px; margin: 0 auto; }
-.image-box img {
-  max-width: 100%;
-  height: auto;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-  margin-bottom: 10px;
-}
-.original { font-weight: 600; font-size: 1.2em; color: #000; margin-top: 15px; }
-.translation { color: #666; font-size: 0.95em; margin-top: 8px; }
-.notes {
-  text-align: left;
-  background: #fff;
-  border-left: 4px solid #007bff;
-  padding: 10px;
-  margin-top: 15px;
-  font-size: 0.9em;
-  border-radius: 4px;
-  white-space: pre-line;
-}
-.target-word {
-  font-size: 2.5em;
-  font-weight: 800;
-  color: #007bff;
-  margin: 40px 0 10px 0;
-}
-.word-meaning {
-  font-size: 1.4em;
-  color: #28a745;
-  font-weight: 500;
-  margin-bottom: 20px;
-}
-.hint {
-  color: #999;
-  font-size: 0.85em;
-  margin-top: 20px;
-}
-.example-box {
-  background: #f0f2f5;
-  padding: 15px;
-  border-radius: 12px;
-  text-align: left;
-  margin-top: 15px;
-}
-.example-box .tag {
-  display: inline-block;
-  font-size: 0.7em;
-  padding: 2px 8px;
-  background: #6c757d;
-  color: white;
-  border-radius: 4px;
-  margin-bottom: 8px;
-}
-.example-box .image-box img { width: 100%; height: auto; border-radius: 8px; }
-.example-box .original { font-weight: 600; font-size: 1em; color: #333; margin: 8px 0; }
-.nightMode .card { background-color: #1e1e1e; color: #eee; }
-.nightMode .translation { color: #aaa; }
-.nightMode .notes { background: #2d2d2d; border-left-color: #375a7f; }
-.nightMode .target-word { color: #4da6ff; }
-.nightMode .word-meaning { color: #5cb85c; }
-.nightMode .hint { color: #666; }
-.nightMode .example-box { background: #2d2d2d; }
-.nightMode .example-box .original { color: #ccc; }`,
-    sentence: {
-      front: `<div class="container">
-  <div class="image-box">{{Screenshot}}</div>
-  <div class="audio-box">{{Audio}}</div>
-  {{^Screenshot}}
-  <div class="original">{{Sentence}}</div>
-  {{/Screenshot}}
-</div>`,
-      back: `<div class="container">
-  <div class="image-box">{{Screenshot}}</div>
-  <hr id="answer">
-  <div class="text-content">
-    <div class="original">{{Sentence}}</div>
-    {{#Translation}}
-    <div class="translation">{{Translation}}</div>
-    {{/Translation}}
-    {{#Notes}}
-    <div class="notes">{{Notes}}</div>
-    {{/Notes}}
-  </div>
-</div>`,
-    },
-    vocab: {
-      front: `<div class="container">
-  {{#Word}}
-  <div class="target-word">{{Word}}</div>
-  <div class="hint">${i18n.t('ankiCard.vocabHintDefault')}</div>
-  {{/Word}}
-  {{^Word}}
-  <div class="original">{{Sentence}}</div>
-  {{/Word}}
-</div>`,
-      back: `<div class="container">
-  <div class="target-word">{{Word}}</div>
-  {{#Definition}}
-  <div class="word-meaning">{{Definition}}</div>
-  {{/Definition}}
-  <hr id="answer">
-  <div class="example-box">
-    <div class="tag">${i18n.t('ankiCard.exampleTagDefault')}</div>
-    {{#Screenshot}}
-    <div class="image-box">{{Screenshot}}</div>
-    {{/Screenshot}}
-    <div class="original">{{Sentence}}</div>
-    <div class="audio-box">{{Audio}}</div>
-  </div>
-</div>`,
-    },
-  },
-  minimal: {
-    css: `.card {
-  font-family: Georgia, "Noto Serif SC", "Source Han Serif CN", serif;
-  font-size: 20px;
-  text-align: center;
-  color: #1a1a2e;
-  background-color: #fafaf8;
-  margin: 0;
-  padding: 0;
-  position: relative;
-  min-height: 80vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.bg-image {
-  position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
-  opacity: 0.12;
-  background-size: cover;
-  background-position: center;
-  pointer-events: none;
-}
-.container {
-  position: relative;
-  max-width: 560px;
-  margin: 0 auto;
-  padding: 40px 30px;
-}
-.image-box { display: none; }
-.divider {
-  width: 40px;
-  height: 1px;
-  background: #c0b8a8;
-  margin: 24px auto;
-}
-.original {
-  font-weight: 600;
-  font-size: 1.3em;
-  line-height: 1.6;
-  color: #1a1a2e;
-  letter-spacing: 0.01em;
-}
-.translation {
-  color: #8a8578;
-  font-size: 0.95em;
-  margin-top: 12px;
-  line-height: 1.5;
-}
-.notes {
-  text-align: left;
-  background: #f5f2ec;
-  border-left: 3px solid #c0b8a8;
-  padding: 12px 14px;
-  margin-top: 20px;
-  font-size: 0.88em;
-  border-radius: 0 4px 4px 0;
-  white-space: pre-line;
-  color: #5a5550;
-}
-.target-word {
-  font-size: 2.8em;
-  font-weight: 700;
-  color: #1a1a2e;
-  margin: 0 0 8px 0;
-  letter-spacing: -0.02em;
-}
-.hint {
-  color: #b0a898;
-  font-size: 0.85em;
-  font-style: italic;
-}
-.word-meaning {
-  font-size: 1.2em;
-  color: #6b8f71;
-  font-weight: 500;
-  margin: 16px 0;
-}
-.divider { margin: 20px auto; }
-.example-box {
-  background: #f5f2ec;
-  padding: 20px;
-  border-radius: 8px;
-  text-align: left;
-  margin-top: 20px;
-}
-.example-box .tag {
-  display: inline-block;
-  font-size: 0.65em;
-  padding: 2px 8px;
-  background: transparent;
-  color: #b0a898;
-  border: 1px solid #d4cdc0;
-  border-radius: 3px;
-  margin-bottom: 10px;
-  letter-spacing: 0.05em;
-}
-.example-box .image-box { display: block; }
-.example-box .image-box img { width: 100%; height: auto; border-radius: 6px; margin-bottom: 12px; }
-.example-box .original { font-weight: 600; font-size: 1em; color: #1a1a2e; margin: 8px 0; line-height: 1.5; }
-.nightMode .card { background-color: #1a1a1a; color: #d4cdc0; }
-.nightMode .original { color: #e8e0d4; }
-.nightMode .translation { color: #8a8578; }
-.nightMode .notes { background: #252520; border-left-color: #5a5550; color: #a09888; }
-.nightMode .target-word { color: #e8e0d4; }
-.nightMode .hint { color: #666; }
-.nightMode .word-meaning { color: #7da882; }
-.nightMode .example-box { background: #252520; }
-.nightMode .example-box .original { color: #a09888; }`,
-    sentence: {
-      front: `<div class="bg-image" style="background-image: url({{Screenshot}})"></div>
-<div class="container">
-  <div class="image-box">{{Screenshot}}</div>
-  <div class="audio-box">{{Audio}}</div>
-  {{^Screenshot}}
-  <div class="original">{{Sentence}}</div>
-  {{/Screenshot}}
-</div>`,
-      back: `<div class="bg-image" style="background-image: url({{Screenshot}})"></div>
-<div class="container">
-  <div class="image-box">{{Screenshot}}</div>
-  <div class="original">{{Sentence}}</div>
-  <div class="divider"></div>
-  {{#Translation}}
-  <div class="translation">{{Translation}}</div>
-  {{/Translation}}
-  {{#Notes}}
-  <div class="notes">{{Notes}}</div>
-  {{/Notes}}
-</div>`,
-    },
-    vocab: {
-      front: `<div class="container">
-  {{#Word}}
-  <div class="target-word">{{Word}}</div>
-  <div class="hint">${i18n.t('ankiCard.vocabHintMinimal')}</div>
-  {{/Word}}
-  {{^Word}}
-  <div class="original">{{Sentence}}</div>
-  {{/Word}}
-</div>`,
-      back: `<div class="container">
-  <div class="target-word">{{Word}}</div>
-  {{#Definition}}
-  <div class="word-meaning">{{Definition}}</div>
-  {{/Definition}}
-  <div class="divider"></div>
-  <div class="example-box">
-    <div class="tag">${i18n.t('ankiCard.exampleTagMinimal')}</div>
-    {{#Screenshot}}
-    <div class="image-box">{{Screenshot}}</div>
-    {{/Screenshot}}
-    <div class="original">{{Sentence}}</div>
-    <div class="audio-box">{{Audio}}</div>
-  </div>
-</div>`,
-    },
-  },
-  netflix: {
-    css: `.card {
-  font-family: "Helvetica Neue", Arial, "PingFang SC", sans-serif;
-  font-size: 18px;
-  text-align: center;
-  color: #e5e5e5;
-  background-color: #141414;
-  margin: 0;
-  padding: 0;
-}
-.container { max-width: 600px; margin: 0 auto; padding: 16px; }
-.image-box img {
-  max-width: 100%;
-  height: auto;
-  border-radius: 6px;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
-}
-.audio-box { margin-top: 8px; }
-.original {
-  font-weight: 600;
-  font-size: 1.15em;
-  color: #ffffff;
-  margin-top: 14px;
-  line-height: 1.5;
-}
-.translation {
-  color: #e50914;
-  font-size: 0.95em;
-  margin-top: 8px;
-  font-weight: 500;
-}
-.notes {
-  text-align: left;
-  background: rgba(255,255,255,0.08);
-  border-left: 3px solid #e50914;
-  padding: 10px 12px;
-  margin-top: 14px;
-  font-size: 0.85em;
-  border-radius: 0 4px 4px 0;
-  white-space: pre-line;
-  color: #b3b3b3;
-}
-.progress-bar {
-  width: 100%;
-  height: 3px;
-  background: #333;
-  margin-top: 20px;
-  border-radius: 2px;
-}
-.target-word {
-  font-size: 3em;
-  font-weight: 800;
-  color: #e50914;
-  margin: 30px 0 10px 0;
-  text-shadow: 0 2px 8px rgba(229,9,20,0.3);
-}
-.hint {
-  color: #666;
-  font-size: 0.85em;
-  margin-top: 16px;
-}
-.word-meaning {
-  font-size: 1.3em;
-  color: #e5e5e5;
-  font-weight: 500;
-  margin: 16px 0;
-}
-.example-box {
-  background: rgba(255,255,255,0.05);
-  padding: 16px;
-  border-radius: 6px;
-  text-align: left;
-  margin-top: 16px;
-}
-.example-box .tag {
-  display: inline-block;
-  font-size: 0.65em;
-  padding: 2px 8px;
-  background: #e50914;
-  color: white;
-  border-radius: 3px;
-  margin-bottom: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-}
-.example-box .image-box img { width: 100%; height: auto; border-radius: 4px; margin-bottom: 10px; }
-.example-box .original { font-weight: 600; font-size: 1em; color: #e5e5e5; margin: 8px 0; }
-.nightMode .card { background-color: #0a0a0a; }
-.nightMode .translation { color: #ff3d47; }
-.nightMode .notes { background: rgba(255,255,255,0.04); border-left-color: #b20710; }
-.nightMode .target-word { color: #ff3d47; }
-.nightMode .word-meaning { color: #e5e5e5; }
-.nightMode .hint { color: #555; }
-.nightMode .example-box { background: rgba(255,255,255,0.03); }
-.nightMode .example-box .original { color: #e5e5e5; }`,
-    sentence: {
-      front: `<div class="container">
-  <div class="image-box">{{Screenshot}}</div>
-  <div class="audio-box">{{Audio}}</div>
-  {{^Screenshot}}
-  <div class="original">{{Sentence}}</div>
-  {{/Screenshot}}
-</div>`,
-      back: `<div class="container">
-  <div class="image-box">{{Screenshot}}</div>
-  <div class="original">{{Sentence}}</div>
-  {{#Translation}}
-  <div class="translation">{{Translation}}</div>
-  {{/Translation}}
-  {{#Notes}}
-  <div class="notes">{{Notes}}</div>
-  {{/Notes}}
-  <div class="progress-bar"></div>
-</div>`,
-    },
-    vocab: {
-      front: `<div class="container">
-  {{#Word}}
-  <div class="target-word">{{Word}}</div>
-  <div class="hint">${i18n.t('ankiCard.vocabHintNetflix')}</div>
-  {{/Word}}
-  {{^Word}}
-  <div class="original">{{Sentence}}</div>
-  {{/Word}}
-</div>`,
-      back: `<div class="container">
-  <div class="target-word">{{Word}}</div>
-  {{#Definition}}
-  <div class="word-meaning">{{Definition}}</div>
-  {{/Definition}}
-  <div class="example-box">
-    <div class="tag">${i18n.t('ankiCard.exampleTagNetflix')}</div>
-    {{#Screenshot}}
-    <div class="image-box">{{Screenshot}}</div>
-    {{/Screenshot}}
-    <div class="original">{{Sentence}}</div>
-    <div class="audio-box">{{Audio}}</div>
-  </div>
-</div>`,
-    },
-  },
-  dictionary: {
-    css: `.card {
-  font-family: "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
-  font-size: 17px;
-  text-align: left;
-  color: #2d2a26;
-  background-color: #fefcf3;
-  margin: 0;
-  padding: 0;
-  line-height: 1.55;
-}
-.container {
-  max-width: 580px;
-  margin: 0 auto;
-  padding: 24px 28px;
-  border: 1px solid #e0dcd0;
-  box-shadow: 2px 2px 8px rgba(0,0,0,0.06);
-}
-.image-box { display: none; }
-.section-label {
-  font-size: 0.7em;
-  font-weight: 700;
-  color: #8b7355;
-  text-transform: uppercase;
-  letter-spacing: 0.15em;
-  margin: 16px 0 6px 0;
-  padding-bottom: 4px;
-  border-bottom: 1px solid #e8e2d4;
-}
-.section-label:first-child { margin-top: 0; }
-.original {
-  font-weight: 600;
-  font-size: 1.1em;
-  color: #2d2a26;
-  line-height: 1.6;
-}
-.translation {
-  color: #5a5248;
-  font-size: 0.95em;
-  margin-top: 4px;
-}
-.notes {
-  background: #f5f0e4;
-  border-left: 3px solid #c4a96a;
-  padding: 10px 12px;
-  margin-top: 6px;
-  font-size: 0.85em;
-  border-radius: 0 3px 3px 0;
-  white-space: pre-line;
-  color: #4a4540;
-}
-.dict-divider {
-  border: none;
-  border-top: 1px solid #e0dcd0;
-  margin: 16px 0;
-}
-.clearfix::after {
-  content: "";
-  display: table;
-  clear: both;
-}
-.thumb {
-  float: right;
-  width: 140px;
-  margin: 0 0 12px 16px;
-  border: 1px solid #e0dcd0;
-  padding: 3px;
-  background: #fff;
-}
-.thumb .image-box { display: block; }
-.thumb .image-box img { width: 100%; height: auto; display: block; }
-.target-word {
-  font-size: 2em;
-  font-weight: 700;
-  color: #2d2a26;
-  margin: 0 0 4px 0;
-}
-.phonetic {
-  font-size: 0.95em;
-  color: #8b7355;
-  font-style: italic;
-  margin-bottom: 16px;
-}
-.hint {
-  color: #b0a898;
-  font-size: 0.82em;
-  font-style: italic;
-  margin-top: 16px;
-}
-.word-meaning {
-  font-size: 1.05em;
-  color: #2d2a26;
-  margin: 8px 0;
-}
-.example-box {
-  background: #f8f4ea;
-  padding: 14px 16px;
-  border-radius: 4px;
-  text-align: left;
-  margin-top: 12px;
-  border: 1px solid #e8e2d4;
-}
-.example-box .tag {
-  display: inline-block;
-  font-size: 0.6em;
-  padding: 1px 6px;
-  background: #8b7355;
-  color: #fefcf3;
-  border-radius: 2px;
-  margin-bottom: 8px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-}
-.example-box .image-box img { width: 100%; height: auto; border-radius: 3px; margin-bottom: 8px; }
-.example-box .original { font-weight: 600; font-size: 0.95em; color: #2d2a26; margin: 6px 0; }
-.nightMode .card { background-color: #1e1c18; color: #d4cdc0; }
-.nightMode .container { border-color: #3a3530; box-shadow: 2px 2px 8px rgba(0,0,0,0.3); }
-.nightMode .section-label { color: #a09888; border-bottom-color: #3a3530; }
-.nightMode .original { color: #e8e0d4; }
-.nightMode .translation { color: #a09888; }
-.nightMode .notes { background: #2a2720; border-left-color: #8b7355; color: #b0a898; }
-.nightMode .dict-divider { border-top-color: #3a3530; }
-.nightMode .thumb { border-color: #3a3530; }
-.nightMode .target-word { color: #e8e0d4; }
-.nightMode .phonetic { color: #a09888; }
-.nightMode .hint { color: #666; }
-.nightMode .word-meaning { color: #d4cdc0; }
-.nightMode .example-box { background: #2a2720; border-color: #3a3530; }
-.nightMode .example-box .original { color: #a09888; }`,
-    sentence: {
-      front: `<div class="container">
-  <div class="image-box">{{Screenshot}}</div>
-  <div class="audio-box">{{Audio}}</div>
-  <div class="section-label">Sentence</div>
-  {{#Screenshot}}
-  <div class="original" style="text-align: center;">${i18n.t('ankiCard.listenAndRecall')}</div>
-  {{/Screenshot}}
-  {{^Screenshot}}
-  <div class="original" style="text-align: center;">{{Sentence}}</div>
-  {{/Screenshot}}
-</div>`,
-      back: `<div class="container clearfix">
-  <div class="section-label">Sentence</div>
-  {{#Screenshot}}
-  <div class="thumb"><div class="image-box">{{Screenshot}}</div></div>
-  {{/Screenshot}}
-  <div class="original">{{Sentence}}</div>
+const _templateCache = new Map<string, ThemeTemplate>();
 
-  {{#Translation}}
-  <div class="section-label">Translation</div>
-  <div class="translation">{{Translation}}</div>
-  {{/Translation}}
+/** 从后端获取主题模板（内置 + 自定义），自动注入 CSS 变量覆盖 */
+async function fetchTemplate(theme: string, overrides?: ThemeOverrides): Promise<ThemeTemplate> {
+  const cacheKey = theme + '\x00' + JSON.stringify(overrides || {});
+  const cached = _templateCache.get(cacheKey);
+  if (cached) return cached;
 
-  {{#Notes}}
-  <div class="section-label">Notes</div>
-  <div class="notes">{{Notes}}</div>
-  {{/Notes}}
-
-  <hr class="dict-divider">
-  <div class="audio-box">{{Audio}}</div>
-</div>`,
-    },
-    vocab: {
-      front: `<div class="container">
-  {{#Word}}
-  <div class="target-word">{{Word}}</div>
-  <div class="phonetic">listen & recall</div>
-  <div class="hint">${i18n.t('ankiCard.vocabHintDictionary')}</div>
-  {{/Word}}
-  {{^Word}}
-  <div class="original" style="text-align: center;">{{Sentence}}</div>
-  {{/Word}}
-</div>`,
-      back: `<div class="container">
-  <div class="target-word">{{Word}}</div>
-
-  {{#Definition}}
-  <div class="section-label">Definition</div>
-  <div class="word-meaning">{{Definition}}</div>
-  {{/Definition}}
-
-  <div class="section-label">Context</div>
-  <div class="example-box">
-    <div class="tag">${i18n.t('ankiCard.videoContext')}</div>
-    {{#Screenshot}}
-    <div class="image-box">{{Screenshot}}</div>
-    {{/Screenshot}}
-    <div class="original">{{Sentence}}</div>
-    <div class="audio-box">{{Audio}}</div>
-  </div>
-</div>`,
-    },
-  },
-};
-
-function getThemeConfig(theme: string): ThemeConfig {
-  return THEMES[theme] || THEMES['default'];
-}
-
-/** 从后端加载自定义主题配置 */
-async function loadCustomThemeConfig(name: string): Promise<ThemeConfig | null> {
-  try {
-    const resp = await fetch(`/api/themes/custom/${name}`);
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    if (!data.front || !data.back || !data.css) return null;
-    return {
+  const resp = await fetch('/api/themes/template', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ theme, overrides: overrides || undefined }),
+  });
+  if (!resp.ok) {
+    // fallback: try default theme
+    const fallbackResp = await fetch('/api/themes/template', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ theme: 'default' }),
+    });
+    if (!fallbackResp.ok) {
+      throw new Error(`无法加载主题模板: ${resp.status}`);
+    }
+    const data = await fallbackResp.json();
+    const tpl: ThemeTemplate = {
       css: data.css,
-      sentence: { front: data.front, back: data.back },
-      vocab: { front: data.front, back: data.back },
+      sentence: { front: data.sentence.front, back: data.sentence.back },
+      vocab: { front: data.vocab.front, back: data.vocab.back },
     };
-  } catch {
-    return null;
+    _templateCache.set(cacheKey, tpl);
+    return tpl;
   }
+  const data = await resp.json();
+  const tpl: ThemeTemplate = {
+    css: data.css,
+    sentence: { front: data.sentence.front, back: data.sentence.back },
+    vocab: { front: data.vocab.front, back: data.vocab.back },
+  };
+  _templateCache.set(cacheKey, tpl);
+  return tpl;
 }
 
-// ── 同步接口 ──
+// ── 同步接口 ────────────────────────────────────────────
 
 export interface SyncProgress {
   current: number;
@@ -689,28 +93,6 @@ export type SyncResult = {
  * @param onProgress 进度回调
  * @param signal 中断信号
  */
-
-/** 将 CSS 变量覆盖注入到 Anki 模型 CSS */
-function _injectSyncOverrides(baseCss: string, overrides?: ThemeOverrides): string {
-  if (!overrides || Object.keys(overrides).length === 0) return baseCss;
-  const declarations = Object.entries(overrides)
-    .filter(([, v]) => v !== undefined && v !== '')
-    .map(([k, v]) => `  ${k}: ${v};`)
-    .join('\n');
-  if (!declarations) return baseCss;
-  return `/* ── 用户自定义样式覆盖 ── */
-:root {
-${declarations}
-}
-.card { background-color: var(--card-bg, inherit) !important; color: var(--card-text, inherit) !important; padding: var(--card-padding, inherit) !important; border-radius: var(--card-radius, inherit) !important; box-shadow: var(--card-shadow, none) !important; }
-.original, .sentence, .subtitle-text { font-family: var(--font-sentence, inherit) !important; font-size: var(--font-size-sentence, inherit) !important; }
-.translation { color: var(--translation-color, inherit) !important; font-family: var(--font-translation, inherit) !important; font-size: var(--font-size-translation, inherit) !important; }
-.notes, .annotation { color: var(--annotation-color, inherit) !important; }
-.container { border-color: var(--accent-color, inherit) !important; }
-hr, hr#answer, .divider { border-color: var(--accent-color, inherit) !important; }
-${baseCss}`;
-}
-
 export async function syncToAnki(
   cards: ProcessedCard[],
   deckName: string,
@@ -729,15 +111,9 @@ export async function syncToAnki(
   // 每次同步生成唯一标识，防止跨批次媒体文件覆盖导致错位
   const uid = Math.random().toString(36).slice(2, 8);
 
-  // 获取主题配置
-  let themeConfig = getThemeConfig(theme || 'default');
-  if (!THEMES[theme || 'default']) {
-    // 可能是自定义主题，尝试从后端加载
-    const custom = await loadCustomThemeConfig(theme || 'default');
-    if (custom) themeConfig = custom;
-  }
+  // 从后端获取主题模板（已注入 CSS 覆盖）
+  const tpl = await fetchTemplate(theme || 'default', themeOverrides);
   const styles = cardStyles || ['sentence'];
-  const css = _injectSyncOverrides(themeConfig.css, themeOverrides);
 
   // 1. 创建牌组
   await createDeck(fullName);
@@ -747,15 +123,15 @@ export async function syncToAnki(
   if (styles.includes('sentence')) {
     cardTemplates.push({
       Name: 'Sentence Card',
-      Front: themeConfig.sentence.front,
-      Back: themeConfig.sentence.back,
+      Front: tpl.sentence.front,
+      Back: tpl.sentence.back,
     });
   }
   if (styles.includes('vocab')) {
     cardTemplates.push({
       Name: 'Vocab Card',
-      Front: themeConfig.vocab.front,
-      Back: themeConfig.vocab.back,
+      Front: tpl.vocab.front,
+      Back: tpl.vocab.back,
     });
   }
 
@@ -763,8 +139,8 @@ export async function syncToAnki(
   if (cardTemplates.length === 0) {
     cardTemplates.push({
       Name: 'Sentence Card',
-      Front: themeConfig.sentence.front,
-      Back: themeConfig.sentence.back,
+      Front: tpl.sentence.front,
+      Back: tpl.sentence.back,
     });
   }
 
@@ -772,7 +148,7 @@ export async function syncToAnki(
   await createModel({
     modelName: MODEL_NAME,
     inOrderFields: ['Sentence', 'Screenshot', 'Audio', 'Translation', 'Notes', 'Word', 'Definition'],
-    css,
+    css: tpl.css,
     cardTemplates,
   });
 

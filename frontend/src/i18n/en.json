@@ -9,7 +9,8 @@
     "showAnswer": "Show Answer",
     "playAudio": "Play Audio",
     "pause": "Pause",
-    "noAudio": "No Audio"
+    "noAudio": "No Audio",
+    "loadError": "Failed to load template"
   },
   "subtitleTable": {
     "selectAll": "Select All",
@@ -213,7 +214,10 @@
       "promptPreset": "Prompt Preset",
       "promptContentLabel": "Prompt Content (editable)",
       "promptPlaceholder": "Enter custom prompt...",
-      "screeningDone": "Screening complete — {{count}} recommended. Confirm selection, then proceed to annotation."
+      "screeningDone": "Screening complete — {{count}} recommended. Confirm selection, then proceed to annotation.",
+      "resetDefault": "Reset to default",
+      "preheating": "Background preprocessing {{done}}/{{total}}…",
+      "preheatDone": "Preprocessing complete, annotation will display instantly"
     },
     "step3": {
       "title": "AI Annotation",

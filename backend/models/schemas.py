@@ -148,6 +148,7 @@ class AIAnnotateRequest(BaseModel):
     batch_size: int = 30
     source_language: str = Field(default="en", description="源语言代码")
     target_language: str = Field(default="zh", description="目标语言代码")
+    task_id: Optional[str] = Field(default=None, description="任务ID，用于查询预热缓存")
 
 
 class CardPreviewRequest(BaseModel):

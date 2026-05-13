@@ -5,6 +5,7 @@
 - GET  /api/themes/{theme}            加载 CSS 变量覆盖
 - POST /api/themes/{theme}            保存 CSS 变量覆盖
 - POST /api/themes/import             导入自定义主题 ZIP 包
+- POST /api/themes/template           获取主题模板（供预览和同步使用）
 - DELETE /api/themes/{theme}          删除覆盖（恢复默认）
 - DELETE /api/themes/custom/{name}    删除自定义主题
 """
@@ -19,6 +20,8 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from pydantic import BaseModel
+
+from core.templates import get_theme
 
 router = APIRouter()
 
@@ -62,6 +65,11 @@ _ALLOWED_HTML = {
 
 class ThemeOverridesPayload(BaseModel):
     variables: dict  # { "--card-bg": "#1a1a2e", ... }
+
+
+class TemplateRequest(BaseModel):
+    theme: str = "default"
+    overrides: dict | None = None  # { "--card-bg": "#1a1a2e", ... }
 
 
 def _theme_file(theme: str) -> Path:
@@ -154,6 +162,31 @@ async def list_themes():
                     })
 
     return {"themes": themes}
+
+
+@router.post("/template")
+async def get_template(req: TemplateRequest):
+    """获取主题模板 HTML/CSS（供前端预览和 Anki 同步使用）
+
+    返回内置或自定义主题的完整模板，已注入 CSS 变量覆盖。
+    前端无需自己维护模板定义——这是模板的唯一真相来源。
+    """
+    theme_cfg = get_theme(req.theme, req.overrides)
+    if theme_cfg is None:
+        raise HTTPException(status_code=400, detail=f"无效的主题名：{req.theme}")
+    return {
+        "name": theme_cfg["name"],
+        "css": theme_cfg["css"],
+        "sentence": {
+            "front": theme_cfg["sentence"][0],
+            "back": theme_cfg["sentence"][1],
+        },
+        "vocab": {
+            "front": theme_cfg["vocab"][0],
+            "back": theme_cfg["vocab"][1],
+        },
+        "isCustom": theme_cfg.get("_custom", False),
+    }
 
 
 @router.get("/custom/{name}")

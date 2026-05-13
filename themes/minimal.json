@@ -1,4 +1,4 @@
 {
-  "--card-radius": "0px",
-  "--card-shadow": "0 2px 10px rgba(0,0,0,0.15)"
+  "--card-bg": "#1a1a2e",
+  "--card-text": "#ffffff"
 }

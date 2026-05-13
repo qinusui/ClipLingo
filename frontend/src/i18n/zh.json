@@ -9,7 +9,8 @@
     "showAnswer": "显示答案",
     "playAudio": "播放音频",
     "pause": "暂停",
-    "noAudio": "无音频"
+    "noAudio": "无音频",
+    "loadError": "模板加载失败"
   },
   "subtitleTable": {
     "selectAll": "全选",
@@ -213,7 +214,10 @@
       "promptPreset": "提示词预设",
       "promptContentLabel": "提示词内容（可自由修改）",
       "promptPlaceholder": "输入自定义提示词...",
-      "screeningDone": "筛选完成 — {{count}} 条推荐。确认选择后，进入下一步进行注释翻译。"
+      "screeningDone": "筛选完成 — {{count}} 条推荐。确认选择后，进入下一步进行注释翻译。",
+      "resetDefault": "恢复默认",
+      "preheating": "后台预处理中 {{done}}/{{total}}…",
+      "preheatDone": "预处理完成，注释将立即显示"
     },
     "step3": {
       "title": "AI 注释",
