@@ -60,9 +60,9 @@ Requires Python 3.10+, ffmpeg (in PATH), and Node.js 18+.
 
 - **AnkiConnect Sync**: Send cards directly to Anki without exporting .apkg files (requires [AnkiConnect](https://ankiweb.net/shared/info/2055492159) add-on), auto-uploads screenshots and audio, automatically skips duplicates
 - **Bidirectional Learned Words Sync**: Extracts learned words from ClipLingo decks in Anki, auto-skip during AI screening; also supports local SQLite tracking
-- **Whisper Transcription**: Built-in faster-whisper, transcribe video directly to subtitles (English/Japanese/Korean and more), cancellable, with timeout protection
-- **Two-Phase AI Workflow**: Screen first (quick learning value assessment) → then annotate (generate translations and notes based on purpose), both prompts fully customizable
-- **4 Built-in + Custom Card Themes**: Classic, Minimal Immersive, Netflix Stills, Dictionary — plus import your own HTML/CSS themes via ZIP
+- **Whisper Transcription**: Built-in faster-whisper, transcribe video directly to subtitles (English/Japanese/Korean and more), cancellable, with timeout protection. Models auto-download via China-optimized mirror; offline model import supported
+- **Two-Phase AI Workflow**: Screen first (quick learning value assessment) → then annotate (generate translations and notes based on purpose). Annotation is optional. Both prompts fully customizable
+- **Card Themes & AI Style Generator**: 4 built-in themes + custom ZIP import + AI generates card CSS from natural language descriptions
 - **CSS Variable Editor**: Fine-tune built-in theme colors, fonts, spacing, and shadows with live preview; changes persist per theme and carry into .apkg generation and AnkiConnect sync
 - **2 Card Structures**: Sentence cards (screenshot + audio → original text + translation + notes) and Vocab cards (word → definition + example)
 - **Multi-Video Processing**: Upload multiple videos at once with per-video subtitle assignment; merge all into one deck or generate independent decks per video
@@ -111,7 +111,7 @@ The interface uses a four-step vertical layout:
 
 1. **Prepare**: Upload one or more video files along with optional subtitle files (or auto-generate via Whisper). A video list table lets you assign subtitles per video, remove videos, or continue adding more. Choose merge mode (one combined deck) or independent mode (one deck per video).
 2. **AI Screen**: Set filter rules (duration/exclusion words), then click "AI Screen" — the table shows real-time recommendation/skip badges
-3. **AI Annotate**: Choose purpose (Grammar / Vocabulary), wait for annotation to complete
+3. **AI Annotate (optional)**: Choose purpose (Grammar / Vocabulary), wait for annotation to complete — or skip to generate basic cards without AI annotations
 4. **Style & Preview**: Choose card structure (sentence/vocab), visual theme (built-in or custom), fine-tune CSS variables for built-in themes, then preview card effects. Click "Generate" when satisfied. Then sync to Anki or download .apkg deck
 
 **Two usage modes:**
@@ -137,9 +137,9 @@ The sync process auto-creates decks (`ClipLingo::videoName`), uploads screenshot
 ```
 AI Screen (fast, returns only include/skip + reason)
     ↓ User confirms selection
-Choose purpose: Grammar or Vocabulary
+Choose purpose: Grammar or Vocabulary (optional skip)
     ↓ AI generates translations and annotations based on purpose
-Choose card structure + visual theme + optional CSS tweaks
+Choose card structure + visual theme + AI style generator (optional)
     ↓ Real-time preview
 Generate → Sync to Anki / Download .apkg
 ```
@@ -168,6 +168,8 @@ Both structures can be selected simultaneously to generate two sets of cards at 
 Themes and structures can be freely combined, with real-time preview before generation.
 
 ### Theme Customization
+
+**AI Style Generator**: Describe your desired card style in natural language (e.g. "Japanese magazine style, cream background, thin black fonts"), and AI generates the corresponding CSS with live preview. Supports iterative refinement.
 
 **CSS Variable Editor** (built-in themes only): Tweak individual visual properties — background color, text color, accent color, fonts, font sizes, padding, border radius, and shadow — with instant live preview. Changes are saved per theme and automatically applied to .apkg generation and AnkiConnect sync.
 
