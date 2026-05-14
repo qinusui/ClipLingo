@@ -40,7 +40,7 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.FFMPEG_NOT_FOUND: "未检测到 ffmpeg，请确保程序完整安装",
     ErrorCode.FFMPEG_FAILED: "媒体处理失败，视频文件可能已损坏",
     ErrorCode.WHISPER_NOT_INSTALLED: "Whisper 未安装，请在设置中安装语音识别组件",
-    ErrorCode.WHISPER_MODEL_FAILED: "Whisper 模型加载失败，请检查网络连接",
+    ErrorCode.WHISPER_MODEL_FAILED: "Whisper 模型下载失败，请检查网络或手动下载模型",
     ErrorCode.WHISPER_TRANSCRIBE_FAILED: "语音识别失败，请重试或手动导入字幕",
     ErrorCode.WHISPER_TIMEOUT: "语音识别超时，请尝试使用更小的模型",
     ErrorCode.SUBTITLE_EMPTY: "没有符合条件的字幕，请调整筛选条件",

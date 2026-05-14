@@ -21,6 +21,18 @@ from errors import ClipLingoError, ErrorCode
 
 logger = logging.getLogger(__name__)
 
+# 离线模型目录：frozen 模式用 %APPDATA%，开发模式用项目根目录
+if getattr(sys, 'frozen', False):
+    LOCAL_MODEL_DIR = Path(os.environ.get('APPDATA', os.path.expanduser('~'))) / 'ClipLingo' / 'models'
+else:
+    LOCAL_MODEL_DIR = Path(__file__).parent.parent / 'models'
+
+# 下载源优先级：国内镜像优先
+HF_SOURCES = [
+    ("https://hf-mirror.com",   "HF 镜像"),
+    ("https://huggingface.co",  "HuggingFace 主站"),
+]
+
 
 def is_whisper_installed() -> bool:
     """检查 whisper 是否可用"""
@@ -82,15 +94,16 @@ def get_whisper() -> Optional[Any]:
         return None
 
 
-def load_model(model_name: str = "base") -> Optional[Any]:
-    """加载 faster-whisper WhisperModel（下载失败自动走镜像重试）"""
-    # 确保 huggingface token 文件存在，避免 OSError
+def _ensure_hf_token():
+    """确保 huggingface token 文件存在，避免 OSError"""
     token_path = os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "token")
     if not os.path.exists(token_path):
         os.makedirs(os.path.dirname(token_path), exist_ok=True)
         open(token_path, "w").close()
 
-    # 修复 PyInstaller 打包后 SSL 证书验证失败的问题
+
+def _ensure_ssl_cert():
+    """修复 PyInstaller 打包后 SSL 证书验证失败的问题"""
     if not os.environ.get("SSL_CERT_FILE"):
         try:
             import certifi
@@ -98,43 +111,58 @@ def load_model(model_name: str = "base") -> Optional[Any]:
         except ImportError:
             pass
 
+
+def _check_offline_model(model_name: str) -> Optional[Path]:
+    """检查本地是否有离线模型文件，返回模型目录路径或 None"""
+    model_dir = LOCAL_MODEL_DIR / model_name
+    model_bin = model_dir / "model.bin"
+    if model_bin.exists():
+        logger.info(f"检测到离线模型: {model_dir}")
+        return model_dir
+    return None
+
+
+def load_model(model_name: str = "base") -> Optional[Any]:
+    """
+    加载 faster-whisper WhisperModel
+
+    下载优先级：
+        1. 本地离线模型（%APPDATA%/ClipLingo/models/{model_name}/）
+        2. HF 镜像（hf-mirror.com，国内优化）
+        3. HuggingFace 主站
+    """
     faster_whisper = get_whisper()
     if faster_whisper is None:
         return None
 
-    def _try_load():
-        return faster_whisper.WhisperModel(model_name)
+    _ensure_hf_token()
+    _ensure_ssl_cert()
 
-    # 网络错误关键词（huggingface_hub / requests / urllib3 常见错误）
-    _NET_ERR = ("timeout", "connection", "unreachable", "refused", "reset",
-                "host", "network", "dns", "getaddrinfo", "name or service",
-                "tls", "ssl", "certificate", "eof", "broken pipe",
-                "nodata", "no data", "403", "502", "503")
-
-    def _is_network_error(err: Exception) -> bool:
-        msg = str(err).lower()
-        return any(kw in msg for kw in _NET_ERR)
-
-    try:
-        return _try_load()
-    except Exception as first_err:
-        if not _is_network_error(first_err):
-            raise ClipLingoError(ErrorCode.WHISPER_MODEL_FAILED, str(first_err)[:200])
-
-        # 网络错误 → 切换 HuggingFace 镜像重试
-        mirror = "https://hf-mirror.com"
-        logger.info(f"模型下载失败（{str(first_err)[:100]}），尝试镜像 {mirror}")
-        old_endpoint = os.environ.get("HF_ENDPOINT")
-        os.environ["HF_ENDPOINT"] = mirror
+    # 1. 离线模型优先
+    offline_path = _check_offline_model(model_name)
+    if offline_path is not None:
         try:
-            return _try_load()
-        except Exception as second_err:
-            # 恢复旧值
-            if old_endpoint is not None:
-                os.environ["HF_ENDPOINT"] = old_endpoint
-            else:
-                os.environ.pop("HF_ENDPOINT", None)
-            raise ClipLingoError(ErrorCode.WHISPER_MODEL_FAILED,
-                                f"镜像重试也失败: {str(second_err)[:150]}")
-        if old_endpoint is None:
-            os.environ.pop("HF_ENDPOINT", None)
+            return faster_whisper.WhisperModel(str(offline_path), local_files_only=True)
+        except Exception as e:
+            logger.warning(f"离线模型加载失败: {e}，尝试在线下载...")
+
+    # 2. 依次尝试在线下载源
+    last_error = None
+    for endpoint, label in HF_SOURCES:
+        os.environ["HF_ENDPOINT"] = endpoint
+        try:
+            logger.info(f"从 {label} 下载模型 {model_name}...")
+            model = faster_whisper.WhisperModel(model_name)
+            logger.info(f"模型下载成功（来源：{label}）")
+            return model
+        except Exception as e:
+            logger.warning(f"{label} 下载失败: {str(e)[:100]}")
+            last_error = e
+
+    # 3. 全部源都失败 → 给用户可操作的提示
+    offline_dir = LOCAL_MODEL_DIR / model_name
+    raise ClipLingoError(ErrorCode.WHISPER_MODEL_FAILED,
+        f"所有下载源均失败\n"
+        f"离线模型目录: {offline_dir}\n"
+        f"手动下载地址: https://hf-mirror.com/Systran/faster-whisper-{model_name}\n"
+        f"下载后把 model.bin 等文件放入上述目录即可")

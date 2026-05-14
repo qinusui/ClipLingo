@@ -1,66 +1,128 @@
 """
-测试 whisper_manager.py — 模型下载镜像重试
+测试 whisper_manager.py — 模型下载多源回退与离线模型
 """
 import sys
 import os
+import tempfile
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from core import whisper_manager
+
+
+class TestOfflineModel:
+    """离线模型检测与加载"""
+
+    def test_offline_model_detected(self):
+        """model.bin 存在时应检测为离线模型"""
+        with tempfile.TemporaryDirectory() as tmp:
+            model_dir = Path(tmp) / "base"
+            model_dir.mkdir(parents=True)
+            (model_dir / "model.bin").write_text("fake model")
+
+            # 临时覆盖离线目录
+            with patch.object(whisper_manager, 'LOCAL_MODEL_DIR', Path(tmp)):
+                result = whisper_manager._check_offline_model("base")
+                assert result == model_dir
+
+    def test_offline_model_not_found(self):
+        """model.bin 不存在时应返回 None"""
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(whisper_manager, 'LOCAL_MODEL_DIR', Path(tmp)):
+                result = whisper_manager._check_offline_model("large-v3")
+                assert result is None
+
+    def test_load_from_offline_model(self):
+        """离线模型存在时应优先从本地加载，不触发网络请求"""
+        mock_fw = MagicMock()
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.object(whisper_manager, 'LOCAL_MODEL_DIR', Path(tmp)),
+            patch.object(whisper_manager, 'get_whisper', return_value=mock_fw),
+        ):
+            model_dir = Path(tmp) / "small"
+            model_dir.mkdir(parents=True)
+            (model_dir / "model.bin").write_text("fake model")
+
+            whisper_manager.load_model("small")
+
+            mock_fw.WhisperModel.assert_called_once_with(
+                str(model_dir), local_files_only=True
+            )
+
+    def test_offline_model_corrupt_falls_through(self):
+        """离线模型存在但损坏，应继续尝试在线下载源"""
+        mock_fw = MagicMock()
+        mock_fw.WhisperModel.side_effect = [
+            OSError("model.bin invalid header"),  # 离线加载失败
+            MagicMock(),  # 在线下载成功
+        ]
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.object(whisper_manager, 'LOCAL_MODEL_DIR', Path(tmp)),
+            patch.object(whisper_manager, 'get_whisper', return_value=mock_fw),
+        ):
+            model_dir = Path(tmp) / "base"
+            model_dir.mkdir(parents=True)
+            (model_dir / "model.bin").write_text("corrupt")
+
+            result = whisper_manager.load_model("base")
+            assert result is not None
+            # 确认调用了两次：第一次离线失败，第二次在线成功
+            assert mock_fw.WhisperModel.call_count == 2
+
+
+class TestMultiSourceDownload:
+    """多下载源回退"""
+
+    def test_hf_mirror_first(self):
+        """第一个在线源应为 hf-mirror.com"""
+        assert whisper_manager.HF_SOURCES[0][0] == "https://hf-mirror.com"
+
+    def test_huggingface_is_last_resort(self):
+        """HuggingFace 主站应为最后一个源"""
+        assert whisper_manager.HF_SOURCES[-1][0] == "https://huggingface.co"
+
+    def test_second_source_used_when_first_fails(self):
+        """第一源失败后尝试第二源"""
+        mock_fw = MagicMock()
+        mock_fw.WhisperModel.side_effect = [
+            OSError("Connection refused"),  # hf-mirror 失败
+            MagicMock(),  # HuggingFace 成功
+        ]
+        with patch.object(whisper_manager, 'get_whisper', return_value=mock_fw):
+            result = whisper_manager.load_model("tiny")
+            assert result is not None
+            assert mock_fw.WhisperModel.call_count == 2
+
+    def test_all_sources_fail_raises_error(self):
+        """所有源失败应抛出 ClipLingoError"""
+        from errors import ClipLingoError, ErrorCode
+
+        mock_fw = MagicMock()
+        mock_fw.WhisperModel.side_effect = OSError("Connection refused")
+        with patch.object(whisper_manager, 'get_whisper', return_value=mock_fw):
+            try:
+                whisper_manager.load_model("tiny")
+                assert False, "应抛出异常"
+            except ClipLingoError as e:
+                assert e.code == ErrorCode.WHISPER_MODEL_FAILED
+                assert "离线模型目录" in e.detail
+                assert "hf-mirror.com" in e.detail
+
 
 class TestWhisperMirrorRetry:
-    """验证网络错误时自动切换 HuggingFace 镜像"""
-
-    def test_network_error_triggers_retry(self):
-        """网络错误（timeout/connection）应触发镜像重试"""
-        from core import whisper_manager
-
-        whisper_mock = MagicMock()
-        whisper_mock.WhisperModel.side_effect = [
-            OSError("Connection timeout"),
-            MagicMock(),  # 第二次成功
-        ]
-
-        # Mock _try_load 的行为
-        call_count = [0]
-        errors = [OSError("Connection timeout"), None]
-        returned = [None, MagicMock()]
-
-        def _mock_try_load():
-            idx = call_count[0]
-            call_count[0] += 1
-            if errors[idx]:
-                raise errors[idx]
-            return returned[idx]
-
-        net_keywords = ("timeout", "connection", "dns", "ssl", "refused", "host", "network")
-
-        def _is_network_error(err):
-            return any(kw in str(err).lower() for kw in net_keywords)
-
-        # 模拟 load_model 的逻辑
-        try:
-            _mock_try_load()
-        except Exception as first_err:
-            assert _is_network_error(first_err), "应识别为网络错误"
-            os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-            try:
-                result = _mock_try_load()
-                assert result is not None, "镜像重试应成功"
-            finally:
-                os.environ.pop("HF_ENDPOINT", None)
-
-        assert call_count[0] == 2, f"应有两次调用（原站失败 + 镜像重试），实际 {call_count[0]}"
+    """验证网络错误关键词覆盖（保留原有测试）"""
 
     def test_non_network_error_no_retry(self):
-        """非网络错误（如模型文件损坏）不应触发镜像重试"""
+        """非网络错误不应被误判"""
         net_keywords = ("timeout", "connection", "dns", "ssl", "refused", "host", "network")
 
         def _is_network_error(err):
             return any(kw in str(err).lower() for kw in net_keywords)
 
-        # 模型损坏错误不含网络关键词
         err = OSError("model file corrupted: invalid header")
         assert not _is_network_error(err), "模型损坏不应被识别为网络错误"
 
