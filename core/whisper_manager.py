@@ -73,6 +73,21 @@ def _get_source_order() -> list:
     return _cached_source_order
 
 
+def _set_hf_endpoint(endpoint: str):
+    """设置 HF_ENDPOINT 并同步更新 huggingface_hub 模块常量
+
+    huggingface_hub.constants 的 ENDPOINT / HUGGINGFACE_CO_URL_TEMPLATE 是模块级常量，
+    import 时求值，只改环境变量不会更新。必须同步修改常量，否则文件下载 URL 仍指向旧端点。
+    """
+    os.environ["HF_ENDPOINT"] = endpoint
+    try:
+        import huggingface_hub.constants as hf_const
+        hf_const.ENDPOINT = endpoint.rstrip("/")
+        hf_const.HUGGINGFACE_CO_URL_TEMPLATE = endpoint.rstrip("/") + "/{repo_id}/resolve/{revision}/{filename}"
+    except ImportError:
+        pass
+
+
 def is_whisper_installed() -> bool:
     """检查 whisper 是否可用"""
     try:
@@ -188,7 +203,7 @@ def load_model(model_name: str = "base") -> Optional[Any]:
     sources = _get_source_order()
     last_error = None
     for endpoint, label in sources:
-        os.environ["HF_ENDPOINT"] = endpoint
+        _set_hf_endpoint(endpoint)
         try:
             logger.info(f"从 {label} 下载模型 {model_name}...")
             model = faster_whisper.WhisperModel(model_name)
