@@ -32,7 +32,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   AI_PROCESS_FAILED: 'AI 处理失败，请检查 API 配置',
 
   // 通用
-  INTERNAL_ERROR: '程序内部错误，请重试',
+  INTERNAL_ERROR: '程序内部错误，请重启程序后重试。如仍出现，请查看日志或提交 issue',
 }
 
 /**
@@ -42,6 +42,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
  * @param fallback - 无匹配时的兜底文本
  */
 export function getFriendlyMessage(errorCode?: string | null, fallback?: string): string {
+  // 后端 get_message() 已格式化好完整信息，优先使用
+  if (fallback && fallback.length > 0 && !fallback.startsWith('未知错误')) {
+    return fallback
+  }
   if (errorCode && ERROR_MESSAGES[errorCode]) {
     return ERROR_MESSAGES[errorCode]
   }

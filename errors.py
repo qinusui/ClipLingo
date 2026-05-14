@@ -46,7 +46,7 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.SUBTITLE_EMPTY: "没有符合条件的字幕，请调整筛选条件",
     ErrorCode.SUBTITLE_PARSE_FAILED: "字幕文件格式错误，请检查文件编码",
     ErrorCode.AI_PROCESS_FAILED: "AI 处理失败，请检查 API 配置",
-    ErrorCode.INTERNAL_ERROR: "程序内部错误，请重试",
+    ErrorCode.INTERNAL_ERROR: "程序内部错误，请重启程序后重试。如仍出现，请查看日志或提交 issue",
 }
 
 
