@@ -40,3 +40,15 @@ class TestTranslateError:
         """无法识别的错误默认为 INTERNAL_ERROR"""
         code, _ = translate_error(RuntimeError("something completely unexpected"))
         assert code == ErrorCode.INTERNAL_ERROR
+
+    def test_ai_empty_result_not_subtitle_parse_error(self):
+        """AI 筛选后无保留字幕不应归类为 SUBTITLE_PARSE_FAILED"""
+        code, _ = translate_error(RuntimeError("AI 处理后没有保留的字幕"))
+        assert code != ErrorCode.SUBTITLE_PARSE_FAILED
+
+    def test_subtitle_parse_keyword_still_matches_real_errors(self):
+        """真实字幕解析错误仍能正确归类"""
+        code, _ = translate_error(RuntimeError("字幕文件格式错误: illegal srt syntax"))
+        assert code == ErrorCode.SUBTITLE_PARSE_FAILED
+        code2, _ = translate_error(RuntimeError("无法解析字幕，请检查编码"))
+        assert code2 == ErrorCode.SUBTITLE_PARSE_FAILED

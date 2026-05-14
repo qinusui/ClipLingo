@@ -32,6 +32,7 @@ from core.parse_srt import parse_srt, filter_short_subtitles, Subtitle
 from core.ai_process import process_subtitles_with_ai, process_subtitles_two_phase
 from core.media_cut import process_media_items
 from core.pack_apkg import create_apkg
+from errors import ClipLingoError, ErrorCode
 
 
 def _apply_index_offset(items: list[dict], offset: int) -> list[dict]:
@@ -175,7 +176,7 @@ def _process_video_to_media(
                 processed = process_subtitles_with_ai(subtitles, api_key, api_base, model_name, source_language, target_language)
 
             if not processed:
-                raise ValueError(f"视频 {video_stem} AI 处理后没有保留的字幕")
+                raise ClipLingoError(ErrorCode.SUBTITLE_EMPTY, f"AI 处理后无保留字幕，请检查 API Key 是否有效或放宽筛选条件")
             progress(2, f"AI 处理完成，保留 {len(processed)} 条有价值内容",
                      {"retained": len(processed)})
         else:

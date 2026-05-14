@@ -100,10 +100,12 @@ _KEYWORD_MAP: list[tuple[str, ErrorCode]] = [
     # Whisper（仅匹配明确的"未安装"提示，避免误判其他 whisper 相关错误）
     ("whisper 未安装", ErrorCode.WHISPER_NOT_INSTALLED),
     ("whisper not installed", ErrorCode.WHISPER_NOT_INSTALLED),
-    # 字幕
+    # 字幕解析
     ("no subtitles", ErrorCode.SUBTITLE_EMPTY),
     ("没有符合条件的字幕", ErrorCode.SUBTITLE_EMPTY),
-    ("字幕", ErrorCode.SUBTITLE_PARSE_FAILED),
+    ("字幕文件格式", ErrorCode.SUBTITLE_PARSE_FAILED),
+    ("无法解析字幕", ErrorCode.SUBTITLE_PARSE_FAILED),
+    ("could not parse subtitle", ErrorCode.SUBTITLE_PARSE_FAILED),
 ]
 
 
