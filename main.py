@@ -132,7 +132,12 @@ def _process_video_to_media(
         raise ValueError(f"视频 {video_stem} 没有符合条件的字幕")
 
     # Step 2: AI 处理（如有预处理数据则跳过）
-    if pre_processed:
+    # 检查 pre_processed 是否包含实际 AI 富化数据（而非仅有索引的空壳）
+    has_ai_data = pre_processed and any(
+        pp.get("translation") or pp.get("notes") or pp.get("word")
+        for pp in pre_processed
+    )
+    if has_ai_data:
         if len(pre_processed) != len(subtitles):
             raise ValueError(f"视频 {video_stem} 预处理数据({len(pre_processed)})与字幕({len(subtitles)})数量不一致")
         processed = []
@@ -152,13 +157,19 @@ def _process_video_to_media(
     else:
         api_key = api_key or os.getenv("DEEPSEEK_API_KEY")
         if api_key:
-            if select_recommended_only and screen_system_prompt and annotation_system_prompt:
-                # 两阶段 AI：先筛选再注释（用户启用了"仅选推荐"）
-                progress(2, f"AI 筛选 + 注释 {len(subtitles)} 条字幕中...")
-                processed = process_subtitles_two_phase(
-                    subtitles, api_key, screen_system_prompt, annotation_system_prompt,
-                    api_base, model_name, source_language, target_language
-                )
+            if select_recommended_only and screen_system_prompt:
+                if annotation_system_prompt:
+                    progress(2, f"AI 筛选 + 注释 {len(subtitles)} 条字幕中...")
+                    processed = process_subtitles_two_phase(
+                        subtitles, api_key, screen_system_prompt, annotation_system_prompt,
+                        api_base, model_name, source_language, target_language
+                    )
+                else:
+                    progress(2, f"AI 筛选（仅筛选）{len(subtitles)} 条字幕中...")
+                    processed = process_subtitles_two_phase(
+                        subtitles, api_key, screen_system_prompt, None,
+                        api_base, model_name, source_language, target_language
+                    )
             else:
                 progress(2, f"AI 注释 {len(subtitles)} 条字幕中...")
                 processed = process_subtitles_with_ai(subtitles, api_key, api_base, model_name, source_language, target_language)

@@ -400,6 +400,10 @@
     "customThemes": "自定义主题",
     "confirmDelete": "确定要删除主题 \"{{name}}\" 吗？"
   },
+  "styleGenerator": {
+    "aiGenerateStyle": "AI 生成卡片样式",
+    "aiContinueAdjust": "AI 继续调整"
+  },
   "marketplace": {
     "title": "模板市场",
     "browse": "浏览社区模板",

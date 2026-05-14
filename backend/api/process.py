@@ -97,7 +97,7 @@ async def upload_and_process(
     source_language: str = Form("en"),
     target_language: str = Form("zh"),
     screen_prompt_criteria: Optional[str] = Form(None),
-    annotation_purpose: str = Form("grammar"),
+    annotation_purpose: Optional[str] = Form(None),
     annotation_prompt_criteria: Optional[str] = Form(None),
     select_recommended_only: bool = Form(False),
     stop_after_media: bool = Form(False),
@@ -224,12 +224,14 @@ async def upload_and_process(
                 source_language=source_language,
                 target_language=target_language,
             )
-            annotation_full_prompt = _build_annotation_prompt(
-                purpose=annotation_purpose,
-                source_language=source_language,
-                target_language=target_language,
-                custom_criteria=annotation_prompt_criteria,
-            )
+            annotation_full_prompt = None
+            if annotation_purpose:
+                annotation_full_prompt = _build_annotation_prompt(
+                    purpose=annotation_purpose,
+                    source_language=source_language,
+                    target_language=target_language,
+                    custom_criteria=annotation_prompt_criteria,
+                )
 
             # 构建 process_cards 参数
             process_kwargs = dict(

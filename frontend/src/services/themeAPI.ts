@@ -76,4 +76,11 @@ export const themeAPI = {
       throw new Error(err.detail || '删除失败');
     }
   },
+
+  /** 获取自定义主题的源文件（供 AI 继续调整使用） */
+  getCustomThemeFiles: async (name: string): Promise<{ name: string; label: string; front: string; back: string; css: string } | null> => {
+    const resp = await fetch(`${API_BASE}/custom/${name}`);
+    if (!resp.ok) return null;
+    return resp.json();
+  },
 };

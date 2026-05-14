@@ -400,6 +400,10 @@
     "customThemes": "Custom Themes",
     "confirmDelete": "Are you sure you want to delete theme \"{{name}}\"?"
   },
+  "styleGenerator": {
+    "aiGenerateStyle": "AI Generate Card Style",
+    "aiContinueAdjust": "Continue with AI"
+  },
   "marketplace": {
     "title": "Template Marketplace",
     "browse": "Browse Community Templates",

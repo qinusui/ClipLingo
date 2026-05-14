@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from './i18n';
-import { Film, Download, Info, Sparkles, ChevronDown, ChevronUp, MessageSquare, Sun, Moon, Monitor, BookOpen, GraduationCap, FolderOpen, X, ExternalLink, RefreshCw, RotateCcw, FileSpreadsheet, FileJson } from 'lucide-react';
+import { Film, Download, Info, Sparkles, ChevronDown, ChevronUp, MessageSquare, Sun, Moon, Monitor, BookOpen, GraduationCap, FolderOpen, X, ExternalLink, RefreshCw, RotateCcw, FileSpreadsheet, FileJson, Palette } from 'lucide-react';
 import { Button } from './components/Button';
 import { Card, CardContent, CardHeader, CardTitle } from './components/Card';
 import { ProgressBar } from './components/ProgressBar';
@@ -13,6 +13,7 @@ import { StyleThemeSelector } from './components/StyleThemeSelector';
 import { CssVariableEditor } from './components/CssVariableEditor';
 import { ThemeImporter } from './components/ThemeImporter';
 import { TemplateMarketplace } from './components/TemplateMarketplace';
+import { StyleGenerator } from './components/StyleGenerator';
 import { AnkiSyncButton } from './components/AnkiSyncButton';
 import { PreheatIndicator } from './components/PreheatIndicator';
 import { SubtitleItem, ProcessedCard, AIRecommendation, CardStyle, CardTheme, ThemeOverrides, WorkflowPhase, AnnotationPurpose } from './types';
@@ -72,21 +73,13 @@ function downloadString(content: string, filename: string, mimeType: string) {
   a.remove();
 }
 
-// 通过 fetch 下载 URL 文件（避免页面导航触发 beforeunload → shutdown）
-async function downloadUrl(url: string, filename: string) {
-  const response = await fetch(url);
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.detail || `下载失败 (HTTP ${response.status})`);
-  }
-  const blob = await response.blob();
-  const objectUrl = window.URL.createObjectURL(blob);
+// 直接浏览器下载（不经过 fetch+blob，避免大文件撑爆内存）
+function downloadUrl(url: string, filename: string) {
   const a = document.createElement('a');
-  a.href = objectUrl;
+  a.href = url;
   a.download = filename;
   document.body.appendChild(a);
   a.click();
-  window.URL.revokeObjectURL(objectUrl);
   a.remove();
 }
 
@@ -191,6 +184,9 @@ function App() {
   const [processedCards, setProcessedCards] = useState<ProcessedCard[] | null>(null);
 
   const [previewIndex, setPreviewIndex] = useState(0);
+  // 预览只展示前 10 张，避免渲染几百个 iframe 卡顿
+  const previewCards = useMemo(() => processedCards?.slice(0, 10) || [], [processedCards]);
+  const previewResult = useMemo(() => result?.slice(0, 10) || [], [result]);
   const [showHelp, setShowHelp] = useState(false);
   const [helpTab, setHelpTab] = useState<'basic' | 'advanced'>('basic');
 
@@ -230,7 +226,7 @@ function App() {
   );
   const [annotationPreset, setAnnotationPreset] = useState<AnnotationPresetKey>('grammar');
   const [showAnnotationPromptEditor, setShowAnnotationPromptEditor] = useState(false);
-  const [selectRecommendedOnly, setSelectRecommendedOnly] = useState(false);
+  const [selectRecommendedOnly, setSelectRecommendedOnly] = useState(true);
   const [cardStyles, setCardStyles] = useState<Set<CardStyle>>(new Set(['sentence']));
   const [cardTheme, setCardTheme] = useState<CardTheme>('default');
   const [themeOverrides, setThemeOverrides] = useState<Record<string, ThemeOverrides>>({});
@@ -240,6 +236,10 @@ function App() {
   const [customThemes, setCustomThemes] = useState<ThemeListItem[]>([]);
   const [showThemeImporter, setShowThemeImporter] = useState(false);
   const [showMarketplace, setShowMarketplace] = useState(false);
+  const [showStyleGenerator, setShowStyleGenerator] = useState(false);
+  const [styleGenInitialTheme, setStyleGenInitialTheme] = useState<{
+    name: string; label: string; front: string; back: string; css: string;
+  } | null>(null);
   const [showPromptEditor, setShowPromptEditor] = useState(false);
   const recommendBatchSize = 30;
   const [ffmpegInstalled, setFFmpegInstalled] = useState<boolean | null>(null);
@@ -450,13 +450,18 @@ function App() {
   // 加载自定义主题列表
   useEffect(() => {
     themeAPI.listThemes().then(themes => {
-      setCustomThemes(themes.filter(t => !t.isBuiltin));
+      // 忽略空响应（服务器错误时 listThemes 返回 []），避免清空已有列表
+      if (themes.length > 0) {
+        setCustomThemes(themes.filter(t => !t.isBuiltin));
+      }
     });
   }, []);
 
   const refreshCustomThemes = async () => {
     const themes = await themeAPI.listThemes();
-    setCustomThemes(themes.filter(t => !t.isBuiltin));
+    if (themes.length > 0) {
+      setCustomThemes(themes.filter(t => !t.isBuiltin));
+    }
   };
 
   const handleImportTheme = async (zipFile: File) => {
@@ -511,6 +516,18 @@ function App() {
       preheatTriggeredRef.current = false;
     }
   }, [workflowPhase, taskId, apiKey]);
+
+  // Esc 退出应用
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      fetch(`${API_BASE_URL}/api/shutdown`, { method: 'POST' }).finally(() => {
+        window.close();
+      });
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // 切换编辑器
   const handleToggleEditor = () => {
@@ -823,10 +840,12 @@ function App() {
         }
         setFailedIndices(failed);
 
-        const recommendedIndices = Array.from(prev.values())
-          .filter(r => r.include && !r.reason?.startsWith(t('app.error.processingFailed')))
-          .map(r => r.index);
-        setSelectedIndices(new Set(recommendedIndices));
+        if (selectRecommendedOnly) {
+          const recommendedIndices = Array.from(prev.values())
+            .filter(r => r.include && !r.reason?.startsWith(t('app.error.processingFailed')))
+            .map(r => r.index);
+          setSelectedIndices(new Set(recommendedIndices));
+        }
         return prev;
       });
 
@@ -921,16 +940,6 @@ function App() {
       }
       setWorkflowPhase('screened');
     }
-  };
-
-  // 仅选推荐
-  const selectRecommended = () => {
-    if (!recommendations) return;
-    setSelectRecommendedOnly(true);
-    const recommendedIndices = Array.from(recommendations.values())
-      .filter(r => r.include && !r.reason?.startsWith(t('app.error.processingFailed')))
-      .map(r => r.index);
-    setSelectedIndices(new Set(recommendedIndices));
   };
 
   // 重试失败的批次
@@ -1157,33 +1166,22 @@ function App() {
     if (!apkgPath) return;
 
     try {
-      // 使用后端返回的 apkg_url（包含 task_id 子目录）
-      const downloadUrl = apkgUrl
-        ? `${API_BASE_URL}${apkgUrl}`
-        : `/download/${encodeURIComponent(apkgPath)}`;
-      const response = await fetch(downloadUrl);
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || `下载失败 (HTTP ${response.status})`);
-      }
-      const blob = await response.blob();
+      // apkgUrl 已是 /output/... 的相对路径，直接用，避免跨域
+      const downloadUrl = apkgUrl || `/download/${encodeURIComponent(apkgPath)}`;
 
-      const url = window.URL.createObjectURL(blob);
+      // 直接浏览器下载，不经过 fetch+blob（大文件会撑爆内存）
       const a = document.createElement('a');
-      a.href = url;
+      a.href = downloadUrl;
       a.download = apkgPath.split('/').pop() || 'deck.apkg';
       document.body.appendChild(a);
       a.click();
-      window.URL.revokeObjectURL(url);
       a.remove();
 
-      // 下载后清理服务端文件
+      // 延迟清理服务端文件（等浏览器开始下载）
       if (taskId) {
-        try {
-          await processAPI.cleanup(taskId);
-        } catch (e) {
-          console.error('清理文件失败:', e);
-        }
+        setTimeout(async () => {
+          try { await processAPI.cleanup(taskId); } catch (e) { console.error('清理文件失败:', e); }
+        }, 3000);
       }
 
       // 清理界面状态，方便继续处理下一个视频
@@ -2029,14 +2027,17 @@ function App() {
                       {t('app.step2.stop')}
                     </Button>
                   )}
-                  {recommendations && workflowPhase !== 'idle' && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={selectRecommended}
-                    >
-                      {t('app.step2.selectRecommendedOnly')}
-                    </Button>
+                  {!!apiKey && (
+                    <label className="flex items-center gap-1.5 cursor-pointer ml-2">
+                      <input
+                        type="checkbox"
+                        checked={selectRecommendedOnly}
+                        onChange={e => setSelectRecommendedOnly(e.target.checked)}
+                        disabled={isRecommending}
+                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      />
+                      <span className="text-xs text-gray-600 dark:text-gray-400">{t('app.step2.selectRecommendedOnly')}</span>
+                    </label>
                   )}
                   {filteredSubtitles.length > 0 && (
                     <Button
@@ -2237,8 +2238,8 @@ function App() {
                   <div className="grid grid-cols-2 gap-4">
                     <button
                       onClick={() => handleAIAnnotate('grammar')}
-                      disabled={processingPhase !== "idle"}
-                      className="p-4 rounded-lg border-2 text-left transition-all border-gray-200 hover:border-primary-300 cursor-pointer dark:border-gray-700 dark:hover:border-primary-600"
+                      disabled={processingPhase !== "idle" || workflowPhase === 'screening'}
+                      className="p-4 rounded-lg border-2 text-left transition-all border-gray-200 hover:border-primary-300 cursor-pointer dark:border-gray-700 dark:hover:border-primary-600 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <div className="flex items-center gap-2 mb-1">
                         <BookOpen className="w-5 h-5 text-primary-600 dark:text-primary-400" />
@@ -2250,8 +2251,8 @@ function App() {
                     </button>
                     <button
                       onClick={() => handleAIAnnotate('vocab')}
-                      disabled={processingPhase !== "idle"}
-                      className="p-4 rounded-lg border-2 text-left transition-all border-gray-200 hover:border-primary-300 cursor-pointer dark:border-gray-700 dark:hover:border-primary-600"
+                      disabled={processingPhase !== "idle" || workflowPhase === 'screening'}
+                      className="p-4 rounded-lg border-2 text-left transition-all border-gray-200 hover:border-primary-300 cursor-pointer dark:border-gray-700 dark:hover:border-primary-600 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <div className="flex items-center gap-2 mb-1">
                         <GraduationCap className="w-5 h-5 text-primary-600 dark:text-primary-400" />
@@ -2326,7 +2327,7 @@ function App() {
           )}
 
           {/* Step 4 · 样式选择与处理 */}
-          {((workflowPhase === 'annotated' || (workflowPhase === 'idle' && !recommendations && subtitles.length > 0)) || processingPhase !== 'idle' || (result && result.length > 0)) && (
+          {((workflowPhase === 'annotated' || workflowPhase === 'screened' || (workflowPhase === 'idle' && !recommendations && subtitles.length > 0)) || processingPhase !== 'idle' || (result && result.length > 0)) && (
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -2367,28 +2368,66 @@ function App() {
                 {/* 4c: 样式预览（真实截图）+ 生成牌组按钮 */}
                 {processingPhase === 'awaiting_styles' && (
                   <div className="space-y-4">
-                    <StyleThemeSelector cardStyles={cardStyles} setCardStyles={setCardStyles} cardTheme={cardTheme} setCardTheme={setCardTheme} showEditor={editingStyles} onToggleEditor={handleToggleEditor} customThemes={customThemes} onImportClick={() => setShowThemeImporter(true)} onBrowseClick={() => setShowMarketplace(true)} onDeleteTheme={handleDeleteTheme} />
-                    {editingStyles && (
-                      <CssVariableEditor
-                        theme={cardTheme}
-                        overrides={pendingOverrides}
-                        onChange={handleOverrideChange}
-                        onSave={handleSaveOverrides}
-                        onReset={handleResetOverrides}
-                        onClose={handleToggleEditor}
-                        hasUnsaved={hasUnsavedOverrides}
-                      />
-                    )}
-                    {processedCards && processedCards.length > 0 && (
-                      <CardPreview
-                        cards={processedCards}
-                        cardStyles={Array.from(cardStyles)}
-                        theme={cardTheme}
-                        themeOverrides={themeOverrides[cardTheme]}
-                        currentIndex={previewIndex}
-                        onPrevious={() => setPreviewIndex(Math.max(0, previewIndex - 1))}
-                        onNext={() => setPreviewIndex(Math.min(processedCards.length - 1, previewIndex + 1))}
-                      />
+                    <StyleThemeSelector cardStyles={cardStyles} setCardStyles={setCardStyles} cardTheme={cardTheme} setCardTheme={setCardTheme} showEditor={editingStyles} onToggleEditor={handleToggleEditor} customThemes={customThemes} onImportClick={() => setShowThemeImporter(true)} onBrowseClick={() => setShowMarketplace(true)} onDeleteTheme={handleDeleteTheme} onAIGenerateClick={async () => {
+                      const isCustom = customThemes.some(t => t.name === cardTheme);
+                      if (isCustom) {
+                        const files = await themeAPI.getCustomThemeFiles(cardTheme);
+                        if (files) {
+                          setStyleGenInitialTheme({ name: files.name, label: files.label, front: files.front, back: files.back, css: files.css });
+                        }
+                      }
+                      setShowStyleGenerator(true);
+                    }} />
+                    <button onClick={() => { setStyleGenInitialTheme(null); setShowStyleGenerator(true); }} className="mt-2 w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600 transition-all shadow-md">
+                      <Palette className="w-4 h-4" />
+                      {t('styleGenerator.aiGenerateStyle')}
+                    </button>
+                    {editingStyles && processedCards && processedCards.length > 0 ? (
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+                        <CssVariableEditor
+                          theme={cardTheme}
+                          overrides={pendingOverrides}
+                          onChange={handleOverrideChange}
+                          onSave={handleSaveOverrides}
+                          onReset={handleResetOverrides}
+                          onClose={handleToggleEditor}
+                          hasUnsaved={hasUnsavedOverrides}
+                        />
+                        <CardPreview
+                          cards={previewCards}
+                          cardStyles={Array.from(cardStyles)}
+                          theme={cardTheme}
+                          themeOverrides={pendingOverrides}
+                          currentIndex={previewIndex}
+                          onPrevious={() => setPreviewIndex(Math.max(0, previewIndex - 1))}
+                          onNext={() => setPreviewIndex(Math.min(previewCards.length - 1, previewIndex + 1))}
+                        />
+                      </div>
+                    ) : (
+                      <>
+                        {editingStyles && (
+                          <CssVariableEditor
+                            theme={cardTheme}
+                            overrides={pendingOverrides}
+                            onChange={handleOverrideChange}
+                            onSave={handleSaveOverrides}
+                            onReset={handleResetOverrides}
+                            onClose={handleToggleEditor}
+                            hasUnsaved={hasUnsavedOverrides}
+                          />
+                        )}
+                        {previewCards.length > 0 && (
+                          <CardPreview
+                            cards={previewCards}
+                            cardStyles={Array.from(cardStyles)}
+                            theme={cardTheme}
+                            themeOverrides={editingStyles ? pendingOverrides : themeOverrides[cardTheme]}
+                            currentIndex={previewIndex}
+                            onPrevious={() => setPreviewIndex(Math.max(0, previewIndex - 1))}
+                            onNext={() => setPreviewIndex(Math.min(previewCards.length - 1, previewIndex + 1))}
+                          />
+                        )}
+                      </>
                     )}
                     <Button
                       variant="primary"
@@ -2416,13 +2455,13 @@ function App() {
                 {processingPhase === 'completed' && result && result.length > 0 && (
                   <div className="space-y-4">
                     <CardPreview
-                      cards={result}
+                      cards={previewResult}
                       cardStyles={Array.from(cardStyles)}
                       theme={cardTheme}
-                      themeOverrides={themeOverrides[cardTheme]}
+                      themeOverrides={editingStyles ? pendingOverrides : themeOverrides[cardTheme]}
                       currentIndex={previewIndex}
                       onPrevious={() => setPreviewIndex(Math.max(0, previewIndex - 1))}
-                      onNext={() => setPreviewIndex(Math.min(result.length - 1, previewIndex + 1))}
+                      onNext={() => setPreviewIndex(Math.min(previewResult.length - 1, previewIndex + 1))}
                     />
                     <Button variant="primary" className="w-full" onClick={handleDownload}>
                       <Download className="w-4 h-4 mr-2" />
@@ -2482,6 +2521,14 @@ function App() {
         <TemplateMarketplace
           onClose={() => setShowMarketplace(false)}
           onInstalled={refreshCustomThemes}
+        />
+      )}
+      {showStyleGenerator && (
+        <StyleGenerator
+          onClose={() => { setShowStyleGenerator(false); setStyleGenInitialTheme(null); }}
+          onImported={refreshCustomThemes}
+          initialTheme={styleGenInitialTheme || undefined}
+          previewCard={processedCards && processedCards.length > 0 ? processedCards[previewIndex] : undefined}
         />
       )}
     </div>

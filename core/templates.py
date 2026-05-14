@@ -18,7 +18,7 @@ _VARIABLE_OVERRIDE_TEMPLATE = """\
 {variable_declarations}
 }}
 
-.card {{ background-color: var(--card-bg, inherit) !important; color: var(--card-text, inherit) !important; padding: var(--card-padding, inherit) !important; border-radius: var(--card-radius, inherit) !important; box-shadow: var(--card-shadow, none) !important; }}
+.card {{ {bg_image_none}background-color: var(--card-bg, inherit) !important; color: var(--card-text, inherit) !important; padding: var(--card-padding, inherit) !important; border-radius: var(--card-radius, inherit) !important; box-shadow: var(--card-shadow, none) !important; }}
 .original, .sentence, .subtitle-text {{ font-family: var(--font-sentence, inherit) !important; font-size: var(--font-size-sentence, inherit) !important; }}
 .translation {{ color: var(--translation-color, inherit) !important; font-family: var(--font-translation, inherit) !important; font-size: var(--font-size-translation, inherit) !important; }}
 .notes, .annotation {{ color: var(--annotation-color, inherit) !important; }}
@@ -32,7 +32,11 @@ def inject_theme_overrides(css: str, overrides: dict | None) -> str:
     if not overrides:
         return css
     declarations = "\n".join(f"  {k}: {v};" for k, v in overrides.items())
-    override_css = _VARIABLE_OVERRIDE_TEMPLATE.format(variable_declarations=declarations)
+    bg_image_none = "background-image: none !important; " if "--card-bg" in overrides else ""
+    override_css = _VARIABLE_OVERRIDE_TEMPLATE.format(
+        variable_declarations=declarations,
+        bg_image_none=bg_image_none,
+    )
     return override_css + "\n" + css
 
 
@@ -594,6 +598,7 @@ _CSS_DICTIONARY = """\
   border: 1px solid #d4cfc0;
   border-radius: 3px;
 }
+.thumb .image-box { display: block; }
 .thumb img {
   width: 100%;
   height: auto;

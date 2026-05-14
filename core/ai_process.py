@@ -193,7 +193,7 @@ def process_subtitles_two_phase(
     subtitles: list,
     api_key: str,
     screen_system_prompt: str,
-    annotation_system_prompt: str,
+    annotation_system_prompt: str = None,
     api_base: str = None,
     model_name: str = None,
     source_language: str = "en",
@@ -205,12 +205,13 @@ def process_subtitles_two_phase(
     与前端两阶段工作流对应：
     - 阶段 1：AI 筛选 — 判断每条字幕是否值得学习
     - 阶段 2：AI 注释 — 为筛选通过的条目生成翻译和注释（include 始终为 true）
+      如果 annotation_system_prompt 为 None，跳过阶段 2
 
     Args:
         subtitles: Subtitle 对象列表
         api_key: API Key
         screen_system_prompt: 筛选阶段的完整 system prompt
-        annotation_system_prompt: 注释阶段的完整 system prompt
+        annotation_system_prompt: 注释阶段的完整 system prompt（None 则只筛选不注释）
         api_base: API 地址
         model_name: 模型名称
         source_language: 源语言代码
@@ -245,6 +246,24 @@ def process_subtitles_two_phase(
 
     if not included:
         return []
+
+    # 如果用户只想要筛选，跳过注释阶段
+    if annotation_system_prompt is None:
+        processed = []
+        for sub, screen_result in included:
+            processed.append({
+                "index": sub["index"],
+                "start_sec": sub["start_sec"],
+                "end_sec": sub["end_sec"],
+                "text": sub["text"],
+                "translation": "",
+                "notes": "",
+                "word": "",
+                "definition": "",
+                "reason": screen_result.get("reason", "") if isinstance(screen_result, dict) else "",
+            })
+        print(f"AI 筛选完成（仅筛选），保留 {len(processed)} 条")
+        return processed
 
     # ── 阶段 2：AI 注释 ──
     included_subs = [s for s, _ in included]

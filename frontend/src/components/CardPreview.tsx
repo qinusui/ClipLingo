@@ -28,11 +28,28 @@ interface ThemeTemplate {
 
 const _baseTemplateCache = new Map<string, ThemeTemplate>();
 
+async function fetchWithRetry(url: string, options: RequestInit, retries = 2): Promise<Response> {
+  let lastErr: Error | null = null;
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const resp = await fetch(url, options);
+      return resp;
+    } catch (e) {
+      lastErr = e instanceof Error ? e : new Error(String(e));
+      if (i < retries) {
+        // 短暂等待后重试（后端可能正忙）
+        await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+      }
+    }
+  }
+  throw lastErr!;
+}
+
 async function fetchBaseTemplate(theme: string): Promise<ThemeTemplate> {
   const cached = _baseTemplateCache.get(theme);
   if (cached) return cached;
 
-  const resp = await fetch('/api/themes/template', {
+  const resp = await fetchWithRetry('/api/themes/template', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ theme }),
@@ -47,13 +64,18 @@ async function fetchBaseTemplate(theme: string): Promise<ThemeTemplate> {
   });
 
   if (!resp.ok) {
-    const fb = await fetch('/api/themes/template', {
+    const detail = await resp.json().catch(() => ({ detail: resp.statusText }));
+    console.warn(`[CardPreview] 主题 "${theme}" 加载失败 (${resp.status}): ${detail.detail}，回退到 default`);
+    const fb = await fetchWithRetry('/api/themes/template', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ theme: 'default' }),
     });
+    if (!fb.ok) {
+      const fbDetail = await fb.json().catch(() => ({ detail: fb.statusText }));
+      throw new Error(`默认主题加载也失败 (${fb.status}): ${fbDetail.detail}`);
+    }
     const tpl = parse(await fb.json());
-    _baseTemplateCache.set(theme, tpl);
     return tpl;
   }
 
@@ -72,13 +94,14 @@ function buildOverrideCss(overrides?: ThemeOverrides): string {
   if (entries.length === 0) return '';
 
   const declarations = entries.map(([k, v]) => `  ${k}: ${v};`).join('\n');
+  const bgImageNone = overrides['--card-bg'] ? 'background-image: none !important; ' : '';
 
   return `/* ── 用户自定义样式覆盖 ── */
 :root {
 ${declarations}
 }
 
-.card { background-color: var(--card-bg, inherit) !important; color: var(--card-text, inherit) !important; padding: var(--card-padding, inherit) !important; border-radius: var(--card-radius, inherit) !important; box-shadow: var(--card-shadow, none) !important; }
+.card { ${bgImageNone}background-color: var(--card-bg, inherit) !important; color: var(--card-text, inherit) !important; padding: var(--card-padding, inherit) !important; border-radius: var(--card-radius, inherit) !important; box-shadow: var(--card-shadow, none) !important; }
 .original, .sentence, .subtitle-text { font-family: var(--font-sentence, inherit) !important; font-size: var(--font-size-sentence, inherit) !important; }
 .translation { color: var(--translation-color, inherit) !important; font-family: var(--font-translation, inherit) !important; font-size: var(--font-size-translation, inherit) !important; }
 .notes, .annotation { color: var(--annotation-color, inherit) !important; }
@@ -142,19 +165,35 @@ const TemplatePane = ({
   style: string;
   showAnswer: boolean;
 }) => {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
   const overrideCss = buildOverrideCss(overrides);
   const fullCss = overrideCss + tpl.css;
   const tmpl = style === 'vocab' ? tpl.vocab : tpl.sentence;
   const htmlFragment = renderTemplate(showAnswer ? tmpl.back : tmpl.front, card);
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${fullCss}</style></head><body>${htmlFragment}</body></html>`;
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${fullCss}</style></head><body><div class="card">${htmlFragment}</div></body></html>`;
+
+  const handleLoad = () => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+    try {
+      const body = iframe.contentWindow?.document?.body;
+      if (body) {
+        iframe.style.height = body.scrollHeight + 'px';
+      }
+    } catch {
+      // 跨域或 sandbox 限制时忽略
+    }
+  };
 
   return (
     <iframe
+      ref={iframeRef}
       key={`${style}-${showAnswer ? 'back' : 'front'}-${JSON.stringify(overrides)}`}
       srcDoc={html}
-      sandbox={tpl.isCustom ? 'allow-scripts' : undefined}
+      sandbox={tpl.isCustom ? 'allow-scripts allow-same-origin' : undefined}
       className="w-full min-h-[300px] border-0"
       title="Card Preview"
+      onLoad={handleLoad}
     />
   );
 };
@@ -189,7 +228,7 @@ export const CardPreview = ({
     setTplError(false);
     fetchBaseTemplate(theme)
       .then(t => { if (!cancelled) { setTpl(t); setTplLoading(false); } })
-      .catch(() => { if (!cancelled) { setTplError(true); setTplLoading(false); } });
+      .catch((err) => { if (!cancelled) { console.error('[CardPreview] 模板加载失败:', err); setTplError(true); setTplLoading(false); } });
     return () => { cancelled = true; };
   }, [theme]);
 

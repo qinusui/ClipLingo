@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { Sparkles } from 'lucide-react';
 import { CardStyle, CardTheme } from '../types';
 import type { ThemeListItem } from '../services/themeAPI';
 
@@ -13,6 +14,7 @@ interface StyleThemeSelectorProps {
   onImportClick?: () => void;
   onBrowseClick?: () => void;
   onDeleteTheme?: (name: string) => void;
+  onAIGenerateClick?: () => void;
 }
 
 const CARD_STYLES: { key: CardStyle }[] = [
@@ -38,6 +40,7 @@ export const StyleThemeSelector = ({
   onImportClick,
   onBrowseClick,
   onDeleteTheme,
+  onAIGenerateClick,
 }: StyleThemeSelectorProps) => {
   const { t } = useTranslation();
   const isCustom = customThemes.some(t => t.name === cardTheme);
@@ -161,8 +164,18 @@ export const StyleThemeSelector = ({
           </button>
         )}
       </div>
-      {/* 编辑样式按钮 — 仅内置主题可用 */}
-      {!isCustom && (
+      {/* 编辑样式按钮 — 内置主题：CSS 变量编辑；自定义主题：AI 继续调整 */}
+      {isCustom ? (
+        onAIGenerateClick && (
+          <button
+            onClick={onAIGenerateClick}
+            className="mt-2 w-full inline-flex items-center justify-center gap-1.5 px-2 py-1.5 rounded text-xs font-medium border border-purple-300 text-purple-600 bg-purple-50 hover:bg-purple-100 dark:border-purple-700 dark:text-purple-400 dark:bg-purple-900/20 dark:hover:bg-purple-900/40 transition-colors"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            {t('styleGenerator.aiContinueAdjust')}
+          </button>
+        )
+      ) : (
         <button
           onClick={onToggleEditor}
           className={`mt-2 w-full px-2 py-1.5 rounded text-xs font-medium border transition-colors ${

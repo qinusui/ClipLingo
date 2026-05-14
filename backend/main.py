@@ -79,6 +79,8 @@ from fastapi.responses import FileResponse
 import uvicorn
 import os
 import json
+import re
+import shutil
 import signal
 import subprocess
 import threading
@@ -91,6 +93,7 @@ from api.process import router as process_router
 from api.cards import router as cards_router
 from api.themes import router as themes_router
 from api.annotate import router as annotate_router
+from api.style_generator import router as style_generator_router
 
 load_dotenv()
 
@@ -136,8 +139,43 @@ def _heartbeat_monitor():
             os._exit(0)
 
 
+def _cleanup_old_outputs(output_dir: Path, max_age_hours: int = 24):
+    """启动时清理过期任务目录和遗留文件"""
+    if not output_dir.exists():
+        return
+    uuid_re = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+    now = time.time()
+    max_age_sec = max_age_hours * 3600
+    cleaned = 0
+
+    for entry in output_dir.iterdir():
+        if not entry.is_dir():
+            continue
+        # 清理 UUID 格式的任务目录（过期则删除）
+        if uuid_re.match(entry.name):
+            try:
+                mtime = entry.stat().st_mtime
+                if now - mtime > max_age_sec:
+                    shutil.rmtree(entry, ignore_errors=True)
+                    cleaned += 1
+            except OSError:
+                pass
+        # 清理根级遗留的 screenshots/ 和 audio/（新代码已改用 output/{task_id}/ 子目录）
+        elif entry.name in ('screenshots', 'audio'):
+            try:
+                shutil.rmtree(entry, ignore_errors=True)
+                cleaned += 1
+            except OSError:
+                pass
+
+    if cleaned:
+        logger.info(f"启动清理完成：移除 {cleaned} 个过期/遗留目录")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 启动时清理过期任务目录
+    _cleanup_old_outputs(output_dir)
     yield
 
 
@@ -190,6 +228,7 @@ app.include_router(process_router, prefix="/api/process", tags=["process"])
 app.include_router(cards_router, prefix="/api/cards", tags=["cards"])
 app.include_router(themes_router, prefix="/api/themes", tags=["themes"])
 app.include_router(annotate_router, prefix="/api/annotate", tags=["annotate"])
+app.include_router(style_generator_router, prefix="/api/style-generator", tags=["style-generator"])
 
 
 @app.post("/api/shutdown")
