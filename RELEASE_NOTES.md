@@ -1,5 +1,59 @@
 # ClipLingo Release Notes
 
+## v1.4.1 (2026-05-14)
+
+**English**
+
+### Whisper Model Multi-Source Download & Offline Model Support
+
+- hf-mirror.com as primary download source (China-optimized), huggingface.co as automatic fallback
+- Offline model support: place `model.bin` in `%APPDATA%/ClipLingo/models/{name}/` for zero-network loading
+- Corrupted offline models are automatically skipped and fall through to online download
+- Clear error message when all sources fail, with direct manual download link and directory path
+
+### AI Style Generator
+
+- Describe your desired card style in natural language (e.g., "Japanese magazine style, cream background, thin black fonts")
+- AI auto-generates corresponding CSS, with live preview and iterative refinement
+- Supports any OpenAI-compatible API
+
+### Optional AI Annotation
+
+- Annotation phase can be skipped entirely — go straight from screening to card generation
+- Users who only need basic translations or no annotations can save time and API costs
+
+### UX Improvements
+
+- Esc key to exit modals and overlays
+- UI help text updated with new feature instructions (mirror/offline model setup, AI style generator, etc.)
+
+**中文**
+
+### Whisper 模型多源下载与离线模型支持
+
+- hf-mirror.com 作为首选下载源（国内加速），huggingface.co 自动回退
+- 离线模型支持：将 `model.bin` 放入 `%APPDATA%/ClipLingo/models/{名称}/` 即可免网络加载
+- 离线模型损坏时自动跳过，继续尝试在线下载
+- 所有源均失败时提供清晰的错误提示，含手动下载链接和目录路径
+
+### AI 样式生成器
+
+- 用自然语言描述想要的卡片风格（如"日系杂志风，米白底色，细黑字体"）
+- AI 自动生成对应 CSS 样式，支持实时预览和迭代优化
+- 支持任意 OpenAI 兼容接口
+
+### AI 注释可选
+
+- 注释阶段可以完全跳过 — 筛选后直接进入卡片生成
+- 只需要基础翻译或无需注释的用户可节省时间和 API 费用
+
+### 用户体验优化
+
+- Esc 键退出弹窗和覆盖层
+- 界面帮助文字新增功能说明（镜像站/离线模型配置、AI 样式生成器等）
+
+---
+
 ## v1.4.0 (2026-05-11)
 
 **English**
