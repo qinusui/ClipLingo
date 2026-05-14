@@ -157,3 +157,42 @@ class TestWhisperMirrorRetry:
         for msg in non_network:
             assert not _is_network_error(Exception(msg)), \
                 f"'{msg}' 不应被识别为网络错误"
+
+
+class TestAutoDetectSourceOrder:
+    """根据网络环境自动调整下载源优先级"""
+
+    def test_mirror_fast_prioritized(self):
+        """hf-mirror.com 延迟 < 2s → 国内用户，镜像优先"""
+        with patch.object(whisper_manager, '_probe_host', return_value=0.15):
+            whisper_manager._cached_source_order = None  # 清除缓存
+            result = whisper_manager._get_source_order()
+            # hf-mirror 应在第一位
+            assert result[0][0] == "https://hf-mirror.com"
+            assert result[1][0] == "https://huggingface.co"
+
+    def test_mirror_slow_falls_back(self):
+        """hf-mirror.com 延迟 >= 2s → 海外用户，HuggingFace 优先"""
+        with patch.object(whisper_manager, '_probe_host', return_value=3.5):
+            whisper_manager._cached_source_order = None
+            result = whisper_manager._get_source_order()
+            # HuggingFace 主站应在第一位
+            assert result[0][0] == "https://huggingface.co"
+            assert result[1][0] == "https://hf-mirror.com"
+
+    def test_mirror_unreachable_falls_back(self):
+        """hf-mirror.com 不可达 → HuggingFace 优先"""
+        with patch.object(whisper_manager, '_probe_host', return_value=None):
+            whisper_manager._cached_source_order = None
+            result = whisper_manager._get_source_order()
+            assert result[0][0] == "https://huggingface.co"
+            assert result[1][0] == "https://hf-mirror.com"
+
+    def test_result_is_cached(self):
+        """探测结果只计算一次，后续调用走缓存"""
+        with patch.object(whisper_manager, '_probe_host', return_value=0.1) as mock_probe:
+            whisper_manager._cached_source_order = None
+            whisper_manager._get_source_order()
+            whisper_manager._get_source_order()
+            # 只探测了一次
+            assert mock_probe.call_count == 1

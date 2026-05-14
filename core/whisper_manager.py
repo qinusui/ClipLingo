@@ -5,6 +5,8 @@ faster-whisper 已内置在主程序中，无需额外安装插件。
 import os
 import sys
 import subprocess
+import socket
+import time
 import logging
 
 # Windows 下防止子进程弹出终端窗口
@@ -27,11 +29,48 @@ if getattr(sys, 'frozen', False):
 else:
     LOCAL_MODEL_DIR = Path(__file__).parent.parent / 'models'
 
-# 下载源优先级：国内镜像优先
+# 下载源优先级：国内镜像优先（默认），海外用户运行时自动调整
 HF_SOURCES = [
     ("https://hf-mirror.com",   "HF 镜像"),
     ("https://huggingface.co",  "HuggingFace 主站"),
 ]
+
+# 缓存探测结果，避免每次下载都重新测速
+_cached_source_order: Optional[list] = None
+
+
+def _probe_host(host: str, port: int = 443, timeout: float = 3.0) -> Optional[float]:
+    """TCP 连通性探测，返回延迟秒数；不可达返回 None"""
+    try:
+        start = time.time()
+        sock = socket.create_connection((host, port), timeout=timeout)
+        sock.close()
+        return time.time() - start
+    except Exception:
+        return None
+
+
+def _get_source_order() -> list:
+    """根据网络环境自动确定下载源优先级，结果会话级缓存"""
+    global _cached_source_order
+    if _cached_source_order is not None:
+        return _cached_source_order
+
+    mirror_latency = _probe_host("hf-mirror.com")
+    if mirror_latency is not None and mirror_latency < 2.0:
+        logger.info(f"HF 镜像延迟 {mirror_latency:.1f}s，优先使用国内镜像")
+        _cached_source_order = [
+            ("https://hf-mirror.com",   "HF 镜像"),
+            ("https://huggingface.co",  "HuggingFace 主站"),
+        ]
+    else:
+        reason = f"{mirror_latency:.1f}s" if mirror_latency else "不可达"
+        logger.info(f"HF 镜像 {reason}，优先使用 HuggingFace 主站")
+        _cached_source_order = [
+            ("https://huggingface.co",  "HuggingFace 主站"),
+            ("https://hf-mirror.com",   "HF 镜像"),
+        ]
+    return _cached_source_order
 
 
 def is_whisper_installed() -> bool:
@@ -128,8 +167,7 @@ def load_model(model_name: str = "base") -> Optional[Any]:
 
     下载优先级：
         1. 本地离线模型（%APPDATA%/ClipLingo/models/{model_name}/）
-        2. HF 镜像（hf-mirror.com，国内优化）
-        3. HuggingFace 主站
+        2. 在线下载（根据网络环境自动选择优先源：国内→hf-mirror，海外→huggingface.co）
     """
     faster_whisper = get_whisper()
     if faster_whisper is None:
@@ -146,9 +184,10 @@ def load_model(model_name: str = "base") -> Optional[Any]:
         except Exception as e:
             logger.warning(f"离线模型加载失败: {e}，尝试在线下载...")
 
-    # 2. 依次尝试在线下载源
+    # 2. 依次尝试在线下载源（根据网络环境自动排序）
+    sources = _get_source_order()
     last_error = None
-    for endpoint, label in HF_SOURCES:
+    for endpoint, label in sources:
         os.environ["HF_ENDPOINT"] = endpoint
         try:
             logger.info(f"从 {label} 下载模型 {model_name}...")
