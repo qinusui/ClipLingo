@@ -226,7 +226,7 @@ function App() {
   );
   const [annotationPreset, setAnnotationPreset] = useState<AnnotationPresetKey>('grammar');
   const [showAnnotationPromptEditor, setShowAnnotationPromptEditor] = useState(false);
-  const [selectRecommendedOnly, setSelectRecommendedOnly] = useState(true);
+  const [selectRecommendedOnly, setSelectRecommendedOnly] = useState(false);
   const [cardStyles, setCardStyles] = useState<Set<CardStyle>>(new Set(['sentence']));
   const [cardTheme, setCardTheme] = useState<CardTheme>('default');
   const [themeOverrides, setThemeOverrides] = useState<Record<string, ThemeOverrides>>({});

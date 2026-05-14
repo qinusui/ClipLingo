@@ -29,7 +29,7 @@ if "--version" in sys.argv:
     sys.exit(0)
 
 from core.parse_srt import parse_srt, filter_short_subtitles, Subtitle
-from core.ai_process import process_subtitles_with_ai, process_subtitles_two_phase
+from core.ai_process import process_subtitles_two_phase
 from core.media_cut import process_media_items
 from core.pack_apkg import create_apkg
 from errors import ClipLingoError, ErrorCode
@@ -157,23 +157,19 @@ def _process_video_to_media(
         progress(2, f"使用 AI 推荐结果，共 {len(processed)} 条")
     else:
         api_key = api_key or os.getenv("DEEPSEEK_API_KEY")
-        if api_key:
-            if select_recommended_only and screen_system_prompt:
-                if annotation_system_prompt:
-                    progress(2, f"AI 筛选 + 注释 {len(subtitles)} 条字幕中...")
-                    processed = process_subtitles_two_phase(
-                        subtitles, api_key, screen_system_prompt, annotation_system_prompt,
-                        api_base, model_name, source_language, target_language
-                    )
-                else:
-                    progress(2, f"AI 筛选（仅筛选）{len(subtitles)} 条字幕中...")
-                    processed = process_subtitles_two_phase(
-                        subtitles, api_key, screen_system_prompt, None,
-                        api_base, model_name, source_language, target_language
-                    )
+        if api_key and select_recommended_only and screen_system_prompt:
+            if annotation_system_prompt:
+                progress(2, f"AI 筛选 + 注释 {len(subtitles)} 条字幕中...")
+                processed = process_subtitles_two_phase(
+                    subtitles, api_key, screen_system_prompt, annotation_system_prompt,
+                    api_base, model_name, source_language, target_language
+                )
             else:
-                progress(2, f"AI 注释 {len(subtitles)} 条字幕中...")
-                processed = process_subtitles_with_ai(subtitles, api_key, api_base, model_name, source_language, target_language)
+                progress(2, f"AI 筛选（仅筛选）{len(subtitles)} 条字幕中...")
+                processed = process_subtitles_two_phase(
+                    subtitles, api_key, screen_system_prompt, None,
+                    api_base, model_name, source_language, target_language
+                )
 
             if not processed:
                 raise ClipLingoError(ErrorCode.SUBTITLE_EMPTY, f"AI 处理后无保留字幕，请检查 API Key 是否有效或放宽筛选条件")
