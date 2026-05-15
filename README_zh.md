@@ -30,7 +30,7 @@
 
 - `ClipLingo_Setup.exe` — 主程序安装包，内置 Whisper 转录
 
-安装后启动 `ClipLingo.exe`，浏览器自动访问 `http://localhost:8000`。
+安装后启动 `ClipLingo.exe`，浏览器会自动打开。默认端口被占用时自动寻找可用端口。
 
 > **注意**：安装路径请使用纯英文，含中文的路径会导致程序无法正常启动。
 

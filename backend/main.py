@@ -21,6 +21,7 @@ if sys.platform == "win32":
                 pass
 
 import logging
+import socket
 from pathlib import Path
 
 # 检测是否在 PyInstaller 打包环境中运行
@@ -412,11 +413,19 @@ async def check_update():
         return {"has_update": False, "current_version": current, "error": str(e)}
 
 
-def _open_browser():
+def find_free_port(start: int = 8000, max_attempts: int = 20) -> int:
+    for port in range(start, start + max_attempts):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            if s.connect_ex(("localhost", port)) != 0:
+                return port
+    raise RuntimeError(f"找不到可用端口 (范围 {start}-{start + max_attempts - 1})")
+
+
+def _open_browser(port: int = 8000):
     """延迟打开浏览器"""
     import webbrowser
     time.sleep(2)  # 等待服务器启动
-    webbrowser.open('http://localhost:8000')
+    webbrowser.open(f'http://localhost:{port}')
 
 
 # PyInstaller 多进程支持：必须在顶层调用，子进程 __name__ == "__mp_main__" 依赖此调用
@@ -427,12 +436,18 @@ if __name__ == "__main__":
     # Docker 或 PyInstaller 中禁用 reload
     is_docker = os.environ.get('DOCKER_CONTAINER') == '1'
 
+    if is_docker:
+        port = 8000
+    else:
+        port = find_free_port()
+        (INSTALL_DIR / ".port").write_text(str(port))
+
     if is_docker or is_frozen:
         # 打包模式下自动打开浏览器
         if is_frozen:
-            threading.Thread(target=_open_browser, daemon=True).start()
+            threading.Thread(target=_open_browser, args=(port,), daemon=True).start()
         # 启动心跳监控线程
         threading.Thread(target=_heartbeat_monitor, daemon=True).start()
-        uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+        uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
     else:
-        uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=True, log_level="info")
+        uvicorn.run("backend.main:app", host="0.0.0.0", port=port, reload=True, log_level="info")

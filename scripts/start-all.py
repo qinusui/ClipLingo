@@ -27,14 +27,9 @@ def main():
         subprocess.run(['npm', 'install'], cwd=frontend_dir, shell=True, check=True)
         print("前端依赖安装完成")
 
-    print(f"\n后端: http://localhost:8000")
-    print(f"前端: http://localhost:5173")
-    print("\n关闭浏览器页面后 5 秒自动停止所有服务")
-    print("按 Ctrl+C 可手动停止")
-    print("-" * 50)
-
     processes = []
     pid_file = backend_dir / 'pids.json'
+    port_file = root_dir / ".port"
 
     try:
         # 启动后端
@@ -50,13 +45,31 @@ def main():
             print(f"  后端启动失败: {e}")
             sys.exit(1)
 
-        # 启动前端
+        # 等待后端写入 .port 文件
+        backend_port = "8000"
+        for _ in range(50):
+            if port_file.exists():
+                backend_port = port_file.read_text().strip()
+                break
+            time.sleep(0.1)
+        else:
+            print("  警告: 后端未写入 .port 文件，使用默认端口 8000")
+
+        print(f"\n后端: http://localhost:{backend_port}")
+        print(f"前端: http://localhost:5173")
+        print("\n关闭浏览器页面后 5 秒自动停止所有服务")
+        print("按 Ctrl+C 可手动停止")
+        print("-" * 50)
+
+        # 启动前端，传递后端端口给 Vite
         print("正在启动前端...")
         try:
+            frontend_env = {**os.environ, 'BACKEND_PORT': backend_port}
             frontend_process = subprocess.Popen(
                 'npm run dev',
                 cwd=frontend_dir,
                 shell=True,
+                env=frontend_env,
             )
             processes.append(frontend_process)
             print(f"  前端 PID: {frontend_process.pid}")
@@ -76,7 +89,7 @@ def main():
         # 等待后端启动后自动打开浏览器
         print("等待服务就绪...")
         time.sleep(3)
-        webbrowser.open('http://localhost:5173')
+        webbrowser.open(f'http://localhost:5173')
         print("浏览器已打开")
 
         # 监控进程状态
@@ -107,6 +120,8 @@ def main():
             except subprocess.TimeoutExpired:
                 p.kill()
         pid_file.unlink(missing_ok=True)
+        # 清理 port 文件
+        port_file.unlink(missing_ok=True)
         print("所有服务已停止")
 
 

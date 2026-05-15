@@ -66,6 +66,7 @@ build/
 
 # Runtime PID tracking
 backend/pids.json
+.port
 
 # Binary files
 bin/*.exe

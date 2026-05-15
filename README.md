@@ -30,7 +30,7 @@ In short: **subs2srs is powerful but has a steep learning curve; LanguageReactor
 
 - `ClipLingo_Setup.exe` — Full installer with built-in Whisper transcription 
 
-After installation, run `ClipLingo.exe` and open `http://localhost:8000` in your browser.
+After installation, run `ClipLingo.exe` — the application will open automatically in your browser. If the default port is in use, it will find an available port automatically.
 
 > **Note**: Install to a path with only English characters. Paths containing Chinese (or other non-ASCII) characters may cause the program to fail to start.
 
