@@ -21,7 +21,7 @@ from typing import List, Optional
 from models.schemas import (
     SubtitleItem, SubtitleListResponse, AIRecommendRequest,
     AIRecommendItem, AIRecommendResponse, AIAnnotateRequest,
-    EmbeddedSubtitleStream, ExtractEmbeddedResponse
+    EmbeddedSubtitleStream, ExtractEmbeddedResponse, ASREngineInfo
 )
 
 # 导入现有的字幕解析模块
@@ -880,67 +880,90 @@ else:
     _PROJECT_ROOT = str(Path(__file__).parent.parent.parent)
 
 
-def _whisper_subprocess(video_path: str, srt_path: str, model_name: str, language: str,
-                        result_path: str, progress_pipe):
-    """在独立进程中运行 Whisper 转录，通过 Pipe 报告进度（含错误）"""
+def _asr_subprocess(video_path: str, srt_path: str, asr_engine: str, model_name: str,
+                    language: str, result_path: str, progress_pipe):
+    """在独立进程中运行 ASR 转录，通过 Pipe 报告进度（含错误）"""
     import sys as _sys
     import traceback as _traceback
     _sys.path.append(_PROJECT_ROOT)
 
+    # 确保子进程能找到 ctranslate2/onnxruntime 等原生 DLL
+    if getattr(_sys, 'frozen', False):
+        try:
+            import os as _os
+            _os.add_dll_directory(_sys._MEIPASS)
+            # 防止 Intel OpenMP 库（libiomp5md.dll）重复加载导致 0xC0000005 崩溃
+            _os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+        except Exception:
+            pass
+
     try:
-        from core.whisper_manager import load_model
+        from core.asr import create_engine
         from core.whisper_transcribe import save_as_srt
         from core.media_cut import get_video_duration
 
-        progress_pipe.send({"step": "loading", "message": f"加载 {model_name} 模型..."})
-
-        def _download_progress(msg: str):
-            progress_pipe.send({"step": "loading", "message": msg})
-
-        model = load_model(model_name, progress_callback=_download_progress)
-        if model is None:
-            raise RuntimeError("Whisper 未安装，请先安装 Whisper")
-
-        # 获取视频总时长，用于计算转录进度百分比
+        # 获取视频总时长
         try:
             duration_sec = get_video_duration(video_path)
         except Exception:
             duration_sec = 0.0
 
-        progress_pipe.send({"step": "transcribing", "message": "转录中...", "duration_sec": duration_sec})
-        segments_iter, info = model.transcribe(
-            video_path,
-            language=language,
-            word_timestamps=True,
-            vad_filter=True,
-        )
+        progress_pipe.send({"step": "loading", "message": f"初始化 {asr_engine} 引擎..."})
 
-        segments = []
-        for seg in segments_iter:
-            text = seg.text.strip()
-            if text:
-                segments.append({"start": seg.start, "end": seg.end, "text": text})
-                # 逐段上报进度
-                progress = min(seg.end / duration_sec, 1.0) if duration_sec > 0 else 0.0
+        # 创建引擎
+        if asr_engine == "faster_whisper":
+            from core.whisper_manager import load_model
+
+            def _download_progress(msg: str):
+                progress_pipe.send({"step": "loading", "message": msg})
+
+            model = load_model(model_name, progress_callback=_download_progress)
+            if model is None:
+                raise RuntimeError("Whisper 未安装，请先安装 Whisper")
+
+            progress_pipe.send({"step": "transcribing", "message": "转录中...", "duration_sec": duration_sec})
+
+            segments_iter, info = model.transcribe(
+                video_path, language=language, word_timestamps=True, vad_filter=True,
+            )
+
+            segments = []
+            for seg in segments_iter:
+                text = seg.text.strip()
+                if text:
+                    segments.append({"start": seg.start, "end": seg.end, "text": text})
+                    progress = min(seg.end / duration_sec, 1.0) if duration_sec > 0 else 0.0
+                    progress_pipe.send({
+                        "step": "transcribing",
+                        "progress": progress,
+                        "transcribed_sec": seg.end,
+                        "duration_sec": duration_sec,
+                        "text": text,
+                    })
+        else:
+            # Bcut 等云端引擎
+            engine = create_engine(asr_engine)
+
+            def _progress(frac: float, msg: str):
+                transcribed = frac * duration_sec if duration_sec > 0 else 0.0
                 progress_pipe.send({
                     "step": "transcribing",
-                    "progress": progress,
-                    "transcribed_sec": seg.end,
+                    "progress": frac,
+                    "transcribed_sec": transcribed,
                     "duration_sec": duration_sec,
-                    "text": text,
+                    "message": msg,
                 })
 
-        save_as_srt(segments, srt_path)
+            segments = engine.transcribe(video_path, language, progress_callback=_progress)
 
+        save_as_srt(segments, srt_path)
         progress_pipe.send({"step": "done", "segment_count": len(segments)})
 
-        # 保存转录元信息到临时 JSON，供主进程读取
         import json as _json
         with open(result_path, "w", encoding="utf-8") as f:
             _json.dump({"segment_count": len(segments)}, f)
 
     except Exception as e:
-        # 通过 pipe 将真实错误传回父进程，避免父进程只能看到 exitcode
         progress_pipe.send({
             "step": "error",
             "error": str(e),
@@ -950,7 +973,7 @@ def _whisper_subprocess(video_path: str, srt_path: str, model_name: str, languag
 
 
 def _run_transcribe_task(task_id: str, video_path_str: str, srt_path_str: str,
-                         model_name: str, language: str, min_duration: float):
+                         asr_engine: str, model_name: str, language: str, min_duration: float):
     """后台执行转录"""
     import multiprocessing
     import time as _time
@@ -972,8 +995,8 @@ def _run_transcribe_task(task_id: str, video_path_str: str, srt_path_str: str,
         parent_conn, child_conn = multiprocessing.Pipe(duplex=False)
 
         proc = multiprocessing.Process(
-            target=_whisper_subprocess,
-            args=(str(video_path_str), str(srt_path_str), model_name, language,
+            target=_asr_subprocess,
+            args=(str(video_path_str), str(srt_path_str), asr_engine, model_name, language,
                   result_json_path, child_conn),
             daemon=True
         )
@@ -1166,22 +1189,37 @@ async def whisper_install():
         raise HTTPException(status_code=500, detail=f"Whisper 安装失败: {error}")
 
 
+@router.get("/asr/engines")
+async def get_asr_engines():
+    """获取可用的 ASR 引擎列表"""
+    # 确保引擎已注册
+    import core.asr.whisper_engine  # noqa: F401
+    import core.asr.bcut_engine     # noqa: F401
+    from core.asr import get_available_engines
+    engines = get_available_engines()
+    return {"engines": [ASREngineInfo(**e).model_dump() for e in engines]}
+
+
+
 @router.post("/transcribe")
 async def transcribe_video_endpoint(
     video: UploadFile = File(...),
     min_duration: float = 1.0,
     language: Optional[str] = None,
-    model_name: str = "base"
+    model_name: str = "base",
+    asr_engine: str = "faster_whisper"
 ):
     """
     使用 Whisper 将视频转录为字幕（后台异步，通过 progress 端点轮询）
     """
-    # 检查 Whisper 是否已安装
-    if not is_whisper_installed():
+    # 检查引擎可用性
+    if asr_engine == "faster_whisper" and not is_whisper_installed():
         raise HTTPException(
             status_code=400,
             detail="Whisper 未安装，请先调用 POST /api/subtitles/whisper/install 安装"
         )
+    elif asr_engine not in ("faster_whisper", "bcut"):
+        raise HTTPException(status_code=400, detail=f"未知的 ASR 引擎: {asr_engine}")
 
     if not video.filename:
         raise HTTPException(status_code=400, detail="未提供视频文件")
@@ -1205,7 +1243,7 @@ async def transcribe_video_endpoint(
 
     thread = _threading.Thread(
         target=_run_transcribe_task,
-        args=(task_id, str(video_path), str(srt_path), model_name, language, min_duration),
+        args=(task_id, str(video_path), str(srt_path), asr_engine, model_name, language, min_duration),
         daemon=True
     )
     thread.start()

@@ -60,7 +60,8 @@ Requires Python 3.10+, ffmpeg (in PATH), and Node.js 18+.
 
 - **AnkiConnect Sync**: Send cards directly to Anki without exporting .apkg files (requires [AnkiConnect](https://ankiweb.net/shared/info/2055492159) add-on), auto-uploads screenshots and audio, automatically skips duplicates
 - **Bidirectional Learned Words Sync**: Extracts learned words from ClipLingo decks in Anki, auto-skip during AI screening; also supports local SQLite tracking
-- **Whisper Transcription**: Built-in faster-whisper, transcribe video directly to subtitles (English/Japanese/Korean and more), cancellable, with timeout protection. Models auto-download via China-optimized mirror; offline model import supported
+- **Speech Recognition (ASR)**: Built-in faster-whisper (local) + Bilibili Bcut (free cloud ASR). Local Whisper supports ~100 languages; Bcut offers instant cloud transcription with no model download. ASR engine selectable in settings
+- **Free Machine Translation**: Built-in Bing and Google Translate — no API key required, batch processing with disk caching, works as a lightweight alternative to AI translation
 - **Two-Phase AI Workflow**: Screen first (quick learning value assessment) → then annotate (generate translations and notes based on purpose). Annotation is optional. Both prompts fully customizable
 - **Card Themes & AI Style Generator**: 4 built-in themes + custom ZIP import + AI generates card CSS from natural language descriptions
 - **CSS Variable Editor**: Fine-tune built-in theme colors, fonts, spacing, and shadows with live preview; changes persist per theme and carry into .apkg generation and AnkiConnect sync
@@ -96,9 +97,18 @@ Adjust in the left "Subtitle Processing Config" panel:
 - **Padding Start**: Audio clipping head padding (default 200ms)
 - **Padding End**: Audio clipping tail padding (default 200ms)
 
+### Translation Services (Optional)
+
+In addition to AI translation, ClipLingo includes two free machine translation services accessible via the API:
+
+- **Bing Translator**: Uses Microsoft Edge Translate API, supports batch translation (multiple texts in one request), auto-fetches auth token, results cached for 7 days
+- **Google Translator**: Mobile web scraping fallback, individual text translation, graceful degradation (returns original text on error)
+
+Use the `GET /api/translate/services` and `POST /api/translate/batch` endpoints. No API key required for either service.
+
 ### Multi-Video Processing
 
-Upload multiple videos at once — each video can have its own subtitle file assigned, or let Whisper auto-transcribe videos without subtitles. Two output modes:
+Upload multiple videos at once — each video can have its own subtitle file assigned, or let Whisper/Bcut ASR auto-transcribe videos without subtitles. Two output modes:
 
 - **Merge (default)** — all videos' cards combined into one Anki deck
 - **Independent** — each video gets its own deck
@@ -109,14 +119,14 @@ After uploading the first video, an "Add More" drop zone stays visible for easy 
 
 The interface uses a four-step vertical layout:
 
-1. **Prepare**: Upload one or more video files along with optional subtitle files (or auto-generate via Whisper). A video list table lets you assign subtitles per video, remove videos, or continue adding more. Choose merge mode (one combined deck) or independent mode (one deck per video).
+1. **Prepare**: Upload one or more video files along with optional subtitle files (or auto-generate via Whisper/Bcut ASR). A video list table lets you assign subtitles per video, remove videos, or continue adding more. Choose merge mode (one combined deck) or independent mode (one deck per video).
 2. **AI Screen**: Set filter rules (duration/exclusion words), then click "AI Screen" — the table shows real-time recommendation/skip badges
-3. **AI Annotate (optional)**: Choose purpose (Grammar / Vocabulary), wait for annotation to complete — or skip to generate basic cards without AI annotations
+3. **AI Annotate / Machine Translate (optional)**: With AI configured — choose purpose (Grammar / Vocabulary) for AI annotation. Without AI — use built-in Bing/Google machine translation (free, no API key). Or skip to generate basic cards without translations
 4. **Style & Preview**: Choose card structure (sentence/vocab), visual theme (built-in or custom), fine-tune CSS variables for built-in themes, then preview card effects. Click "Generate" when satisfied. Then sync to Anki or download .apkg deck
 
 **Two usage modes:**
 
-- **Basic Mode** (no AI): Upload video → auto-extract/transcribe subtitles → rule filter or manual selection → generate cards
+- **Basic Mode** (no AI): Upload video → auto-extract/transcribe subtitles → rule filter or manual selection → machine translate (Bing/Google, free) → generate cards
 - **AI Mode** (optional): Configure AI → AI Screen → choose purpose & annotate → preview theme → generate cards
 
 > Learned words are automatically recorded to local SQLite, and both AI screening and rule-based filtering will automatically skip them on subsequent runs.

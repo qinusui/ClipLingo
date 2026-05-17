@@ -154,3 +154,30 @@ class AIAnnotateRequest(BaseModel):
 class CardPreviewRequest(BaseModel):
     """卡片预览请求"""
     cards: List[ProcessedCard]
+
+
+class TranslateBatchRequest(BaseModel):
+    """批量翻译请求"""
+    texts: List[str] = Field(default=[], description="待翻译的文本列表")
+    service: str = Field(default="bing", description="翻译服务 ID：bing / google")
+    source_lang: str = Field(default="auto", description="源语言代码")
+    target_lang: str = Field(default="zh", description="目标语言代码")
+
+
+class TranslateBatchResponse(BaseModel):
+    """批量翻译响应"""
+    translations: List[str] = Field(default=[], description="翻译结果列表")
+
+
+class ASREngineInfo(BaseModel):
+    """ASR 引擎信息"""
+    id: str
+    name: str
+    available: bool
+
+
+class TranslateServiceInfo(BaseModel):
+    """翻译服务信息"""
+    id: str
+    name: str
+    available: bool

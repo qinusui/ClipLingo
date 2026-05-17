@@ -1,5 +1,105 @@
 # ClipLingo Release Notes
 
+## v1.4.4 (2026-05-17)
+
+**English**
+
+### Bug Fixes
+
+- **Fixed ffmpeg/ffprobe not found in packaged builds**: ChunkedASR and BcutASR used hardcoded `"ffmpeg"`/`"ffprobe"` instead of resolving paths via `_get_bin_path()`, causing `[WinError 2]` when cutting audio or extracting audio tracks
+- **Fixed missing diskcache module**: `diskcache` was listed in `requirements.txt` but not installed in the build environment — translation and ASR services crashed with `ModuleNotFoundError`. Now properly installed and collected by PyInstaller
+- **Fixed ctranslate2 missing DLL**: `cudnn64_9.dll` was not collected by PyInstaller, and child processes lacked proper DLL search paths, causing `0xC0000005` access violation in Whisper transcription subprocess
+- **Graceful degradation for diskcache**: `_get_diskcache()` now returns a no-op cache on `ImportError` instead of crashing — translation and ASR still work without caching
+- **Intel OpenMP conflict mitigation**: Added `KMP_DUPLICATE_LIB_OK=TRUE` environment variable to prevent `libiomp5md.dll` duplicate-loading crashes in multiprocessing child processes
+- **Fixed misleading error message**: Machine translation errors no longer show "AI annotation failed" — now displays "Machine translation failed" with the actual error detail
+- **DLL search path for child processes**: Added `os.add_dll_directory(sys._MEIPASS)` to both runtime hook and ASR subprocess entry point for reliable native DLL resolution
+
+**中文**
+
+### Bug 修复
+
+- **修复打包版 ffmpeg/ffprobe 找不到**：ChunkedASR 和 BcutASR 硬编码了 `"ffmpeg"`/`"ffprobe"` 字符串，未经过 `_get_bin_path()` 路径解析，导致切割音频或提取音轨时出现 `[WinError 2]`
+- **修复 diskcache 模块缺失**：`diskcache` 在 `requirements.txt` 中但未安装到构建环境，翻译和 ASR 服务因 `ModuleNotFoundError` 崩溃。现已正确安装并被 PyInstaller 收集
+- **修复 ctranslate2 DLL 缺失**：`cudnn64_9.dll` 未被 PyInstaller 收集，子进程缺少 DLL 搜索路径，导致 Whisper 转录子进程 `0xC0000005` 访问冲突崩溃
+- **diskcache 容错降级**：`_get_diskcache()` 在 `ImportError` 时返回空操作缓存而非崩溃——翻译和 ASR 在无缓存时仍可正常工作
+- **Intel OpenMP 冲突缓解**：添加 `KMP_DUPLICATE_LIB_OK=TRUE` 环境变量，防止多进程子进程中 `libiomp5md.dll` 重复加载崩溃
+- **修复错误提示张冠李戴**：机器翻译失败不再显示"AI 注释失败"，改为"机器翻译失败"并附实际错误详情
+- **子进程 DLL 搜索路径**：在运行时钩子和 ASR 子进程入口处添加 `os.add_dll_directory(sys._MEIPASS)`，确保原生 DLL 可靠加载
+
+---
+
+## v1.4.3 (2026-05-17)
+
+**English**
+
+### New ASR Engine: Bilibili Bcut (Cloud)
+
+- Added Bcut ASR engine powered by Bilibili's public cloud API — free, no API key required
+- ASR engine selector in settings: choose between Faster Whisper (local) and Bilibili Bcut (cloud)
+- Bcut supports CRC32-based disk caching for repeated recognition of the same audio
+- Automatic rate limiting: 100 calls/12h, 360 minutes/12h with clear error messages
+
+### New Translation Services: Bing & Google
+
+- Added Bing Translator (Microsoft Edge API) — free, no API key, batch translation
+- Added Google Translator (mobile web) — free, no API key, as fallback option
+- Both services include 7-day disk caching for repeated translations
+- New `/api/translate/batch` and `/api/translate/services` endpoints
+
+### Machine Translation UI Panel
+
+- New machine translation panel in Step 3 (visible when no AI API key is configured)
+- Bing/Google service selector, one-click batch translation of all selected subtitles
+- Progress indicator and completion confirmation with translated sentence count
+
+### Python 3.13 Compatibility
+
+- Removed `pydub` dependency entirely — replaced all audio operations with ffmpeg/ffprobe subprocess calls
+- ChunkedASR and BcutASR both use ffmpeg for duration detection and audio chunking
+
+### Architecture
+
+- New `core/asr/` module: abstract ASR engine layer with `BaseASREngine` and registry
+- New `core/translate/` module: abstract translation service layer with `BaseTranslator` and registry
+- All new services follow the factory + registry pattern for easy future extension
+- Zero breaking changes: all new parameters default to existing behavior
+
+**中文**
+
+### 新增 ASR 引擎：Bilibili 必剪（云端）
+
+- 新增 Bcut ASR 引擎，使用 Bilibili 公开云 API — 免费、无需 API Key
+- 设置中新增 ASR 引擎选择器：Faster Whisper（本地）与 Bilibili 必剪（云端）二选一
+- Bcut 支持 CRC32 磁盘缓存，同一音频重复识别直接命中缓存
+- 自动限流控制：100 次/12小时，360 分钟/12小时，超限时给出明确提示
+
+### 新增翻译服务：Bing & Google
+
+- 新增必应翻译（Bing），使用 Microsoft Edge 免费接口 — 免费、无需 API Key、支持批量
+- 新增谷歌翻译（Google），使用移动端网页接口 — 免费、作为备用选项
+- 两个翻译服务均支持 7 天磁盘缓存
+- 新增 `/api/translate/batch` 和 `/api/translate/services` 端点
+
+### 机器翻译 UI 面板
+
+- 步骤 3 新增机器翻译面板（未配置 AI API Key 时可见）
+- 支持 Bing/Google 翻译服务选择，一键批量翻译全部选中字幕
+- 进度指示和完成确认，显示翻译句子数量
+
+### Python 3.13 兼容性
+
+- 彻底移除 `pydub` 依赖——所有音频操作改用 ffmpeg/ffprobe 子进程调用
+- ChunkedASR 和 BcutASR 均使用 ffmpeg 进行时长检测和音频分片
+
+### 架构优化
+
+- 新增 `core/asr/` 模块：ASR 引擎抽象层（`BaseASREngine` + 注册表）
+- 新增 `core/translate/` 模块：翻译服务抽象层（`BaseTranslator` + 注册表）
+- 全部新服务采用工厂 + 注册表模式，便于后续扩展
+- 零破坏性变更：所有新参数默认走原有行为
+
+---
+
 ## v1.4.2 (2026-05-17)
 
 **English**

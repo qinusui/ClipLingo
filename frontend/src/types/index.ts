@@ -116,3 +116,23 @@ export interface ProcessProgress {
   total_steps: number;
   current_step: number;
 }
+
+// ASR 引擎和翻译服务
+export type ASREngine = 'faster_whisper' | 'bcut';
+export type TranslateService = 'bing' | 'google';
+
+export interface ASREngineInfo {
+  id: ASREngine;
+  name: string;
+  available: boolean;
+}
+
+export interface TranslateServiceInfo {
+  id: TranslateService;
+  name: string;
+  available: boolean;
+}
+
+export interface TranslateBatchResponse {
+  translations: string[];
+}

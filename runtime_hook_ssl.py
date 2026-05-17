@@ -33,6 +33,20 @@ if sys.stdout is None:
 if sys.stderr is None:
     sys.stderr = open(os.devnull, 'w')
 
+# ── 添加 DLL 搜索路径，确保子进程能找到 ctranslate2/onnxruntime 等原生模块 ──
+if getattr(sys, 'frozen', False):
+    try:
+        os.add_dll_directory(sys._MEIPASS)
+    except Exception:
+        pass
+
+    # 防止 Intel OpenMP 库（libiomp5md.dll）重复加载冲突导致 0xC0000005 崩溃
+    if sys.platform == "win32":
+        try:
+            os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+        except Exception:
+            pass
+
 # ── 修复 SSL 证书 ──
 try:
     import certifi

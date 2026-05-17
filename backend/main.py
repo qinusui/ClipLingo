@@ -95,6 +95,7 @@ from api.cards import router as cards_router
 from api.themes import router as themes_router
 from api.annotate import router as annotate_router
 from api.style_generator import router as style_generator_router
+from api.translate import router as translate_router
 
 load_dotenv()
 
@@ -230,6 +231,7 @@ app.include_router(cards_router, prefix="/api/cards", tags=["cards"])
 app.include_router(themes_router, prefix="/api/themes", tags=["themes"])
 app.include_router(annotate_router, prefix="/api/annotate", tags=["annotate"])
 app.include_router(style_generator_router, prefix="/api/style-generator", tags=["style-generator"])
+app.include_router(translate_router, prefix="/api/translate", tags=["translate"])
 
 
 @app.post("/api/shutdown")

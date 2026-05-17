@@ -16,8 +16,8 @@ import { TemplateMarketplace } from './components/TemplateMarketplace';
 import { StyleGenerator } from './components/StyleGenerator';
 import { AnkiSyncButton } from './components/AnkiSyncButton';
 import { PreheatIndicator } from './components/PreheatIndicator';
-import { SubtitleItem, ProcessedCard, AIRecommendation, CardStyle, CardTheme, ThemeOverrides, WorkflowPhase, AnnotationPurpose } from './types';
-import { subtitleAPI, processAPI, API_BASE_URL } from './services/api';
+import { SubtitleItem, ProcessedCard, AIRecommendation, CardStyle, CardTheme, ThemeOverrides, WorkflowPhase, AnnotationPurpose, ASREngine, TranslateService } from './types';
+import { subtitleAPI, processAPI, translateAPI, API_BASE_URL } from './services/api';
 import { themeAPI, type ThemeListItem } from './services/themeAPI';
 import { pingAnki, fetchWordsFromAnki } from './services/ankiConnect';
 
@@ -156,6 +156,8 @@ function App() {
   const [paddingStartMs, setPaddingStartMs] = useState(200);
   const [paddingEndMs, setPaddingEndMs] = useState(200);
   const [whisperModel, setWhisperModel] = useState('base');
+  const [asrEngine, setAsrEngine] = useState<ASREngine>('faster_whisper');
+  const [mtService, setMtService] = useState<TranslateService>('bing');
   const [checkingEmbedded, setCheckingEmbedded] = useState(false);
   const [extractedSource, setExtractedSource] = useState('');
 
@@ -653,7 +655,7 @@ function App() {
     setTranscribeMessage(t('app.error.transcribePreparing'));
 
     try {
-      const { task_id } = await subtitleAPI.startTranscribe(videoFiles[0], minDuration, sourceLanguage, whisperModel);
+      const { task_id } = await subtitleAPI.startTranscribe(videoFiles[0], minDuration, sourceLanguage, whisperModel, asrEngine);
 
       const pollInterval = setInterval(async () => {
         try {
@@ -941,6 +943,33 @@ function App() {
         console.error('AI 注释失败:', error);
         alert(t('app.error.aiAnnotateFailed') + getApiErrorMessage(error));
       }
+      setWorkflowPhase('screened');
+    }
+  };
+
+  // 机器翻译（无 API Key 时使用）
+  const handleMTTranslate = async () => {
+    const selectedSubs = subtitles.filter(s => selectedIndices.has(s.index));
+    if (selectedSubs.length === 0) {
+      alert(t('app.error.needSelectSentencesForAnnotation'));
+      return;
+    }
+    setWorkflowPhase('annotating');
+    try {
+      const texts = selectedSubs.map(s => s.text);
+      const { translations } = await translateAPI.batch(texts, mtService, sourceLanguage, targetLanguage);
+      setRecommendations(prev => {
+        const next = new Map(prev);
+        selectedSubs.forEach((sub, i) => {
+          const existing = next.get(sub.index) || { index: sub.index, include: true, reason: '机器翻译' };
+          next.set(sub.index, { ...existing, translation: translations[i] || '' });
+        });
+        return next;
+      });
+      setWorkflowPhase('annotated');
+    } catch (error) {
+      console.error('机器翻译失败:', error);
+      alert(t('app.error.mtTranslateFailed') + getApiErrorMessage(error));
       setWorkflowPhase('screened');
     }
   };
@@ -1616,38 +1645,77 @@ function App() {
                     </div>
                   )}
 
-                  {/* Whisper 模型选择器（有未配字幕的视频时显示） */}
+                  {/* ASR 引擎 + Whisper 模型选择器（有未配字幕的视频时显示） */}
                   {videoFiles.some((_, i) => !subtitleFiles[i]) && !isTranscribing && (
                     <div className="border border-gray-200 rounded-lg p-4 bg-gray-50 space-y-3 dark:border-gray-600 dark:bg-gray-800">
-                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                        {t('app.step1.whisperModelHint')}
-                      </p>
-                      <div className="space-y-2">
-                        {WHISPER_MODELS.map(m => (
-                          <label
-                            key={m.key}
-                            className={`flex items-center gap-3 p-2 rounded cursor-pointer border transition-colors ${
-                              whisperModel === m.key
-                                ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30 dark:border-primary-400'
-                                : 'border-gray-200 hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-700'
-                            }`}
-                          >
-                            <input
-                              type="radio"
-                              name="whisperModel"
-                              value={m.key}
-                              checked={whisperModel === m.key}
-                              onChange={() => setWhisperModel(m.key)}
-                              className="w-4 h-4 text-primary-600"
-                            />
-                            <div className="flex-1">
-                              <span className="font-medium text-sm">{m.label}</span>
-                              <span className="text-xs text-gray-500 ml-2 dark:text-gray-400">{m.size}</span>
-                            </div>
-                            <span className="text-xs text-gray-400 dark:text-gray-500">{m.speed}</span>
-                          </label>
-                        ))}
+                      {/* ASR 引擎选择 */}
+                      <div>
+                        <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          {t('app.step1.asrEngineLabel')}
+                        </p>
+                        <div className="flex gap-2">
+                          {([{
+                            key: 'faster_whisper' as ASREngine, label: t('app.step1.asrEngineFasterWhisper'), hint: ''
+                          }, {
+                            key: 'bcut' as ASREngine, label: t('app.step1.asrEngineBcut'), hint: t('app.step1.asrEngineBcutHint')
+                          }] as const).map(e => (
+                            <label
+                              key={e.key}
+                              className={`flex-1 flex flex-col items-center gap-1 p-2 rounded cursor-pointer border text-center transition-colors ${
+                                asrEngine === e.key
+                                  ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30 dark:border-primary-400'
+                                  : 'border-gray-200 hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-700'
+                              }`}
+                            >
+                              <input
+                                type="radio"
+                                name="asrEngine"
+                                value={e.key}
+                                checked={asrEngine === e.key}
+                                onChange={() => setAsrEngine(e.key)}
+                                className="hidden"
+                              />
+                              <span className="font-medium text-xs">{e.label}</span>
+                              {e.hint && (
+                                <span className="text-xs text-gray-400 dark:text-gray-500">{e.hint}</span>
+                              )}
+                            </label>
+                          ))}
+                        </div>
                       </div>
+
+                      {/* Whisper 模型选择（仅本地引擎时显示） */}
+                      {asrEngine === 'faster_whisper' && (
+                        <div className="space-y-2">
+                          <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                            {t('app.step1.whisperModelHint')}
+                          </p>
+                          {WHISPER_MODELS.map(m => (
+                            <label
+                              key={m.key}
+                              className={`flex items-center gap-3 p-2 rounded cursor-pointer border transition-colors ${
+                                whisperModel === m.key
+                                  ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30 dark:border-primary-400'
+                                  : 'border-gray-200 hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-700'
+                              }`}
+                            >
+                              <input
+                                type="radio"
+                                name="whisperModel"
+                                value={m.key}
+                                checked={whisperModel === m.key}
+                                onChange={() => setWhisperModel(m.key)}
+                                className="w-4 h-4 text-primary-600"
+                              />
+                              <div className="flex-1">
+                                <span className="font-medium text-sm">{m.label}</span>
+                                <span className="text-xs text-gray-500 ml-2 dark:text-gray-400">{m.size}</span>
+                              </div>
+                              <span className="text-xs text-gray-400 dark:text-gray-500">{m.speed}</span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -2325,6 +2393,101 @@ function App() {
                   </div>
                 )}
 
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Step 3 · 机器翻译（无需 API Key） */}
+          {selectedIndices.size > 0 && !apiKey && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <span className="bg-primary-100 text-primary-700 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold dark:bg-primary-900/40 dark:text-primary-300">3</span>
+                  {t('app.step3.mtTitle')}
+                  <span className="text-sm font-normal text-gray-500 ml-2 dark:text-gray-400">
+                    ({t('app.step3.countInfo', { count: selectedIndices.size })})
+                  </span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {(workflowPhase !== 'annotating' && workflowPhase !== 'annotated') && (
+                  <div className="space-y-4">
+                    <p className="text-sm text-gray-500 dark:text-gray-400">{t('app.step3.mtDesc')}</p>
+                    {/* 翻译服务选择 */}
+                    <div>
+                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        {t('app.step3.translateService')}
+                      </p>
+                      <div className="flex gap-2">
+                        {([{
+                          key: 'bing' as TranslateService, label: '微软翻译 (Bing)'
+                        }, {
+                          key: 'google' as TranslateService, label: '谷歌翻译 (备用)'
+                        }] as const).map(e => (
+                          <label
+                            key={e.key}
+                            className={`flex-1 flex flex-col items-center gap-1 p-2 rounded cursor-pointer border text-center transition-colors ${
+                              mtService === e.key
+                                ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30 dark:border-primary-400'
+                                : 'border-gray-200 hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-700'
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              name="mtService"
+                              value={e.key}
+                              checked={mtService === e.key}
+                              onChange={() => setMtService(e.key)}
+                              className="hidden"
+                            />
+                            <span className="font-medium text-xs">{e.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <button
+                      onClick={handleMTTranslate}
+                      disabled={processingPhase !== 'idle'}
+                      className="w-full p-4 rounded-lg border-2 text-center transition-all border-primary-300 hover:border-primary-500 hover:bg-primary-50 dark:border-primary-700 dark:hover:bg-primary-900/30 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <div className="flex items-center justify-center gap-2 mb-1">
+                        <Sparkles className="w-5 h-5 text-primary-600 dark:text-primary-400" />
+                        <span className="font-medium text-gray-900 dark:text-gray-100">{t('app.step3.translateButton', { count: selectedIndices.size })}</span>
+                      </div>
+                    </button>
+                  </div>
+                )}
+                {/* 翻译进行中 */}
+                {workflowPhase === 'annotating' && (
+                  <div>
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="animate-spin w-4 h-4 border-2 border-primary-500 border-t-transparent rounded-full" />
+                      <span className="text-sm text-gray-600 dark:text-gray-400">{t('app.step3.translating')}</span>
+                    </div>
+                  </div>
+                )}
+                {/* 翻译完成 */}
+                {workflowPhase === 'annotated' && (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3">
+                      <div className="p-3 bg-green-50 border border-green-200 rounded-lg dark:bg-green-900/20 dark:border-green-800 flex-1">
+                        <p className="text-sm text-green-700 dark:text-green-300">
+                          {t('app.step3.translatedDone', { count: selectedIndices.size })}
+                        </p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setWorkflowPhase('screened');
+                          setAnnotationPurpose(null);
+                        }}
+                      >
+                        {t('app.step3.reselect')}
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}

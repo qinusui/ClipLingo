@@ -26,6 +26,11 @@ class ErrorCode(str, Enum):
     SUBTITLE_EMPTY = "SUBTITLE_EMPTY"
     SUBTITLE_PARSE_FAILED = "SUBTITLE_PARSE_FAILED"
     AI_PROCESS_FAILED = "AI_PROCESS_FAILED"
+    BCUT_RATE_LIMITED = "BCUT_RATE_LIMITED"
+    BCUT_UPLOAD_FAILED = "BCUT_UPLOAD_FAILED"
+    BCUT_TASK_FAILED = "BCUT_TASK_FAILED"
+    TRANSLATE_SERVICE_FAILED = "TRANSLATE_SERVICE_FAILED"
+    TRANSLATE_AUTH_FAILED = "TRANSLATE_AUTH_FAILED"
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
 
@@ -46,6 +51,11 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.SUBTITLE_EMPTY: "没有符合条件的字幕，请调整筛选条件",
     ErrorCode.SUBTITLE_PARSE_FAILED: "字幕文件格式错误，请检查文件编码",
     ErrorCode.AI_PROCESS_FAILED: "AI 处理失败，请检查 API 配置",
+    ErrorCode.BCUT_RATE_LIMITED: "必剪语音识别次数已达上限，请12小时后再试或切换为本地 Whisper",
+    ErrorCode.BCUT_UPLOAD_FAILED: "必剪语音上传失败，请检查网络连接或切换为本地 Whisper",
+    ErrorCode.BCUT_TASK_FAILED: "必剪语音识别任务失败，请重试或切换为本地 Whisper",
+    ErrorCode.TRANSLATE_SERVICE_FAILED: "翻译服务请求失败，请检查网络或切换翻译服务",
+    ErrorCode.TRANSLATE_AUTH_FAILED: "翻译服务认证失败，请稍后重试",
     ErrorCode.INTERNAL_ERROR: "程序内部错误，请重启程序后重试。如仍出现，请查看日志或提交 issue",
 }
 
@@ -106,6 +116,17 @@ _KEYWORD_MAP: list[tuple[str, ErrorCode]] = [
     ("字幕文件格式", ErrorCode.SUBTITLE_PARSE_FAILED),
     ("无法解析字幕", ErrorCode.SUBTITLE_PARSE_FAILED),
     ("could not parse subtitle", ErrorCode.SUBTITLE_PARSE_FAILED),
+    # Bcut ASR
+    ("rate limit", ErrorCode.BCUT_RATE_LIMITED),
+    ("duration limit", ErrorCode.BCUT_RATE_LIMITED),
+    ("call count limit", ErrorCode.BCUT_RATE_LIMITED),
+    ("upload", ErrorCode.BCUT_UPLOAD_FAILED),
+    ("asr task", ErrorCode.BCUT_TASK_FAILED),
+    # Translation
+    ("translate", ErrorCode.TRANSLATE_SERVICE_FAILED),
+    ("auth", ErrorCode.TRANSLATE_AUTH_FAILED),
+    ("401", ErrorCode.TRANSLATE_AUTH_FAILED),
+    ("403", ErrorCode.TRANSLATE_AUTH_FAILED),
 ]
 
 

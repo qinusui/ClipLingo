@@ -2,7 +2,7 @@
 import os
 import sys
 
-VERSION = "1.3.2.0"
+VERSION = "1.4.4.0"
 
 block_cipher = None
 
@@ -18,12 +18,20 @@ _fw_datas = [(os.path.join(_fw_dir, f), 'faster_whisper')
              for f in os.listdir(_fw_dir)
              if f.endswith('.py')]
 
+# 收集 ctranslate2 的全部 DLL（PyInstaller 可能遗漏 cudnn64_9.dll）
+import ctranslate2 as _ct2
+_ct2_dir = os.path.dirname(_ct2.__file__)
+_ct2_binaries = [(os.path.join(_ct2_dir, f), 'ctranslate2')
+                 for f in os.listdir(_ct2_dir)
+                 if f.endswith('.dll')]
+
 a = Analysis(
     ['backend/main.py'],
     pathex=['backend', '.'],
     binaries=[
         ('bin/ffmpeg.exe', 'bin'),
         ('bin/ffprobe.exe', 'bin'),
+        *_ct2_binaries,
     ],
     datas=[
         (frontend_dist, 'frontend/dist'),
@@ -52,6 +60,16 @@ a = Analysis(
         'core.pack_apkg',
         'core.parse_srt',
         'core.whisper_manager',
+        'core.asr',
+        'core.asr.base',
+        'core.asr.whisper_engine',
+        'core.asr.bcut_engine',
+        'core.asr.chunked_asr',
+        'core.translate',
+        'core.translate.base',
+        'core.translate.bing',
+        'core.translate.google',
+        'diskcache',
         'faster_whisper',
         'ctranslate2',
         'onnxruntime',

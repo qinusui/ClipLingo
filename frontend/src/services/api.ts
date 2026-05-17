@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { SubtitleListResponse, ProcessResult, ProcessedCard, SubtitleItem, AIRecommendResponse, AnnotationPurpose } from '../types';
+import type { SubtitleListResponse, ProcessResult, ProcessedCard, SubtitleItem, AIRecommendResponse, AnnotationPurpose, ASREngine, ASREngineInfo, TranslateService, TranslateServiceInfo, TranslateBatchResponse } from '../types';
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 
@@ -30,12 +30,13 @@ export const subtitleAPI = {
     return response.data;
   },
 
-  // Whisper 转录：启动任务
+  // 转录：启动任务
   startTranscribe: async (
     video: File,
     minDuration: number = 1.0,
     language?: string,
-    modelName?: string
+    modelName?: string,
+    asrEngine?: ASREngine
   ): Promise<{ task_id: string; status: string }> => {
     const formData = new FormData();
     formData.append('video', video);
@@ -43,12 +44,19 @@ export const subtitleAPI = {
     params.append('min_duration', minDuration.toString());
     if (language) params.append('language', language);
     if (modelName) params.append('model_name', modelName);
+    if (asrEngine) params.append('asr_engine', asrEngine);
 
     const response = await api.post<{ task_id: string; status: string }>(
       `/api/subtitles/transcribe?${params.toString()}`,
       formData,
       { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 600000 }
     );
+    return response.data;
+  },
+
+  // 获取可用 ASR 引擎列表
+  getASREngines: async (): Promise<{ engines: ASREngineInfo[] }> => {
+    const response = await api.get('/api/subtitles/asr/engines');
     return response.data;
   },
 
@@ -328,6 +336,31 @@ export const subtitleAPI = {
     return response.data;
   },
 
+};
+
+// 翻译相关 API
+export const translateAPI = {
+  // 获取可用翻译服务列表
+  getServices: async (): Promise<{ services: TranslateServiceInfo[] }> => {
+    const response = await api.get('/api/translate/services');
+    return response.data;
+  },
+
+  // 批量翻译
+  batch: async (
+    texts: string[],
+    service: TranslateService = 'bing',
+    sourceLang: string = 'auto',
+    targetLang: string = 'zh'
+  ): Promise<TranslateBatchResponse> => {
+    const response = await api.post<TranslateBatchResponse>('/api/translate/batch', {
+      texts,
+      service,
+      source_lang: sourceLang,
+      target_lang: targetLang,
+    });
+    return response.data;
+  },
 };
 
 // 处理相关 API

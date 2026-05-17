@@ -25,7 +25,7 @@ from pathlib import Path
 
 # 处理 --version 参数（在导入模块之前，避免依赖问题）
 if "--version" in sys.argv:
-    print("ClipLingo 1.4.2")
+    print("ClipLingo 1.5.0")
     sys.exit(0)
 
 from core.parse_srt import parse_srt, filter_short_subtitles, Subtitle
@@ -53,6 +53,7 @@ def _process_video_to_media(
     min_duration: float = 1.0,
     num_workers: int = 8,
     whisper_model: str = "base",
+    asr_engine: str = "faster_whisper",
     language: str = None,
     force_transcribe: bool = False,
     progress_callback=None,
@@ -233,6 +234,7 @@ def run(
     min_duration: float = 1.0,
     num_workers: int = 8,
     whisper_model: str = "base",
+    asr_engine: str = "faster_whisper",
     language: str = None,
     force_transcribe: bool = False,
     progress_callback=None,
@@ -305,6 +307,7 @@ def run(
         min_duration=min_duration,
         num_workers=num_workers,
         whisper_model=whisper_model,
+        asr_engine=asr_engine,
         language=language,
         force_transcribe=force_transcribe,
         progress_callback=progress_callback,
