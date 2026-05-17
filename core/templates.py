@@ -31,8 +31,20 @@ def inject_theme_overrides(css: str, overrides: dict | None) -> str:
     """将用户 CSS 变量注入到主题 CSS 前面"""
     if not overrides:
         return css
-    declarations = "\n".join(f"  {k}: {v};" for k, v in overrides.items())
-    bg_image_none = "background-image: none !important; " if "--card-bg" in overrides else ""
+
+    ov = dict(overrides)
+
+    # 合并拆分后的阴影变量为 --card-shadow
+    shadow_keys = {"--card-shadow-offset-x", "--card-shadow-offset-y", "--card-shadow-blur", "--card-shadow-color"}
+    if shadow_keys & set(ov.keys()):
+        ox = ov.pop("--card-shadow-offset-x", "0px")
+        oy = ov.pop("--card-shadow-offset-y", "2px")
+        blur = ov.pop("--card-shadow-blur", "0px")
+        color = ov.pop("--card-shadow-color", "rgba(0,0,0,0.15)")
+        ov["--card-shadow"] = f"{ox} {oy} {blur} 0px {color}"
+
+    declarations = "\n".join(f"  {k}: {v};" for k, v in ov.items())
+    bg_image_none = "background-image: none !important; " if "--card-bg" in ov else ""
     override_css = _VARIABLE_OVERRIDE_TEMPLATE.format(
         variable_declarations=declarations,
         bg_image_none=bg_image_none,

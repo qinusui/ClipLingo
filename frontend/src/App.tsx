@@ -84,21 +84,21 @@ function downloadUrl(url: string, filename: string) {
 }
 
 type StepStatus = 'pending' | 'processing' | 'completed' | 'error';
-type ProcessingStep = { id: string; label: string; status: StepStatus; error?: string };
+type ProcessingStep = { id: string; status: StepStatus; error?: string };
 
 const PROCESSING_STEPS: ProcessingStep[] = [
-  { id: 'parse', label: i18n.t('app.processing.parseSubtitles'), status: 'pending' },
-  { id: 'media', label: i18n.t('app.processing.cutAudioScreenshots'), status: 'pending' },
-  { id: 'pack', label: i18n.t('app.processing.packAnkiDeck'), status: 'pending' },
+  { id: 'parse', status: 'pending' },
+  { id: 'media', status: 'pending' },
+  { id: 'pack', status: 'pending' },
 ];
 
 const MEDIA_PROCESSING_STEPS: ProcessingStep[] = [
-  { id: 'parse', label: i18n.t('app.processing.parseSubtitles'), status: 'pending' },
-  { id: 'media', label: i18n.t('app.processing.cutAudioScreenshots'), status: 'pending' },
+  { id: 'parse', status: 'pending' },
+  { id: 'media', status: 'pending' },
 ];
 
 const PACK_PROCESSING_STEPS: ProcessingStep[] = [
-  { id: 'pack', label: i18n.t('app.processing.packAnkiDeck'), status: 'pending' },
+  { id: 'pack', status: 'pending' },
 ];
 
 const LANGUAGE_CODES = ['zh', 'en', 'ja', 'ko', 'fr', 'de', 'es', 'it', 'pt', 'ru', 'ar', 'th', 'vi', 'nl', 'sv', 'pl', 'tr', 'hi', 'id'] as const;
@@ -440,7 +440,8 @@ function App() {
 
   // ── 主题覆盖：加载 + 实时预览 ──
   useEffect(() => {
-    themeAPI.loadOverrides(cardTheme).then(ov => {
+    themeAPI.loadOverrides(cardTheme).then(result => {
+      const ov = result.variables || {};
       setThemeOverrides(prev => ({ ...prev, [cardTheme]: ov }));
       setPendingOverrides(ov);
       setHasUnsavedOverrides(false);
@@ -476,12 +477,14 @@ function App() {
     await refreshCustomThemes();
   };
 
+  // ── 主题覆盖：作用域预览（只影响卡片预览区域，不污染全局样式）──
   useEffect(() => {
     const vars = themeOverrides[cardTheme] || {};
-    const root = document.documentElement;
+    const scope = document.getElementById('card-preview-scope');
+    if (!scope) return;
     Object.entries(vars).forEach(([k, v]) => {
-      if (v) root.style.setProperty(k, v);
-      else root.style.removeProperty(k);
+      if (v) scope.style.setProperty(k, v);
+      else scope.style.removeProperty(k);
     });
   }, [cardTheme, themeOverrides]);
 
@@ -540,15 +543,17 @@ function App() {
     }
   };
 
+  // 切换主题（有未保存修改时弹出确认）
+  const handleSetCardTheme = (theme: CardTheme) => {
+    if (hasUnsavedOverrides && theme !== cardTheme) {
+      if (!window.confirm(t('cssEditor.unsavedMessage'))) return;
+    }
+    setCardTheme(theme);
+  };
+
   const handleOverrideChange = (overrides: ThemeOverrides) => {
     setPendingOverrides(overrides);
     setHasUnsavedOverrides(true);
-    // 即时预览：把变量应用到 document
-    const root = document.documentElement;
-    Object.entries(overrides).forEach(([k, v]) => {
-      if (v) root.style.setProperty(k, v);
-      else root.style.removeProperty(k);
-    });
   };
 
   const handleSaveOverrides = async () => {
@@ -560,8 +565,6 @@ function App() {
   const handleResetOverrides = () => {
     setPendingOverrides({});
     setHasUnsavedOverrides(true);
-    const root = document.documentElement;
-    Object.keys(themeOverrides[cardTheme] || {}).forEach(k => root.style.removeProperty(k));
   };
 
   // 测试 AI 连接
@@ -2368,7 +2371,7 @@ function App() {
                 {/* 4c: 样式预览（真实截图）+ 生成牌组按钮 */}
                 {processingPhase === 'awaiting_styles' && (
                   <div className="space-y-4">
-                    <StyleThemeSelector cardStyles={cardStyles} setCardStyles={setCardStyles} cardTheme={cardTheme} setCardTheme={setCardTheme} showEditor={editingStyles} onToggleEditor={handleToggleEditor} customThemes={customThemes} onImportClick={() => setShowThemeImporter(true)} onBrowseClick={() => setShowMarketplace(true)} onDeleteTheme={handleDeleteTheme} onAIGenerateClick={async () => {
+                    <StyleThemeSelector cardStyles={cardStyles} setCardStyles={setCardStyles} cardTheme={cardTheme} setCardTheme={handleSetCardTheme} showEditor={editingStyles} onToggleEditor={handleToggleEditor} customThemes={customThemes} onImportClick={() => setShowThemeImporter(true)} onBrowseClick={() => setShowMarketplace(true)} onDeleteTheme={handleDeleteTheme} onAIGenerateClick={async () => {
                       const isCustom = customThemes.some(t => t.name === cardTheme);
                       if (isCustom) {
                         const files = await themeAPI.getCustomThemeFiles(cardTheme);

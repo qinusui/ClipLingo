@@ -1,9 +1,10 @@
 import { CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { cn } from '../utils/cn';
 
 interface Step {
   id: string;
-  label: string;
+  label?: string;
   status: 'pending' | 'processing' | 'completed' | 'error';
   error?: string;
 }
@@ -14,7 +15,15 @@ interface ProcessingStatusProps {
   message?: string;
 }
 
+const STEP_I18N_MAP: Record<string, string> = {
+  parse: 'app.processing.parseSubtitles',
+  media: 'app.processing.cutAudioScreenshots',
+  pack: 'app.processing.packAnkiDeck',
+};
+
 export const ProcessingStatus = ({ steps, currentStepIndex, message }: ProcessingStatusProps) => {
+  const { t } = useTranslation();
+
   return (
     <div className="space-y-3">
       {message && (
@@ -25,6 +34,8 @@ export const ProcessingStatus = ({ steps, currentStepIndex, message }: Processin
       {steps.map((step, index) => {
         const isActive = index === currentStepIndex;
         const isCompleted = index < currentStepIndex;
+        // 优先使用 step.label（兼容旧代码），否则根据 step.id 实时翻译
+        const displayLabel = step.label || t(STEP_I18N_MAP[step.id] || step.id);
 
         return (
           <div
@@ -58,7 +69,7 @@ export const ProcessingStatus = ({ steps, currentStepIndex, message }: Processin
                   isActive ? 'text-blue-700 dark:text-blue-400' : 'text-gray-700 dark:text-gray-300'
                 )}
               >
-                {step.label}
+                {displayLabel}
               </p>
               {step.error && (
                 <p className="text-xs text-red-600 mt-1 dark:text-red-400">{step.error}</p>

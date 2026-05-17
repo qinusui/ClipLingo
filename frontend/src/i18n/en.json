@@ -376,7 +376,14 @@
     "cardShadow": "Shadow",
     "save": "Save",
     "reset": "Reset Default",
-    "editCss": "Edit Style"
+    "editCss": "Edit Style",
+    "sizes": "Font Sizes",
+    "shadow": "Shadow",
+    "saved": "Saved",
+    "invalidColor": "Invalid color value(s) exist. Please fix before saving.",
+    "resetKey": "Reset {{key}}",
+    "unsavedTitle": "Unsaved Changes",
+    "unsavedMessage": "You have unsaved style changes. Switching themes will discard them. Continue?"
   },
   "themeImporter": {
     "title": "Import Custom Theme",

@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ProcessedCard, CardTheme, ThemeOverrides } from '../types';
 import { ChevronLeft, ChevronRight, Play, Pause, Loader2 } from 'lucide-react';
+import { themeAPI } from '../services/themeAPI';
 
 interface CardPreviewProps {
   cards: ProcessedCard[];
@@ -13,10 +14,6 @@ interface CardPreviewProps {
   themeOverrides?: ThemeOverrides;
   videoFile?: File;
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//  模板获取与缓存（只获取基础模板，不含 overrides）
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 interface ThemeTemplate {
   name: string;
@@ -37,7 +34,6 @@ async function fetchWithRetry(url: string, options: RequestInit, retries = 2): P
     } catch (e) {
       lastErr = e instanceof Error ? e : new Error(String(e));
       if (i < retries) {
-        // 短暂等待后重试（后端可能正忙）
         await new Promise(r => setTimeout(r, 1000 * (i + 1)));
       }
     }
@@ -85,32 +81,6 @@ async function fetchBaseTemplate(theme: string): Promise<ThemeTemplate> {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//  客户端 CSS 变量覆盖注入（与服务端 inject_theme_overrides 保持一致）
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-function buildOverrideCss(overrides?: ThemeOverrides): string {
-  if (!overrides) return '';
-  const entries = Object.entries(overrides).filter(([, v]) => v !== undefined && v !== '');
-  if (entries.length === 0) return '';
-
-  const declarations = entries.map(([k, v]) => `  ${k}: ${v};`).join('\n');
-  const bgImageNone = overrides['--card-bg'] ? 'background-image: none !important; ' : '';
-
-  return `/* ── 用户自定义样式覆盖 ── */
-:root {
-${declarations}
-}
-
-.card { ${bgImageNone}background-color: var(--card-bg, inherit) !important; color: var(--card-text, inherit) !important; padding: var(--card-padding, inherit) !important; border-radius: var(--card-radius, inherit) !important; box-shadow: var(--card-shadow, none) !important; }
-.original, .sentence, .subtitle-text { font-family: var(--font-sentence, inherit) !important; font-size: var(--font-size-sentence, inherit) !important; }
-.translation { color: var(--translation-color, inherit) !important; font-family: var(--font-translation, inherit) !important; font-size: var(--font-size-translation, inherit) !important; }
-.notes, .annotation { color: var(--annotation-color, inherit) !important; }
-.container { border-color: var(--accent-color, inherit) !important; }
-hr, hr#answer, .divider { border-color: var(--accent-color, inherit) !important; }
-`;
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  Anki 模板变量填充
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -154,19 +124,18 @@ function renderTemplate(tpl: string, card: ProcessedCard): string {
 
 const TemplatePane = ({
   tpl,
-  overrides,
+  overrideCss,
   card,
   style,
   showAnswer,
 }: {
   tpl: ThemeTemplate;
-  overrides?: ThemeOverrides;
+  overrideCss: string;
   card: ProcessedCard;
   style: string;
   showAnswer: boolean;
 }) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const overrideCss = buildOverrideCss(overrides);
   const fullCss = overrideCss + tpl.css;
   const tmpl = style === 'vocab' ? tpl.vocab : tpl.sentence;
   const htmlFragment = renderTemplate(showAnswer ? tmpl.back : tmpl.front, card);
@@ -188,7 +157,7 @@ const TemplatePane = ({
   return (
     <iframe
       ref={iframeRef}
-      key={`${style}-${showAnswer ? 'back' : 'front'}-${JSON.stringify(overrides)}`}
+      key={`${style}-${showAnswer ? 'back' : 'front'}-${overrideCss}`}
       srcDoc={html}
       sandbox={tpl.isCustom ? 'allow-scripts allow-same-origin' : undefined}
       className="w-full min-h-[300px] border-0"
@@ -220,8 +189,10 @@ export const CardPreview = ({
   const [tpl, setTpl] = useState<ThemeTemplate | null>(null);
   const [tplLoading, setTplLoading] = useState(true);
   const [tplError, setTplError] = useState(false);
+  const [overrideCss, setOverrideCss] = useState('');
+  const overrideTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
-  // 只在主题变化时从后端获取基础模板（覆盖变化由客户端即时处理）
+  // 主题变化时获取基础模板（不含覆盖）
   useEffect(() => {
     let cancelled = false;
     setTplLoading(true);
@@ -231,6 +202,21 @@ export const CardPreview = ({
       .catch((err) => { if (!cancelled) { console.error('[CardPreview] 模板加载失败:', err); setTplError(true); setTplLoading(false); } });
     return () => { cancelled = true; };
   }, [theme]);
+
+  // 覆盖变化时通过 API 获取注入后的 CSS（debounced）
+  useEffect(() => {
+    if (overrideTimerRef.current) clearTimeout(overrideTimerRef.current);
+    if (!themeOverrides || Object.keys(themeOverrides).filter(k => (themeOverrides as any)[k]).length === 0) {
+      setOverrideCss('');
+      return;
+    }
+    overrideTimerRef.current = setTimeout(() => {
+      themeAPI.getPreviewCss(theme, themeOverrides).then(css => {
+        setOverrideCss(css ? css.replace(tpl?.css || '', '') : '');
+      });
+    }, 150);
+    return () => { if (overrideTimerRef.current) clearTimeout(overrideTimerRef.current); };
+  }, [themeOverrides, theme, tpl?.css]);
 
   if (cards.length === 0) {
     return (
@@ -321,8 +307,8 @@ export const CardPreview = ({
         </button>
       </div>
 
-      {/* 卡片：iframe 渲染真实 Anki 模板（overrides 客户端即时注入） */}
-      <div className="bg-white dark:bg-gray-900 rounded-lg overflow-hidden">
+      {/* 卡片预览容器（CSS 变量作用域隔离） */}
+      <div id="card-preview-scope" className="bg-white dark:bg-gray-900 rounded-lg overflow-hidden">
         {tplLoading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
@@ -335,7 +321,7 @@ export const CardPreview = ({
           <TemplatePane
             key={`${theme}-${previewStyle}`}
             tpl={tpl}
-            overrides={themeOverrides}
+            overrideCss={overrideCss}
             card={card}
             style={previewStyle}
             showAnswer={showAnswer}

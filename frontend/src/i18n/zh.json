@@ -376,7 +376,14 @@
     "cardShadow": "阴影",
     "save": "保存",
     "reset": "恢复默认",
-    "editCss": "编辑样式"
+    "editCss": "编辑样式",
+    "sizes": "字号",
+    "shadow": "阴影",
+    "saved": "已保存",
+    "invalidColor": "存在无效的颜色值，请修正后再保存",
+    "resetKey": "重置 {{key}}",
+    "unsavedTitle": "未保存的修改",
+    "unsavedMessage": "你有未保存的样式修改，切换主题将丢失修改。是否继续？"
   },
   "themeImporter": {
     "title": "导入自定义主题",

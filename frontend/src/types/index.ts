@@ -64,6 +64,7 @@ export interface CustomThemeMeta {
 
 // CSS 变量覆盖（用户自定义样式）
 export interface ThemeOverrides {
+  [key: string]: string | undefined;
   '--card-bg'?: string;
   '--card-text'?: string;
   '--translation-color'?: string;
@@ -76,17 +77,26 @@ export interface ThemeOverrides {
   '--card-padding'?: string;
   '--card-radius'?: string;
   '--card-shadow'?: string;
+  // 阴影拆分变量（编辑器使用，后端合并为 --card-shadow）
+  '--card-shadow-offset-x'?: string;
+  '--card-shadow-offset-y'?: string;
+  '--card-shadow-blur'?: string;
+  '--card-shadow-color'?: string;
 }
 
-// CSS 变量编辑器字段定义
+// CSS 变量编辑器字段定义（从后端 GET /api/themes/variables 获取）
 export interface CssVariableField {
-  key: keyof ThemeOverrides;
+  key: string;
   label: string;
+  labelEn: string;
   type: 'color' | 'font' | 'size' | 'slider';
-  options?: string[];  // for font selector
+  group: string;
+  options?: string[];
+  optionLabels?: string[];
   min?: number;
   max?: number;
   step?: number;
+  unit?: string;
 }
 
 // 工作流阶段

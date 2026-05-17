@@ -44,6 +44,11 @@ export const StyleThemeSelector = ({
 }: StyleThemeSelectorProps) => {
   const { t } = useTranslation();
   const isCustom = customThemes.some(t => t.name === cardTheme);
+  const currentCustomTheme = customThemes.find(t => t.name === cardTheme);
+  const customSupportsVariables = currentCustomTheme?.supportsVariables ?? false;
+
+  // 编辑按钮是否可用
+  const canEditVariables = !isCustom || customSupportsVariables;
 
   return (
     <div className="space-y-3">
@@ -125,6 +130,9 @@ export const StyleThemeSelector = ({
                     }`}
                   >
                     {tm.label}
+                    {tm.supportsVariables && (
+                      <span className="ml-0.5 text-[8px] opacity-70">&#9881;</span>
+                    )}
                   </button>
                   {onDeleteTheme && (
                     <button
@@ -164,29 +172,31 @@ export const StyleThemeSelector = ({
           </button>
         )}
       </div>
-      {/* 编辑样式按钮 — 内置主题：CSS 变量编辑；自定义主题：AI 继续调整 */}
-      {isCustom ? (
-        onAIGenerateClick && (
+
+      {/* 编辑样式 / AI 继续调整 按钮 */}
+      <div className="flex gap-2">
+        {canEditVariables && (
+          <button
+            onClick={onToggleEditor}
+            className={`flex-1 px-2 py-1.5 rounded text-xs font-medium border transition-colors ${
+              showEditor
+                ? 'bg-primary-500 text-white border-primary-500'
+                : 'bg-white text-gray-500 border-gray-300 hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-400 dark:border-gray-600 dark:hover:bg-gray-600'
+            }`}
+          >
+            {t('cssEditor.editCss')}
+          </button>
+        )}
+        {isCustom && onAIGenerateClick && (
           <button
             onClick={onAIGenerateClick}
-            className="mt-2 w-full inline-flex items-center justify-center gap-1.5 px-2 py-1.5 rounded text-xs font-medium border border-purple-300 text-purple-600 bg-purple-50 hover:bg-purple-100 dark:border-purple-700 dark:text-purple-400 dark:bg-purple-900/20 dark:hover:bg-purple-900/40 transition-colors"
+            className={`${canEditVariables ? '' : 'flex-1'} inline-flex items-center justify-center gap-1.5 px-2 py-1.5 rounded text-xs font-medium border border-purple-300 text-purple-600 bg-purple-50 hover:bg-purple-100 dark:border-purple-700 dark:text-purple-400 dark:bg-purple-900/20 dark:hover:bg-purple-900/40 transition-colors`}
           >
             <Sparkles className="w-3.5 h-3.5" />
             {t('styleGenerator.aiContinueAdjust')}
           </button>
-        )
-      ) : (
-        <button
-          onClick={onToggleEditor}
-          className={`mt-2 w-full px-2 py-1.5 rounded text-xs font-medium border transition-colors ${
-            showEditor
-              ? 'bg-primary-500 text-white border-primary-500'
-              : 'bg-white text-gray-500 border-gray-300 hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-400 dark:border-gray-600 dark:hover:bg-gray-600'
-          }`}
-        >
-          {t('cssEditor.editCss')}
-        </button>
-      )}
+        )}
+      </div>
     </div>
   );
 };
