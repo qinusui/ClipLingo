@@ -10,25 +10,12 @@ import os
 from pathlib import Path
 
 
-# ── CSS 变量覆盖层模板 ──────────────────────────────────────
-# 用户自定义 CSS 变量注入时，生成 :root + 选择器覆盖规则
-_VARIABLE_OVERRIDE_TEMPLATE = """\
-/* ── 用户自定义样式覆盖 ── */
-:root {{
-{variable_declarations}
-}}
-
-.card {{ {bg_image_none}background-color: var(--card-bg, inherit) !important; color: var(--card-text, inherit) !important; padding: var(--card-padding, inherit) !important; border-radius: var(--card-radius, inherit) !important; box-shadow: var(--card-shadow, none) !important; }}
-.original, .sentence, .subtitle-text {{ font-family: var(--font-sentence, inherit) !important; font-size: var(--font-size-sentence, inherit) !important; }}
-.translation {{ color: var(--translation-color, inherit) !important; font-family: var(--font-translation, inherit) !important; font-size: var(--font-size-translation, inherit) !important; }}
-.notes, .annotation {{ color: var(--annotation-color, inherit) !important; }}
-.container {{ border-color: var(--accent-color, inherit) !important; }}
-hr, hr#answer, .divider {{ border-color: var(--accent-color, inherit) !important; }}
-"""
-
-
 def inject_theme_overrides(css: str, overrides: dict | None) -> str:
-    """将用户 CSS 变量注入到主题 CSS 前面"""
+    """将用户 CSS 变量注入到主题 CSS 前面
+
+    只对实际被修改的 CSS 变量生成选择器规则，未涉及的属性保持主题默认值。
+    避免 `var(--card-bg, inherit)` 在主题使用硬编码值时回退到透明，导致背景异常。
+    """
     if not overrides:
         return css
 
@@ -43,12 +30,56 @@ def inject_theme_overrides(css: str, overrides: dict | None) -> str:
         color = ov.pop("--card-shadow-color", "rgba(0,0,0,0.15)")
         ov["--card-shadow"] = f"{ox} {oy} {blur} 0px {color}"
 
+    # :root 块：声明所有被覆盖的变量
     declarations = "\n".join(f"  {k}: {v};" for k, v in ov.items())
-    bg_image_none = "background-image: none !important; " if "--card-bg" in ov else ""
-    override_css = _VARIABLE_OVERRIDE_TEMPLATE.format(
-        variable_declarations=declarations,
-        bg_image_none=bg_image_none,
-    )
+    lines = ["/* ── 用户自定义样式覆盖 ── */", ":root {", declarations, "}", ""]
+
+    # 按需生成选择器规则：只对实际被覆盖的变量添加 !important 规则
+    # ── .card ──
+    card_parts = []
+    if "--card-bg" in ov:
+        card_parts.append("background-image: none !important; background-color: var(--card-bg) !important")
+    if "--card-text" in ov:
+        card_parts.append("color: var(--card-text) !important")
+    if "--card-padding" in ov:
+        card_parts.append("padding: var(--card-padding) !important")
+    if "--card-radius" in ov:
+        card_parts.append("border-radius: var(--card-radius) !important")
+    if "--card-shadow" in ov:
+        card_parts.append("box-shadow: var(--card-shadow) !important")
+    if card_parts:
+        lines.append(f'.card {{ {" ".join(card_parts)} }}')
+
+    # ── .original / .sentence / .subtitle-text ──
+    orig_parts = []
+    if "--font-sentence" in ov:
+        orig_parts.append("font-family: var(--font-sentence) !important")
+    if "--font-size-sentence" in ov:
+        orig_parts.append("font-size: var(--font-size-sentence) !important")
+    if orig_parts:
+        lines.append(f'.original, .sentence, .subtitle-text {{ {" ".join(orig_parts)} }}')
+
+    # ── .translation ──
+    trans_parts = []
+    if "--translation-color" in ov:
+        trans_parts.append("color: var(--translation-color) !important")
+    if "--font-translation" in ov:
+        trans_parts.append("font-family: var(--font-translation) !important")
+    if "--font-size-translation" in ov:
+        trans_parts.append("font-size: var(--font-size-translation) !important")
+    if trans_parts:
+        lines.append(f'.translation {{ {" ".join(trans_parts)} }}')
+
+    # ── .notes / .annotation ──
+    if "--annotation-color" in ov:
+        lines.append(".notes, .annotation { color: var(--annotation-color) !important; }")
+
+    # ── .container / hr ──
+    if "--accent-color" in ov:
+        lines.append(".container { border-color: var(--accent-color) !important; }")
+        lines.append("hr, hr#answer, .divider { border-color: var(--accent-color) !important; }")
+
+    override_css = "\n".join(lines) + "\n"
     return override_css + "\n" + css
 
 
