@@ -893,7 +893,11 @@ def _whisper_subprocess(video_path: str, srt_path: str, model_name: str, languag
         from core.media_cut import get_video_duration
 
         progress_pipe.send({"step": "loading", "message": f"加载 {model_name} 模型..."})
-        model = load_model(model_name)
+
+        def _download_progress(msg: str):
+            progress_pipe.send({"step": "loading", "message": msg})
+
+        model = load_model(model_name, progress_callback=_download_progress)
         if model is None:
             raise RuntimeError("Whisper 未安装，请先安装 Whisper")
 
