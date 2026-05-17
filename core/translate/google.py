@@ -24,12 +24,19 @@ GOOGLE_TRANSLATE_URL = "https://translate.google.com/m"
 
 HEADERS = {
     "User-Agent": (
-        "Mozilla/4.0 (compatible;MSIE 6.0;Windows NT 5.1;SV1;"
-        ".NET CLR 1.1.4322;.NET CLR 2.0.50727;.NET CLR 3.0.04506.30)"
+        "Mozilla/5.0 (Linux; Android 13; Pixel 7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
     ),
 }
 
 CACHE_EXPIRE = 86400 * 7  # 7 天
+
+# Google Translate /m 端点需要完整的 BCP-47 语言标签，短代码如 "zh" 不翻译
+_GOOGLE_LANG_MAP = {"zh": "zh-CN"}
+
+
+def _normalize_lang(code: str) -> str:
+    return _GOOGLE_LANG_MAP.get(code, code)
 
 
 def _get_diskcache():
@@ -96,8 +103,8 @@ class GoogleTranslator(BaseTranslator):
         resp = self.session.get(
             GOOGLE_TRANSLATE_URL,
             params={
-                "tl": target_lang,
-                "sl": source_lang,
+                "tl": _normalize_lang(target_lang),
+                "sl": _normalize_lang(source_lang),
                 "q": text[:5000],
             },
             headers=HEADERS,
@@ -113,7 +120,12 @@ class GoogleTranslator(BaseTranslator):
         if match:
             return html_mod.unescape(match[0])
         else:
-            logger.warning("Google 翻译结果解析失败")
+            # 诊断：记录响应片段，帮助排查 GFW 劫持或页面结构变更
+            snippet = resp.text[:500].replace("\n", " ")
+            logger.warning(
+                f"Google 翻译结果解析失败 (status={resp.status_code}, len={len(resp.text)}), "
+                f"response preview: {snippet}"
+            )
             return text
 
     @classmethod
