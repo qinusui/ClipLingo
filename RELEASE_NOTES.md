@@ -1,5 +1,59 @@
 # ClipLingo Release Notes
 
+## v1.4.2 (2026-05-17)
+
+**English**
+
+### Whisper Model Multi-Mirror Download
+
+- Added Tsinghua TUNA mirror and ModelScope (Alibaba Cloud) as additional download sources
+- All 4 sources probed on startup, auto-sorted by latency — fastest source used first
+- Network-unreachable mirrors automatically deprioritized as fallbacks
+- Manual download links include both HF Mirror and Tsinghua mirror addresses
+
+### CSS Variable Editor Enhancements
+
+- Shadow split into 4 independent variables (offset-x/y, blur, color) for more intuitive editing
+- Custom themes now support CSS variable editing when `theme.json` declares a `variables` field
+- New `/api/themes/variables` endpoint: CSS variable metadata defined server-side as single source of truth
+- New `/api/themes/preview-css` endpoint: server-side CSS injection for instant preview
+- Frontend reads field definitions from backend, no longer hardcodes editor UI
+
+### Bug Fixes
+
+- Auto-detect free port on startup to avoid port conflicts
+- AI screening disabled by default to avoid unintended API calls
+- Fixed AI screening all-fail being misreported as "subtitle file format error"
+- Fixed file download URL still pointing to old endpoint after HF_ENDPOINT switch
+- Fixed frontend error messages losing backend detail; INTERNAL_ERROR now shows actionable guidance
+
+**中文**
+
+### Whisper 模型多镜像下载
+
+- 新增清华 TUNA 镜像和 ModelScope（阿里云）作为额外下载源
+- 启动时探测全部 4 个源延迟，按响应速度自动排序，最快优先
+- 不可达镜像自动降为备选
+- 手动下载链接同时提供 HF 镜像和清华镜像地址
+
+### CSS 变量编辑器增强
+
+- 阴影拆分为 4 个独立变量（X/Y 偏移、模糊、颜色），编辑更直观
+- 自定义主题在 `theme.json` 声明 `variables` 字段后即支持 CSS 变量编辑
+- 新增 `/api/themes/variables` 端点：CSS 变量元数据服务端统一定义
+- 新增 `/api/themes/preview-css` 端点：服务端注入 CSS 覆盖，实现即时预览
+- 前端从后端获取字段定义，不再硬编码编辑器 UI
+
+### Bug 修复
+
+- 启动时自动查找可用端口，避免端口冲突
+- 默认关闭 AI 筛选，避免用户无感知触发 AI 处理
+- 修复 AI 筛选全失败误报为"字幕文件格式错误"
+- 修复 HF_ENDPOINT 切换后文件下载 URL 仍指向旧端点
+- 修复前端错误提示丢失后端 detail，INTERNAL_ERROR 文案改为可操作指引
+
+---
+
 ## v1.4.1 (2026-05-14)
 
 **English**

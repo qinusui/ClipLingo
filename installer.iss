@@ -2,7 +2,7 @@
 ; 支持中文路径：Inno Setup 6+ 原生 Unicode，{app} 变量自动处理中文路径
 [Setup]
 AppName=ClipLingo
-AppVersion=1.4.1
+AppVersion=1.4.2
 AppPublisher=ClipLingo
 DefaultDirName={autopf}\ClipLingo
 DefaultGroupName=ClipLingo

@@ -25,7 +25,7 @@ from pathlib import Path
 
 # 处理 --version 参数（在导入模块之前，避免依赖问题）
 if "--version" in sys.argv:
-    print("ClipLingo 1.4.1")
+    print("ClipLingo 1.4.2")
     sys.exit(0)
 
 from core.parse_srt import parse_srt, filter_short_subtitles, Subtitle
