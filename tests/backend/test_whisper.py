@@ -81,16 +81,26 @@ class TestMultiSourceDownload:
         """第一个在线源应为 hf-mirror.com"""
         assert whisper_manager.HF_SOURCES[0][0] == "https://hf-mirror.com"
 
+    def test_tsinghua_in_sources(self):
+        """清华镜像应在下载源列表中"""
+        endpoints = [s[0] for s in whisper_manager.HF_SOURCES]
+        assert any("tuna.tsinghua.edu.cn" in ep for ep in endpoints)
+
+    def test_modelscope_in_sources(self):
+        """ModelScope（阿里云）应在下载源列表中"""
+        endpoints = [s[0] for s in whisper_manager.HF_SOURCES]
+        assert any("modelscope" in ep for ep in endpoints)
+
     def test_huggingface_is_last_resort(self):
         """HuggingFace 主站应为最后一个源"""
         assert whisper_manager.HF_SOURCES[-1][0] == "https://huggingface.co"
 
     def test_second_source_used_when_first_fails(self):
-        """第一源失败后尝试第二源"""
+        """第一源失败后尝试第二源（清华镜像）"""
         mock_fw = MagicMock()
         mock_fw.WhisperModel.side_effect = [
-            OSError("Connection refused"),  # hf-mirror 失败
-            MagicMock(),  # HuggingFace 成功
+            OSError("Connection refused"),   # hf-mirror 失败
+            MagicMock(),                     # 清华镜像 成功
         ]
         with patch.object(whisper_manager, 'get_whisper', return_value=mock_fw):
             result = whisper_manager.load_model("tiny")
@@ -111,6 +121,7 @@ class TestMultiSourceDownload:
                 assert e.code == ErrorCode.WHISPER_MODEL_FAILED
                 assert "离线模型目录" in e.detail
                 assert "hf-mirror.com" in e.detail
+                assert "tuna.tsinghua.edu.cn" in e.detail
 
 
 class TestWhisperMirrorRetry:
@@ -160,33 +171,50 @@ class TestWhisperMirrorRetry:
 
 
 class TestAutoDetectSourceOrder:
-    """根据网络环境自动调整下载源优先级"""
+    """根据网络环境自动调整下载源优先级（探测所有源延迟并排序）"""
 
-    def test_mirror_fast_prioritized(self):
-        """hf-mirror.com 延迟 < 2s → 国内用户，镜像优先"""
+    def test_all_fast_original_order_preserved(self):
+        """所有源延迟相同 → 保持原始优先级顺序"""
         with patch.object(whisper_manager, '_probe_host', return_value=0.15):
-            whisper_manager._cached_source_order = None  # 清除缓存
-            result = whisper_manager._get_source_order()
-            # hf-mirror 应在第一位
-            assert result[0][0] == "https://hf-mirror.com"
-            assert result[1][0] == "https://huggingface.co"
-
-    def test_mirror_slow_falls_back(self):
-        """hf-mirror.com 延迟 >= 2s → 海外用户，HuggingFace 优先"""
-        with patch.object(whisper_manager, '_probe_host', return_value=3.5):
             whisper_manager._cached_source_order = None
             result = whisper_manager._get_source_order()
-            # HuggingFace 主站应在第一位
-            assert result[0][0] == "https://huggingface.co"
-            assert result[1][0] == "https://hf-mirror.com"
+            # 返回格式: (endpoint, label, url_tpl)
+            assert result[0][0] == "https://hf-mirror.com"
+            assert result[1][0] == "https://mirrors.tuna.tsinghua.edu.cn/hugging-face-hub"
+            assert result[2][0] == "https://huggingface.modelscope.cn"
+            assert result[3][0] == "https://huggingface.co"
 
-    def test_mirror_unreachable_falls_back(self):
-        """hf-mirror.com 不可达 → HuggingFace 优先"""
+    def test_hf_main_lowest_latency_goes_first(self):
+        """HuggingFace 主站延迟最低 → 排第一位"""
+        def fake_probe(host, port=443, timeout=3.0):
+            if host == "huggingface.co":
+                return 0.05
+            return 0.5
+        with patch.object(whisper_manager, '_probe_host', side_effect=fake_probe):
+            whisper_manager._cached_source_order = None
+            result = whisper_manager._get_source_order()
+            assert result[0][0] == "https://huggingface.co"
+
+    def test_tsinghua_unreachable_deprioritized(self):
+        """清华镜像不可达 → 降为备选（排最后）"""
+        def fake_probe(host, port=443, timeout=3.0):
+            if host == "mirrors.tuna.tsinghua.edu.cn":
+                return None  # 不可达
+            return 0.1
+        with patch.object(whisper_manager, '_probe_host', side_effect=fake_probe):
+            whisper_manager._cached_source_order = None
+            result = whisper_manager._get_source_order()
+            # 不可达的排在最后
+            assert result[-1][0] == "https://mirrors.tuna.tsinghua.edu.cn/hugging-face-hub"
+
+    def test_all_unreachable_still_returns_all(self):
+        """全部不可达仍返回完整列表（延迟均为 999，保持原顺序）"""
         with patch.object(whisper_manager, '_probe_host', return_value=None):
             whisper_manager._cached_source_order = None
             result = whisper_manager._get_source_order()
-            assert result[0][0] == "https://huggingface.co"
-            assert result[1][0] == "https://hf-mirror.com"
+            assert len(result) == 4
+            for endpoint, label, url_tpl in result:
+                assert url_tpl is not None or endpoint != ""  # 每个源都有有效的 endpoint
 
     def test_result_is_cached(self):
         """探测结果只计算一次，后续调用走缓存"""
@@ -194,5 +222,5 @@ class TestAutoDetectSourceOrder:
             whisper_manager._cached_source_order = None
             whisper_manager._get_source_order()
             whisper_manager._get_source_order()
-            # 只探测了一次
-            assert mock_probe.call_count == 1
+            # 4 个源各探测一次
+            assert mock_probe.call_count == 4

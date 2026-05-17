@@ -30,9 +30,13 @@ else:
     LOCAL_MODEL_DIR = Path(__file__).parent.parent / 'models'
 
 # 下载源优先级：国内镜像优先（默认），海外用户运行时自动调整
+# 格式: (endpoint, label, host_for_probe, url_template_override)
+# url_template_override 为 None 时使用默认模板 {endpoint}/{repo_id}/resolve/{revision}/{filename}
 HF_SOURCES = [
-    ("https://hf-mirror.com",   "HF 镜像"),
-    ("https://huggingface.co",  "HuggingFace 主站"),
+    ("https://hf-mirror.com",                                   "HF 镜像",              "hf-mirror.com",                       None),
+    ("https://mirrors.tuna.tsinghua.edu.cn/hugging-face-hub",   "清华镜像",             "mirrors.tuna.tsinghua.edu.cn",         "https://mirrors.tuna.tsinghua.edu.cn/hugging-face-models/{repo_id}/resolve/{revision}/{filename}"),
+    ("https://huggingface.modelscope.cn",                       "ModelScope（阿里云）",  "huggingface.modelscope.cn",            None),
+    ("https://huggingface.co",                                  "HuggingFace 主站",     "huggingface.co",                       None),
 ]
 
 # 缓存探测结果，避免每次下载都重新测速
@@ -51,29 +55,33 @@ def _probe_host(host: str, port: int = 443, timeout: float = 3.0) -> Optional[fl
 
 
 def _get_source_order() -> list:
-    """根据网络环境自动确定下载源优先级，结果会话级缓存"""
+    """根据网络环境自动确定下载源优先级（按延迟从低到高排序），结果会话级缓存"""
     global _cached_source_order
     if _cached_source_order is not None:
         return _cached_source_order
 
-    mirror_latency = _probe_host("hf-mirror.com")
-    if mirror_latency is not None and mirror_latency < 2.0:
-        logger.info(f"HF 镜像延迟 {mirror_latency:.1f}s，优先使用国内镜像")
-        _cached_source_order = [
-            ("https://hf-mirror.com",   "HF 镜像"),
-            ("https://huggingface.co",  "HuggingFace 主站"),
-        ]
-    else:
-        reason = f"{mirror_latency:.1f}s" if mirror_latency else "不可达"
-        logger.info(f"HF 镜像 {reason}，优先使用 HuggingFace 主站")
-        _cached_source_order = [
-            ("https://huggingface.co",  "HuggingFace 主站"),
-            ("https://hf-mirror.com",   "HF 镜像"),
-        ]
+    # 探测所有源的延迟
+    probed = []
+    for endpoint, label, host, url_tpl in HF_SOURCES:
+        latency = _probe_host(host)
+        if latency is not None:
+            logger.info(f"{label}（{host}）延迟 {latency:.1f}s")
+            probed.append((latency, endpoint, label, url_tpl))
+        else:
+            logger.info(f"{label}（{host}）不可达，降为备选")
+            probed.append((999.0, endpoint, label, url_tpl))
+
+    # 按延迟从低到高排序
+    probed.sort(key=lambda x: x[0])
+    _cached_source_order = [(endpoint, label, url_tpl) for _, endpoint, label, url_tpl in probed]
+
+    first_label = _cached_source_order[0][1]
+    first_latency = probed[0][0]
+    logger.info(f"选择优先源: {first_label}（{first_latency:.1f}s）")
     return _cached_source_order
 
 
-def _set_hf_endpoint(endpoint: str):
+def _set_hf_endpoint(endpoint: str, url_template: str = None):
     """设置 HF_ENDPOINT 并同步更新 huggingface_hub 模块常量
 
     huggingface_hub.constants 的 ENDPOINT / HUGGINGFACE_CO_URL_TEMPLATE 是模块级常量，
@@ -83,7 +91,10 @@ def _set_hf_endpoint(endpoint: str):
     try:
         import huggingface_hub.constants as hf_const
         hf_const.ENDPOINT = endpoint.rstrip("/")
-        hf_const.HUGGINGFACE_CO_URL_TEMPLATE = endpoint.rstrip("/") + "/{repo_id}/resolve/{revision}/{filename}"
+        if url_template:
+            hf_const.HUGGINGFACE_CO_URL_TEMPLATE = url_template
+        else:
+            hf_const.HUGGINGFACE_CO_URL_TEMPLATE = endpoint.rstrip("/") + "/{repo_id}/resolve/{revision}/{filename}"
     except ImportError:
         pass
 
@@ -202,10 +213,12 @@ def load_model(model_name: str = "base") -> Optional[Any]:
     # 2. 依次尝试在线下载源（根据网络环境自动排序）
     sources = _get_source_order()
     last_error = None
-    for endpoint, label in sources:
-        _set_hf_endpoint(endpoint)
+    tried_labels = []
+    for endpoint, label, url_tpl in sources:
+        _set_hf_endpoint(endpoint, url_tpl)
+        tried_labels.append(label)
         try:
-            logger.info(f"从 {label} 下载模型 {model_name}...")
+            logger.info(f"从 {label}（{endpoint}）下载模型 {model_name}...")
             model = faster_whisper.WhisperModel(model_name)
             logger.info(f"模型下载成功（来源：{label}）")
             return model
@@ -215,8 +228,10 @@ def load_model(model_name: str = "base") -> Optional[Any]:
 
     # 3. 全部源都失败 → 给用户可操作的提示
     offline_dir = LOCAL_MODEL_DIR / model_name
+    tried_str = " → ".join(tried_labels)
     raise ClipLingoError(ErrorCode.WHISPER_MODEL_FAILED,
-        f"所有下载源均失败\n"
+        f"所有下载源均失败（{tried_str}）\n"
         f"离线模型目录: {offline_dir}\n"
         f"手动下载地址: https://hf-mirror.com/Systran/faster-whisper-{model_name}\n"
+        f"           或 https://mirrors.tuna.tsinghua.edu.cn/hugging-face-models/Systran/faster-whisper-{model_name}\n"
         f"下载后把 model.bin 等文件放入上述目录即可")
