@@ -204,18 +204,6 @@ def _check_offline_model(model_name: str) -> Optional[Path]:
     return None
 
 
-def _check_bundled_model(model_name: str) -> Optional[Path]:
-    """检查打包内置的模型（仅 frozen 模式），返回模型目录路径或 None"""
-    if not getattr(sys, 'frozen', False):
-        return None
-    model_dir = Path(sys._MEIPASS) / "models" / "bundled" / model_name
-    model_bin = model_dir / "model.bin"
-    if model_bin.exists():
-        logger.info(f"检测到内置模型: {model_dir}")
-        return model_dir
-    return None
-
-
 def _clear_model_cache(model_name: str):
     """清除指定模型的本地缓存，避免损坏/不完整的缓存阻止重试"""
     try:
@@ -237,9 +225,8 @@ def load_model(
 
     下载优先级：
         1. 本地离线模型（%APPDATA%/ClipLingo/models/{model_name}/）
-        2. 打包内置模型
-        3. ModelScope SDK 下载（国内最快最稳，下载到离线模型目录）
-        4. HuggingFace hub 在线下载（根据网络环境自动选择优先源）
+        2. ModelScope SDK 下载（国内最快最稳，下载到离线模型目录）
+        3. HuggingFace hub 在线下载（根据网络环境自动选择优先源）
 
     progress_callback(status_message) 可选，用于上报下载进度。
     """
@@ -263,18 +250,9 @@ def load_model(
             _report(f"加载离线模型: {offline_path}")
             return faster_whisper.WhisperModel(str(offline_path), local_files_only=True)
         except Exception as e:
-            logger.warning(f"离线模型加载失败: {e}，尝试内置模型...")
+            logger.warning(f"离线模型加载失败: {e}，尝试在线下载...")
 
-    # 2. 内置模型（打包时预置）
-    bundled_path = _check_bundled_model(model_name)
-    if bundled_path is not None:
-        try:
-            _report(f"加载内置模型: {bundled_path}")
-            return faster_whisper.WhisperModel(str(bundled_path), local_files_only=True)
-        except Exception as e:
-            logger.warning(f"内置模型加载失败: {e}，尝试在线下载...")
-
-    # 3. ModelScope SDK 下载 → 离线模型目录（后续启动自动命中离线缓存）
+    # 2. ModelScope SDK 下载 → 离线模型目录（后续启动自动命中离线缓存）
     _report(f"下载 {model_name} 模型（ModelScope）...")
     ms_path = _download_via_modelscope(model_name)
     if ms_path is not None:
@@ -286,7 +264,7 @@ def load_model(
             logger.warning(f"ModelScope 模型加载失败: {e}，尝试 HF hub...")
             _clear_offline_model(model_name)
 
-    # 4. HuggingFace hub 在线下载（多镜像自动测速）
+    # 3. HuggingFace hub 在线下载（多镜像自动测速）
     sources = _get_source_order()
     last_error = None
     tried_labels: list[str] = []
@@ -304,7 +282,7 @@ def load_model(
             logger.warning(f"{label} 下载失败: {str(e)[:100]}")
             last_error = e
 
-    # 5. 全部源都失败 → 给用户可操作的提示
+    # 4. 全部源都失败 → 给用户可操作的提示
     offline_dir = LOCAL_MODEL_DIR / model_name
     tried_str = " → ".join(tried_labels)
     raise ClipLingoError(ErrorCode.WHISPER_MODEL_FAILED,

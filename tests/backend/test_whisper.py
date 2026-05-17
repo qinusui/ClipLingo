@@ -223,7 +223,6 @@ class TestModelScopeDownload:
         with (
             patch.object(whisper_manager, 'get_whisper', return_value=mock_fw),
             patch.object(whisper_manager, '_check_offline_model', return_value=None),
-            patch.object(whisper_manager, '_check_bundled_model', return_value=None),
             patch.object(whisper_manager, '_download_via_modelscope', return_value=ms_path),
         ):
             result = whisper_manager.load_model("base")
@@ -242,7 +241,6 @@ class TestModelScopeDownload:
         with (
             patch.object(whisper_manager, 'get_whisper', return_value=mock_fw),
             patch.object(whisper_manager, '_check_offline_model', return_value=None),
-            patch.object(whisper_manager, '_check_bundled_model', return_value=None),
             patch.object(whisper_manager, '_download_via_modelscope', return_value=None),
             patch.object(whisper_manager, '_set_hf_endpoint'),
         ):
@@ -266,7 +264,6 @@ class TestModelScopeDownload:
         with (
             patch.object(whisper_manager, 'get_whisper', return_value=mock_fw),
             patch.object(whisper_manager, '_check_offline_model', return_value=None),
-            patch.object(whisper_manager, '_check_bundled_model', return_value=None),
             patch.object(whisper_manager, '_download_via_modelscope', return_value=fake_path),
             patch.object(whisper_manager, '_clear_offline_model') as mock_clear,
             patch.object(whisper_manager, '_set_hf_endpoint'),
@@ -321,7 +318,6 @@ class TestProgressCallback:
         with (
             patch.object(whisper_manager, 'get_whisper', return_value=mock_fw),
             patch.object(whisper_manager, '_check_offline_model', return_value=None),
-            patch.object(whisper_manager, '_check_bundled_model', return_value=None),
             patch.object(whisper_manager, '_download_via_modelscope', return_value=None),
             patch.object(whisper_manager, '_set_hf_endpoint'),
         ):
@@ -341,7 +337,6 @@ class TestProgressCallback:
         with (
             patch.object(whisper_manager, 'get_whisper', return_value=mock_fw),
             patch.object(whisper_manager, '_check_offline_model', return_value=None),
-            patch.object(whisper_manager, '_check_bundled_model', return_value=None),
             patch.object(whisper_manager, '_download_via_modelscope', return_value=None),
             patch.object(whisper_manager, '_set_hf_endpoint'),
         ):
