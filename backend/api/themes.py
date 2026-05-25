@@ -84,7 +84,7 @@ SHADOW_LEGACY_KEY = "--card-shadow"
 
 
 def _split_shadow_to_variables(shadow_value: str) -> dict:
-    """将旧式 box-shadow 值拆分为独立变量"""
+    """将旧式 box-shadow 值拆分为独立变量。使用正则匹配 rgba/rgb/hex 颜色，避免 naive 空格拆分破坏 rgba(0, 0, 0, 0.15)"""
     if not shadow_value or shadow_value == "none":
         return {
             "--card-shadow-offset-x": "0px",
@@ -92,18 +92,13 @@ def _split_shadow_to_variables(shadow_value: str) -> dict:
             "--card-shadow-blur": "0px",
             "--card-shadow-color": "rgba(0,0,0,0.15)",
         }
-    parts = shadow_value.strip().split()
+    # 提取颜色部分（rgba、rgb、hex 或命名色）
+    color_match = re.search(r'(rgba?\([^)]+\)|#[0-9a-fA-F]{3,8}|\b[a-z]+\b)', shadow_value.strip())
+    color = color_match.group(1) if color_match else "rgba(0,0,0,0.15)"
+    # 去除颜色后剩余的就是数字偏移量
+    without_color = re.sub(r'(rgba?\([^)]+\)|#[0-9a-fA-F]{3,8})', '', shadow_value).strip()
+    nums = [p for p in without_color.split() if re.match(r'^-?\d', p)]
     result = {}
-    # 简单解析：offset-x offset-y blur spread color
-    nums = []
-    color_parts = []
-    for p in parts:
-        if p.endswith("px") or p.endswith("px)"):
-            nums.append(p)
-        elif re.match(r'^-?\d', p):
-            nums.append(p)
-        else:
-            color_parts.append(p)
     if len(nums) >= 1:
         result["--card-shadow-offset-x"] = nums[0]
     if len(nums) >= 2:
@@ -112,7 +107,7 @@ def _split_shadow_to_variables(shadow_value: str) -> dict:
         result["--card-shadow-blur"] = nums[2]
     elif len(nums) >= 2:
         result["--card-shadow-blur"] = "0px"
-    result["--card-shadow-color"] = " ".join(color_parts) if color_parts else "rgba(0,0,0,0.15)"
+    result["--card-shadow-color"] = color
     return result
 
 
@@ -159,7 +154,7 @@ _ALLOWED_HTML = {
     "table", "tr", "td", "th", "thead", "tbody", "ul", "ol", "li", "p",
     "h1", "h2", "h3", "h4", "h5", "h6", "a", "video", "source", "svg",
     "path", "circle", "rect", "g", "line", "polygon", "polyline",
-    "style", "link", "meta", "section", "header", "footer", "main", "nav",
+    "style", "section", "header", "footer", "main", "nav",
     "article", "aside", "figure", "figcaption", "blockquote", "pre", "code",
     "small", "sub", "sup", "mark", "del", "ins", "dl", "dt", "dd",
 }
@@ -448,6 +443,10 @@ async def import_theme_zip(file: UploadFile = File(...)):
                 import shutil
                 shutil.rmtree(theme_dir)
             theme_dir.mkdir(parents=True, exist_ok=True)
+
+            # 导入时自动补上 variables 声明（支持 CSS 变量编辑）
+            if not meta.get("variables"):
+                meta["variables"] = [f["key"] for f in CSS_VARIABLE_FIELDS]
 
             (theme_dir / "theme.json").write_text(
                 json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"

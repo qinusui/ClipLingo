@@ -2,7 +2,6 @@ import { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ProcessedCard, CardTheme, ThemeOverrides } from '../types';
 import { ChevronLeft, ChevronRight, Play, Pause, Loader2 } from 'lucide-react';
-import { themeAPI } from '../services/themeAPI';
 
 interface CardPreviewProps {
   cards: ProcessedCard[];
@@ -24,6 +23,15 @@ interface ThemeTemplate {
 }
 
 const _baseTemplateCache = new Map<string, ThemeTemplate>();
+
+// 简易字符串 hash，避免把大段 CSS 字符串当 React key
+function _hashStr(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  }
+  return h;
+}
 
 async function fetchWithRetry(url: string, options: RequestInit, retries = 2): Promise<Response> {
   let lastErr: Error | null = null;
@@ -124,22 +132,37 @@ function renderTemplate(tpl: string, card: ProcessedCard): string {
 
 const TemplatePane = ({
   tpl,
-  overrideCss,
+  overrides,
   card,
   style,
   showAnswer,
+  cardScopeId,
 }: {
   tpl: ThemeTemplate;
-  overrideCss: string;
+  overrides: Record<string, string | undefined>;
   card: ProcessedCard;
   style: string;
   showAnswer: boolean;
+  cardScopeId: string;
 }) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const fullCss = overrideCss + tpl.css;
   const tmpl = style === 'vocab' ? tpl.vocab : tpl.sentence;
   const htmlFragment = renderTemplate(showAnswer ? tmpl.back : tmpl.front, card);
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${fullCss}</style></head><body><div class="card">${htmlFragment}</div></body></html>`;
+
+  // 在客户端构建覆盖 CSS（避免服务端重复拼接 base CSS）
+  const buildOverrideCss = () => {
+    if (!Object.keys(overrides).length) return '';
+    const lines: string[] = [`/* ── Override for ${cardScopeId} ── */`];
+    const decls = Object.entries(overrides)
+      .filter(([, v]) => v && String(v).trim())
+      .map(([k, v]) => `  ${k}: ${v};`)
+      .join('\n');
+    if (decls) lines.push(`:root {${decls}}`);
+    return lines.join('\n') + '\n';
+  };
+
+  const fullCss = buildOverrideCss() + '\n' + tpl.css;
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${fullCss}</style></head><body><div class="${cardScopeId}">${htmlFragment}</div></body></html>`;
 
   const handleLoad = () => {
     const iframe = iframeRef.current;
@@ -157,7 +180,7 @@ const TemplatePane = ({
   return (
     <iframe
       ref={iframeRef}
-      key={`${style}-${showAnswer ? 'back' : 'front'}-${overrideCss}`}
+      key={`${cardScopeId}-${style}-${showAnswer ? 'back' : 'front'}`}
       srcDoc={html}
       sandbox={tpl.isCustom ? 'allow-scripts allow-same-origin' : undefined}
       className="w-full min-h-[300px] border-0"
@@ -189,34 +212,20 @@ export const CardPreview = ({
   const [tpl, setTpl] = useState<ThemeTemplate | null>(null);
   const [tplLoading, setTplLoading] = useState(true);
   const [tplError, setTplError] = useState(false);
-  const [overrideCss, setOverrideCss] = useState('');
-  const overrideTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  // 卡片唯一标识，用于 React key 和 iframe scope 隔离
+  const cardScopeId = `clip-cls-${currentIndex}-${_hashStr(JSON.stringify(cards[currentIndex]?.sentence ?? ''))}`;
 
-  // 主题变化时获取基础模板（不含覆盖）
+  // 主题变化时获取基础模板（不含覆盖），同时清除缓存
   useEffect(() => {
     let cancelled = false;
     setTplLoading(true);
     setTplError(false);
+    _baseTemplateCache.delete(theme);
     fetchBaseTemplate(theme)
       .then(t => { if (!cancelled) { setTpl(t); setTplLoading(false); } })
       .catch((err) => { if (!cancelled) { console.error('[CardPreview] 模板加载失败:', err); setTplError(true); setTplLoading(false); } });
     return () => { cancelled = true; };
   }, [theme]);
-
-  // 覆盖变化时通过 API 获取注入后的 CSS（debounced）
-  useEffect(() => {
-    if (overrideTimerRef.current) clearTimeout(overrideTimerRef.current);
-    if (!themeOverrides || Object.keys(themeOverrides).filter(k => (themeOverrides as any)[k]).length === 0) {
-      setOverrideCss('');
-      return;
-    }
-    overrideTimerRef.current = setTimeout(() => {
-      themeAPI.getPreviewCss(theme, themeOverrides).then(css => {
-        setOverrideCss(css ? css.replace(tpl?.css || '', '') : '');
-      });
-    }, 150);
-    return () => { if (overrideTimerRef.current) clearTimeout(overrideTimerRef.current); };
-  }, [themeOverrides, theme, tpl?.css]);
 
   if (cards.length === 0) {
     return (
@@ -319,12 +328,13 @@ export const CardPreview = ({
           </div>
         ) : tpl ? (
           <TemplatePane
-            key={`${theme}-${previewStyle}`}
+            key={`${theme}-${previewStyle}-${currentIndex}`}
             tpl={tpl}
-            overrideCss={overrideCss}
+            overrides={(themeOverrides as Record<string, string | undefined>) ?? {}}
             card={card}
             style={previewStyle}
             showAnswer={showAnswer}
+            cardScopeId={cardScopeId}
           />
         ) : null}
       </div>

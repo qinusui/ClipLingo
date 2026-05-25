@@ -545,10 +545,19 @@ function App() {
     }
   };
 
-  // 切换主题（有未保存修改时弹出确认）
-  const handleSetCardTheme = (theme: CardTheme) => {
+  // 切换主题（有未保存修改时自动保存当前更改，避免数据丢失）
+  const handleSetCardTheme = async (theme: CardTheme) => {
     if (hasUnsavedOverrides && theme !== cardTheme) {
-      if (!window.confirm(t('cssEditor.unsavedMessage'))) return;
+      if (!window.confirm(`${t('cssEditor.unsavedMessage')}\n\n即将保存当前更改到「${cardTheme}」并切换到新主题。`)) return;
+      try {
+        const result = await themeAPI.saveOverrides(cardTheme, pendingOverrides);
+        if (result.ok) {
+          setThemeOverrides(prev => ({ ...prev, [cardTheme]: { ...pendingOverrides } }));
+        } else {
+          alert(result.detail || '保存失败，请重试');
+        }
+      } catch { /* save failed silently */ }
+      setHasUnsavedOverrides(false);
     }
     setCardTheme(theme);
   };
@@ -559,9 +568,13 @@ function App() {
   };
 
   const handleSaveOverrides = async () => {
-    await themeAPI.saveOverrides(cardTheme, pendingOverrides);
-    setThemeOverrides(prev => ({ ...prev, [cardTheme]: { ...pendingOverrides } }));
-    setHasUnsavedOverrides(false);
+    const result = await themeAPI.saveOverrides(cardTheme, pendingOverrides);
+    if (result.ok) {
+      setThemeOverrides(prev => ({ ...prev, [cardTheme]: { ...pendingOverrides } }));
+      setHasUnsavedOverrides(false);
+    } else {
+      alert(result.detail || '保存样式失败，请重试');
+    }
   };
 
   const handleResetOverrides = () => {

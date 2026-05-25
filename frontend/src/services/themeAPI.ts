@@ -70,13 +70,18 @@ export const themeAPI = {
     };
   },
 
-  /** 保存指定主题的 CSS 变量覆盖 */
-  saveOverrides: async (theme: string, variables: ThemeOverrides): Promise<void> => {
-    await fetch(`${API_BASE}/${theme}`, {
+  /** 保存指定主题的 CSS 变量覆盖，返回成功或错误信息 */
+  saveOverrides: async (theme: string, variables: ThemeOverrides): Promise<{ ok: boolean; detail?: string }> => {
+    const resp = await fetch(`${API_BASE}/${theme}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ variables }),
     });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+      return { ok: false, detail: err.detail || `保存失败 (${resp.status})` };
+    }
+    return { ok: true };
   },
 
   /** 重置指定主题为默认 */
