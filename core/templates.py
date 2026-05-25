@@ -83,6 +83,68 @@ def inject_theme_overrides(css: str, overrides: dict | None) -> str:
     return override_css + "\n" + css
 
 
+def build_override_only(overrides: dict | None) -> str:
+    """构建覆盖层 CSS，不含主题 CSS（供前端独立注入，不拼接到模板 CSS 前面）"""
+    if not overrides:
+        return ""
+
+    ov = dict(overrides)
+
+    # 合并拆分后的阴影变量为 --card-shadow
+    shadow_keys = {"--card-shadow-offset-x", "--card-shadow-offset-y", "--card-shadow-blur", "--card-shadow-color"}
+    if shadow_keys & set(ov.keys()):
+        ox = ov.pop("--card-shadow-offset-x", "0px")
+        oy = ov.pop("--card-shadow-offset-y", "2px")
+        blur = ov.pop("--card-shadow-blur", "0px")
+        color = ov.pop("--card-shadow-color", "rgba(0,0,0,0.15)")
+        ov["--card-shadow"] = f"{ox} {oy} {blur} 0px {color}"
+
+    declarations = "\n".join(f"  {k}: {v};" for k, v in ov.items())
+    lines = ["/* ── 用户自定义样式覆盖 ── */", ":root {", declarations, "}", ""]
+
+    # ── .card ──
+    card_parts = []
+    if "--card-bg" in ov:
+        card_parts.append("background-image: none !important; background-color: var(--card-bg) !important")
+    if "--card-text" in ov:
+        card_parts.append("color: var(--card-text) !important")
+    if "--card-padding" in ov:
+        card_parts.append("padding: var(--card-padding) !important")
+    if "--card-radius" in ov:
+        card_parts.append("border-radius: var(--card-radius) !important")
+    if "--card-shadow" in ov:
+        card_parts.append("box-shadow: var(--card-shadow) !important")
+    if card_parts:
+        lines.append(f'.card {{ {" ".join(card_parts)} }}')
+
+    orig_parts = []
+    if "--font-sentence" in ov:
+        orig_parts.append("font-family: var(--font-sentence) !important")
+    if "--font-size-sentence" in ov:
+        orig_parts.append("font-size: var(--font-size-sentence) !important")
+    if orig_parts:
+        lines.append(f'.original, .sentence, .subtitle-text {{ {" ".join(orig_parts)} }}')
+
+    trans_parts = []
+    if "--translation-color" in ov:
+        trans_parts.append("color: var(--translation-color) !important")
+    if "--font-translation" in ov:
+        trans_parts.append("font-family: var(--font-translation) !important")
+    if "--font-size-translation" in ov:
+        trans_parts.append("font-size: var(--font-size-translation) !important")
+    if trans_parts:
+        lines.append(f'.translation {{ {" ".join(trans_parts)} }}')
+
+    if "--annotation-color" in ov:
+        lines.append(".notes, .annotation { color: var(--annotation-color) !important; }")
+
+    if "--accent-color" in ov:
+        lines.append(".container { border-color: var(--accent-color) !important; }")
+        lines.append("hr, hr#answer, .divider { border-color: var(--accent-color) !important; }")
+
+    return "\n".join(lines) + "\n"
+
+
 # ── 统一样式 ──────────────────────────────────────────────
 _CSS = """\
 .card {

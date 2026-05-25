@@ -23,7 +23,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from pydantic import BaseModel
 
-from core.templates import get_theme, inject_theme_overrides
+from core.templates import get_theme, inject_theme_overrides, build_override_only
 
 router = APIRouter()
 
@@ -315,23 +315,18 @@ async def get_template(req: TemplateRequest):
 
 @router.post("/preview-css")
 async def get_preview_css(req: PreviewCssRequest):
-    """获取注入覆盖后的 CSS（供前端实现即时预览）
+    """获取纯覆盖层 CSS（不含主题 CSS，前端负责拼接）
 
-    接收原始 overrides（含拆分后的阴影变量），合并为 box-shadow 后注入主题 CSS。
-    返回完整的注入后 CSS 字符串，前端直接用于 iframe 预览。
+    接收原始 overrides（含拆分后的阴影变量），合并为 box-shadow 后生成选择器规则。
+    仅返回覆盖层，前端可将其置于更高特异性选择器下作用于 iframe。
     """
-    overrides = req.overrides
-    if overrides:
-        overrides = dict(overrides)
-        if any(k.startswith("--card-shadow-") for k in overrides):
-            overrides[SHADOW_LEGACY_KEY] = _join_variables_to_shadow(overrides)
-        overrides = {k: v for k, v in overrides.items() if v and not k.startswith("--card-shadow-")}
+    overrides = req.overrides or {}
+    overrides = dict(overrides)
+    if any(k.startswith("--card-shadow-") for k in overrides):
+        overrides[SHADOW_LEGACY_KEY] = _join_variables_to_shadow(overrides)
+    overrides = {k: v for k, v in overrides.items() if v and not k.startswith("--card-shadow-")}
 
-    theme_cfg = get_theme(req.theme)
-    if theme_cfg is None:
-        raise HTTPException(status_code=400, detail=f"无效的主题名：{req.theme}")
-    css = inject_theme_overrides(theme_cfg["css"], overrides if overrides else None)
-    return {"css": css}
+    return {"css": build_override_only(overrides)}
 
 
 @router.get("/custom/{name}")
