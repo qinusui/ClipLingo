@@ -151,8 +151,8 @@ _CSS = """\
   font-family: system-ui, -apple-system, sans-serif;
   font-size: 18px;
   text-align: center;
-  color: #2c3e50;
-  background-color: #f8f9fa;
+  color: var(--card-text, #2c3e50);
+  background-color: var(--card-bg, #f8f9fa);
   margin: 0;
   padding: 10px;
 }
@@ -160,45 +160,57 @@ _CSS = """\
 .image-box img {
   max-width: 100%;
   height: auto;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  border-radius: var(--card-radius, 8px);
+  box-shadow: var(--card-shadow, 0 4px 12px rgba(0,0,0,0.1));
   margin-bottom: 10px;
 }
 /* ── 句型卡 ── */
-.original { font-weight: 600; font-size: 1.2em; color: #000; margin-top: 15px; }
-.translation { color: #666; font-size: 0.95em; margin-top: 8px; }
+.original {
+  font-weight: 600;
+  font-size: var(--font-size-sentence, 1.2em);
+  font-family: var(--font-sentence, inherit);
+  color: var(--card-text, #000);
+  margin-top: 15px;
+}
+.translation {
+  color: var(--translation-color, #666);
+  font-size: var(--font-size-translation, 0.95em);
+  font-family: var(--font-translation, inherit);
+  margin-top: 8px;
+}
 .notes {
   text-align: left;
-  background: #fff;
-  border-left: 4px solid #007bff;
+  background: var(--card-bg, #fff);
+  border-left: 4px solid var(--accent-color, #007bff);
   padding: 10px;
   margin-top: 15px;
   font-size: 0.9em;
   border-radius: 4px;
+  border-radius: var(--card-radius, 4px);
   white-space: pre-line;
 }
 /* ── 词汇卡 ── */
 .target-word {
   font-size: 2.5em;
   font-weight: 800;
-  color: #007bff;
+  color: var(--accent-color, #007bff);
   margin: 40px 0 10px 0;
 }
 .word-meaning {
   font-size: 1.4em;
-  color: #28a745;
+  color: var(--translation-color, #28a745);
   font-weight: 500;
   margin-bottom: 20px;
 }
 .hint {
-  color: #999;
+  color: var(--annotation-color, #999);
   font-size: 0.85em;
   margin-top: 20px;
 }
 .example-box {
-  background: #f0f2f5;
+  background: var(--card-bg, #f0f2f5);
   padding: 15px;
-  border-radius: 12px;
+  border-radius: var(--card-radius, 12px);
   text-align: left;
   margin-top: 15px;
 }
@@ -206,20 +218,20 @@ _CSS = """\
   display: inline-block;
   font-size: 0.7em;
   padding: 2px 8px;
-  background: #6c757d;
+  background: var(--annotation-color, #6c757d);
   color: white;
-  border-radius: 4px;
+  border-radius: var(--card-radius, 4px);
   margin-bottom: 8px;
 }
 .example-box .image-box img {
   width: 100%;
   height: auto;
-  border-radius: 8px;
+  border-radius: var(--card-radius, 8px);
 }
 .example-box .original {
   font-weight: 600;
   font-size: 1em;
-  color: #333;
+  color: var(--card-text, #333);
   margin: 8px 0;
 }
 /* ── 夜间模式 ── */
@@ -298,8 +310,8 @@ _CSS_MINIMAL = """\
   font-family: Georgia, "Noto Serif SC", "Source Han Serif CN", serif;
   font-size: 20px;
   text-align: center;
-  color: #1a1a2e;
-  background-color: #fafaf8;
+  color: var(--card-text, #1a1a2e);
+  background-color: var(--card-bg, #fafaf8);
   margin: 0;
   padding: 0;
   position: relative;
@@ -326,29 +338,29 @@ _CSS_MINIMAL = """\
 .divider {
   width: 40px;
   height: 1px;
-  background: #c0b8a8;
+  background: var(--accent-color, #c0b8a8);
   margin: 24px auto;
 }
 .original {
   font-weight: 600;
   font-size: 1.3em;
   line-height: 1.6;
-  color: #1a1a2e;
+  color: var(--card-text, #1a1a2e);
   letter-spacing: 0.01em;
 }
 .translation {
-  color: #8a8578;
+  color: var(--translation-color, #8a8578);
   font-size: 0.95em;
   margin-top: 12px;
   line-height: 1.5;
 }
 .notes {
   text-align: left;
-  color: #6b6560;
+  color: var(--annotation-color, #6b6560);
   font-size: 0.85em;
   margin-top: 20px;
   padding: 12px 0;
-  border-top: 1px solid #e8e4dc;
+  border-top: 1px solid var(--accent-color, #e8e4dc);
   white-space: pre-line;
   font-family: "Courier New", "Source Code Pro", monospace;
   line-height: 1.6;
@@ -356,24 +368,24 @@ _CSS_MINIMAL = """\
 .target-word {
   font-size: 3em;
   font-weight: 700;
-  color: #1a1a2e;
+  color: var(--card-text, #1a1a2e);
   margin: 0 0 8px 0;
   letter-spacing: -0.02em;
 }
 .phonetic {
   font-size: 0.9em;
-  color: #a09888;
+  color: var(--translation-color, #a09888);
   font-style: italic;
   margin-bottom: 16px;
 }
 .word-meaning {
   font-size: 1.3em;
-  color: #8a8578;
+  color: var(--translation-color, #8a8578);
   font-weight: 400;
   margin: 16px 0;
 }
 .hint {
-  color: #c0b8a8;
+  color: var(--annotation-color, #c0b8a8);
   font-size: 0.8em;
   margin-top: 24px;
   letter-spacing: 0.05em;
@@ -382,14 +394,14 @@ _CSS_MINIMAL = """\
   text-align: left;
   margin-top: 24px;
   padding-top: 20px;
-  border-top: 1px solid #e8e4dc;
+  border-top: 1px solid var(--accent-color, #e8e4dc);
 }
 .example-box .tag {
   display: inline-block;
   font-size: 0.65em;
   padding: 2px 8px;
-  color: #a09888;
-  border: 1px solid #e0dcd4;
+  color: var(--annotation-color, #a09888);
+  border: 1px solid var(--accent-color, #e0dcd4);
   border-radius: 2px;
   margin-bottom: 10px;
   letter-spacing: 0.1em;
@@ -399,10 +411,11 @@ _CSS_MINIMAL = """\
 .example-box .original {
   font-weight: 400;
   font-size: 0.95em;
-  color: #3a3530;
+  color: var(--card-text, #3a3530);
   margin: 6px 0;
   line-height: 1.5;
 }
+
 .nightMode .card { background-color: #161618; color: #d8d4cc; }
 .nightMode .bg-image { opacity: 0.08; }
 .nightMode .original { color: #d8d4cc; }
@@ -478,8 +491,8 @@ _CSS_NETFLIX = """\
   font-family: "Helvetica Neue", Arial, "PingFang SC", sans-serif;
   font-size: 18px;
   text-align: center;
-  color: #e5e5e5;
-  background-color: #141414;
+  color: var(--card-text, #e5e5e5);
+  background-color: var(--card-bg, #141414);
   margin: 0;
   padding: 0;
 }
@@ -494,33 +507,33 @@ _CSS_NETFLIX = """\
 .original {
   font-weight: 600;
   font-size: 1.15em;
-  color: #ffffff;
+  color: var(--card-text, #ffffff);
   margin-top: 14px;
   line-height: 1.5;
 }
 .translation {
-  color: #e50914;
+  color: var(--translation-color, #e50914);
   font-size: 0.95em;
   margin-top: 8px;
   font-weight: 500;
 }
 .notes {
   text-align: left;
-  background: rgba(255,255,255,0.08);
-  border-left: 3px solid #e50914;
+  background: var(--card-bg, rgba(255,255,255,0.08));
+  border-left: 3px solid var(--accent-color, #e50914);
   padding: 10px 12px;
   margin-top: 14px;
   font-size: 0.85em;
-  border-radius: 0 4px 4px 0;
+  border-radius: var(--card-radius, 0 4px 4px 0);
   white-space: pre-line;
-  color: #b3b3b3;
+  color: var(--translation-color, #b3b3b3);
 }
 .progress-bar {
   width: 100%;
   height: 3px;
-  background: #333;
+  background: var(--annotation-color, #333);
   margin-top: 20px;
-  border-radius: 2px;
+  border-radius: var(--card-radius, 2px);
   overflow: hidden;
 }
 .progress-bar::after {
@@ -528,54 +541,54 @@ _CSS_NETFLIX = """\
   display: block;
   width: 35%;
   height: 100%;
-  background: #e50914;
-  border-radius: 2px;
+  background: var(--accent-color, #e50914);
+  border-radius: var(--card-radius, 2px);
 }
 .target-word {
   font-size: 2.8em;
   font-weight: 800;
-  color: #ffffff;
+  color: var(--card-text, #ffffff);
   margin: 30px 0 8px 0;
   text-shadow: 0 2px 20px rgba(229,9,20,0.3);
 }
 .word-meaning {
   font-size: 1.3em;
-  color: #e50914;
+  color: var(--accent-color, #e50914);
   font-weight: 600;
   margin-bottom: 16px;
 }
 .hint {
-  color: #666;
+  color: var(--annotation-color, #666);
   font-size: 0.85em;
   margin-top: 16px;
 }
 .example-box {
-  background: rgba(255,255,255,0.06);
+  background: var(--card-bg, rgba(255,255,255,0.06));
   padding: 14px;
-  border-radius: 8px;
+  border-radius: var(--card-radius, 8px);
   text-align: left;
   margin-top: 14px;
-  border: 1px solid rgba(255,255,255,0.08);
+  border: 1px solid var(--accent-color, rgba(255,255,255,0.08));
 }
 .example-box .tag {
   display: inline-block;
   font-size: 0.65em;
   padding: 2px 10px;
-  background: #e50914;
+  background: var(--accent-color, #e50914);
   color: white;
-  border-radius: 3px;
+  border-radius: var(--card-radius, 3px);
   margin-bottom: 8px;
   font-weight: 700;
   letter-spacing: 0.08em;
 }
 .example-box .image-box img {
   width: 100%;
-  border-radius: 4px;
+  border-radius: var(--card-radius, 4px);
 }
 .example-box .original {
   font-weight: 600;
   font-size: 0.95em;
-  color: #e5e5e5;
+  color: var(--card-text, #e5e5e5);
   margin: 8px 0;
 }
 .nightMode .card { background-color: #141414; }
@@ -648,8 +661,8 @@ _CSS_DICTIONARY = """\
   font-family: "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
   font-size: 17px;
   text-align: left;
-  color: #2d2a26;
-  background-color: #fefcf3;
+  color: var(--card-text, #2d2a26);
+  background-color: var(--card-bg, #fefcf3);
   margin: 0;
   padding: 0;
   line-height: 1.55;
@@ -658,68 +671,68 @@ _CSS_DICTIONARY = """\
   max-width: 580px;
   margin: 0 auto;
   padding: 24px 28px;
-  border: 1px solid #e0dcd0;
-  box-shadow: 2px 2px 8px rgba(0,0,0,0.06);
+  border: 1px solid var(--accent-color, #e0dcd0);
+  box-shadow: var(--card-shadow, 2px 2px 8px rgba(0,0,0,0.06));
 }
 .image-box { display: none; }
 .section-label {
   font-size: 0.7em;
   font-weight: 700;
-  color: #8b7355;
+  color: var(--annotation-color, #8b7355);
   text-transform: uppercase;
   letter-spacing: 0.15em;
   margin: 16px 0 6px 0;
   padding-bottom: 4px;
-  border-bottom: 1px solid #e8e2d4;
+  border-bottom: 1px solid var(--accent-color, #e8e2d4);
 }
 .section-label:first-child { margin-top: 0; }
 .original {
   font-weight: 600;
   font-size: 1.1em;
-  color: #2d2a26;
+  color: var(--card-text, #2d2a26);
   line-height: 1.6;
 }
 .translation {
-  color: #5a5248;
+  color: var(--translation-color, #5a5248);
   font-size: 0.95em;
   margin-top: 4px;
 }
 .notes {
-  background: #f5f0e4;
-  border-left: 3px solid #c4a96a;
+  background: var(--card-bg, #f5f0e4);
+  border-left: 3px solid var(--accent-color, #c4a96a);
   padding: 10px 12px;
   margin-top: 6px;
   font-size: 0.85em;
-  border-radius: 0 3px 3px 0;
+  border-radius: var(--card-radius, 0 3px 3px 0);
   white-space: pre-line;
   font-family: "Courier New", "Source Code Pro", monospace;
-  color: #4a4538;
+  color: var(--annotation-color, #4a4538);
   line-height: 1.6;
 }
 .thumb {
   float: right;
   width: 110px;
   margin: 0 0 8px 14px;
-  border: 1px solid #d4cfc0;
-  border-radius: 3px;
+  border: 1px solid var(--accent-color, #d4cfc0);
+  border-radius: var(--card-radius, 3px);
 }
 .thumb .image-box { display: block; }
 .thumb img {
   width: 100%;
   height: auto;
   display: block;
-  border-radius: 2px;
+  border-radius: var(--card-radius, 2px);
 }
 .headword {
   font-size: 2.2em;
   font-weight: 700;
-  color: #2d2a26;
+  color: var(--card-text, #2d2a26);
   margin: 0;
   display: inline;
 }
 .headword-phonetic {
   font-size: 0.85em;
-  color: #8b7355;
+  color: var(--annotation-color, #8b7355);
   font-style: italic;
   margin-left: 8px;
 }
@@ -728,39 +741,39 @@ _CSS_DICTIONARY = """\
   font-size: 0.7em;
   font-weight: 700;
   padding: 1px 8px;
-  background: #c4a96a;
-  color: #fff;
-  border-radius: 3px;
+  background: var(--accent-color, #c4a96a);
+  color: white;
+  border-radius: var(--card-radius, 3px);
   margin-left: 8px;
   vertical-align: middle;
 }
 .word-meaning {
   font-size: 1.2em;
-  color: #4a4538;
+  color: var(--translation-color, #4a4538);
   font-weight: 600;
   margin: 10px 0;
 }
 .hint {
-  color: #b0a890;
+  color: var(--annotation-color, #b0a890);
   font-size: 0.8em;
   margin-top: 12px;
   font-style: italic;
 }
 .example-box {
-  background: #f5f0e4;
+  background: var(--card-bg, #f5f0e4);
   padding: 12px 14px;
-  border-radius: 4px;
+  border-radius: var(--card-radius, 4px);
   margin-top: 10px;
-  border: 1px solid #e8e2d4;
+  border: 1px solid var(--accent-color, #e8e2d4);
 }
 .example-box .tag {
   display: inline-block;
   font-size: 0.6em;
   font-weight: 700;
   padding: 1px 6px;
-  background: #8b7355;
+  background: var(--annotation-color, #8b7355);
   color: white;
-  border-radius: 2px;
+  border-radius: var(--card-radius, 2px);
   margin-bottom: 6px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -769,12 +782,12 @@ _CSS_DICTIONARY = """\
 .example-box .original {
   font-weight: 600;
   font-size: 0.95em;
-  color: #3a3530;
+  color: var(--card-text, #3a3530);
   margin: 4px 0;
 }
 .dict-divider {
   border: none;
-  border-top: 2px solid #c4a96a;
+  border-top: 2px solid var(--accent-color, #c4a96a);
   margin: 16px 0 12px 0;
 }
 .clearfix::after { content: ''; display: table; clear: both; }
