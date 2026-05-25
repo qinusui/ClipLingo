@@ -162,7 +162,7 @@ const TemplatePane = ({
   };
 
   const fullCss = buildOverrideCss() + '\n' + tpl.css;
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${fullCss}</style></head><body><div class="${cardScopeId}">${htmlFragment}</div></body></html>`;
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${fullCss}</style></head><body><div class="card">${htmlFragment}</div></body></html>`;
 
   const handleLoad = () => {
     const iframe = iframeRef.current;
