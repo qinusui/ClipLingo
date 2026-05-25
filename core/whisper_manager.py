@@ -194,6 +194,21 @@ def _ensure_ssl_cert():
             pass
 
 
+def _create_whisper_model(whisper_mod, path_or_name: str, **kwargs) -> Any:
+    """创建 WhisperModel，优先 GPU，自动降级 CPU"""
+    try:
+        logger.info("尝试使用 GPU (cuda) 加载 Whisper 模型...")
+        return whisper_mod.WhisperModel(path_or_name, device="cuda", compute_type="float16", **kwargs)
+    except Exception as e:
+        logger.warning(f"GPU 模式失败 ({str(e)[:80]})，自动降级到 CPU 模式...")
+        try:
+            model = whisper_mod.WhisperModel(path_or_name, device="cpu", compute_type="int8", **kwargs)
+            logger.info("使用 CPU (int8) 模式加载 Whisper 模型成功")
+            return model
+        except Exception as e2:
+            raise RuntimeError(f"Whisper 模型加载失败：CPU 模式也不可用 — {e2}") from e2
+
+
 def _check_offline_model(model_name: str) -> Optional[Path]:
     """检查本地是否有离线模型文件，返回模型目录路径或 None"""
     model_dir = LOCAL_MODEL_DIR / model_name
@@ -248,7 +263,7 @@ def load_model(
     if offline_path is not None:
         try:
             _report(f"加载离线模型: {offline_path}")
-            return faster_whisper.WhisperModel(str(offline_path), local_files_only=True)
+            return _create_whisper_model(faster_whisper, str(offline_path), local_files_only=True)
         except Exception as e:
             logger.warning(f"离线模型加载失败: {e}，尝试在线下载...")
 
@@ -257,7 +272,7 @@ def load_model(
     ms_path = _download_via_modelscope(model_name)
     if ms_path is not None:
         try:
-            model = faster_whisper.WhisperModel(str(ms_path), local_files_only=True)
+            model = _create_whisper_model(faster_whisper, str(ms_path), local_files_only=True)
             _report(f"模型加载成功（来源：ModelScope，已缓存到 {ms_path}）")
             return model
         except Exception as e:
@@ -275,7 +290,7 @@ def load_model(
         tried_labels.append(label)
         try:
             _report(f"从 {label} 下载模型 {model_name}...")
-            model = faster_whisper.WhisperModel(model_name)
+            model = _create_whisper_model(faster_whisper, model_name)
             _report(f"模型下载成功（来源：{label}）")
             return model
         except Exception as e:

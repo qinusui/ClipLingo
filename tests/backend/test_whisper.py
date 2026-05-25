@@ -49,7 +49,7 @@ class TestOfflineModel:
             whisper_manager.load_model("small")
 
             mock_fw.WhisperModel.assert_called_once_with(
-                str(model_dir), local_files_only=True
+                str(model_dir), device="cuda", compute_type="float16", local_files_only=True
             )
 
     def test_offline_model_corrupt_falls_through(self):
@@ -70,7 +70,7 @@ class TestOfflineModel:
 
             result = whisper_manager.load_model("base")
             assert result is not None
-            # 确认调用了两次：第一次离线失败，第二次在线成功
+            # GPU 模式失败（OSError）后自动降级 CPU 成功 → WhisperModel 被调用两次
             assert mock_fw.WhisperModel.call_count == 2
 
 
@@ -146,12 +146,12 @@ class TestCacheClearing:
             with patch('huggingface_hub.constants.HF_HUB_CACHE', tmp):
                 whisper_manager._clear_model_cache("large-v3")  # 不应抛异常
 
-    def test_cache_cleared_between_failed_attempts(self):
-        """第一源失败后，尝试第二源前应清除缓存"""
+    def test_gpu_fallback_prevents_source_retry(self):
+        """GPU 失败自动降级 CPU → 不再尝试下一个源，不触发 _clear_model_cache"""
         mock_fw = MagicMock()
         mock_fw.WhisperModel.side_effect = [
-            OSError("Unable to open file"),   # 第一源失败
-            MagicMock(),                      # 第二源成功
+            OSError("Unable to open file"),   # GPU 模式失败
+            MagicMock(),                      # CPU 重试成功（同一次 _create_whisper_model 内）
         ]
         with (
             patch.object(whisper_manager, 'get_whisper', return_value=mock_fw),
@@ -160,8 +160,8 @@ class TestCacheClearing:
         ):
             result = whisper_manager.load_model("tiny")
             assert result is not None
-            # 第一源失败后应调用 _clear_model_cache 一次
-            mock_clear.assert_called_once_with("tiny")
+            # CPU 降级成功后，不再进入下一源的回退逻辑
+            mock_clear.assert_not_called()
 
 
 class TestWhisperMirrorRetry:
@@ -227,7 +227,9 @@ class TestModelScopeDownload:
         ):
             result = whisper_manager.load_model("base")
             assert result is not None
-            mock_fw.WhisperModel.assert_called_once_with(str(ms_path), local_files_only=True)
+            mock_fw.WhisperModel.assert_called_once_with(
+                str(ms_path), device="cuda", compute_type="float16", local_files_only=True
+            )
             # HF hub 相关函数不应被调用
             assert "_set_hf_endpoint" not in str(mock_fw.method_calls)
 
@@ -247,18 +249,23 @@ class TestModelScopeDownload:
             result = whisper_manager.load_model("base")
             assert result is not None
             # 确认尝试了 HF hub 下载
-            mock_fw.WhisperModel.assert_called_once_with("base")
+            mock_fw.WhisperModel.assert_called_once_with(
+                "base", device="cuda", compute_type="float16"
+            )
 
-    def test_modelscope_failure_clears_offline_dir(self):
-        """ModelScope 下载成功后加载失败时清除离线目录再走 HF"""
+    def test_modelscope_load_fails_triggers_hf_fallback(self):
+        """ModelScope 模型在 GPU 和 CPU 模式下都加载失败时，触发 HF hub 回退并清除离线目录"""
         mock_fw = MagicMock()
         fake_path = Path("/fake/models/base")
         fake_path.mkdir(parents=True, exist_ok=True)
         (fake_path / "model.bin").write_text("fake")
 
+        # 离线模型路径的 GPU + CPU 两次都失败（模拟损坏），HF hub 的 GPU 尝试成功
         mock_fw.WhisperModel.side_effect = [
-            OSError("corrupt model"),  # 离线加载失败
-            MagicMock(),               # HF hub 成功
+            OSError("corrupt model"),       # 离线 GPU 失败
+            OSError("corrupt model"),       # 离线 CPU 失败
+            OSError("bad model"),           # HF GPU 失败
+            MagicMock(),                    # HF CPU 成功
         ]
 
         with (
@@ -270,6 +277,7 @@ class TestModelScopeDownload:
         ):
             result = whisper_manager.load_model("base")
             assert result is not None
+            # ModelScope 模型加载失败后应清除离线目录
             mock_clear.assert_called_once_with("base")
 
     def test_download_via_modelscope_returns_path(self):
