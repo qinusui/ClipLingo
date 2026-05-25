@@ -1358,6 +1358,20 @@ function App() {
               <Button
                 variant="ghost"
                 size="sm"
+                onClick={async () => {
+                  try {
+                    await processAPI.openLogs();
+                  } catch {
+                    alert(t('app.step1.cantOpenLogFolder'));
+                  }
+                }}
+              >
+                <FolderOpen className="w-4 h-4 mr-2" />
+                {t('app.step1.logs')}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => {
                   const next = i18n.language === 'zh' ? 'en' : 'zh';
                   i18n.changeLanguage(next);
@@ -1918,26 +1932,10 @@ function App() {
                       {modelList && modelList.length === 0 && (
                         <p className="text-xs text-red-500">{t('app.step1.modelListFailed')}</p>
                       )}
-                      <div className="flex gap-2 mt-1">
+                      <div className="mt-1 flex justify-end">
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="flex-1 text-gray-500"
-                          onClick={async () => {
-                            try {
-                              await processAPI.openLogs();
-                            } catch {
-                              alert(t('app.step1.cantOpenLogFolder'));
-                            }
-                          }}
-                        >
-                          <FolderOpen className="w-3.5 h-3.5 mr-1" />
-                          {t('app.step1.logs')}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="flex-1"
                           onClick={() => setConfigExpanded(false)}
                         >
                           <ChevronUp className="w-4 h-4 mr-1" />
