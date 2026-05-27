@@ -146,6 +146,7 @@ function App() {
   const [apiBase, setApiBase] = useState(savedConfig?.apiBase || 'https://api.deepseek.com');
   const [modelName, setModelName] = useState(savedConfig?.modelName || 'deepseek-chat');
   const [apiKey, setApiKey] = useState(savedConfig?.apiKey || '');
+  const [aiConcurrency, setAiConcurrency] = useState(savedConfig?.aiConcurrency ?? 3);
   const [sourceLanguage, setSourceLanguage] = useState<string>(savedConfig?.sourceLanguage || 'en');
   const [targetLanguage, setTargetLanguage] = useState<string>(savedConfig?.targetLanguage || 'zh');
   const [configExpanded, setConfigExpanded] = useState(!savedConfig); // 首次展开
@@ -371,8 +372,8 @@ function App() {
 
   // AI 配置变化时自动保存到 localStorage
   useEffect(() => {
-    localStorage.setItem('anki_ai_config', JSON.stringify({ apiBase, modelName, apiKey, sourceLanguage, targetLanguage, customPrompt, annotationPrompt }));
-  }, [apiBase, modelName, apiKey, sourceLanguage, targetLanguage, customPrompt, annotationPrompt]);
+    localStorage.setItem('anki_ai_config', JSON.stringify({ apiBase, modelName, apiKey, aiConcurrency, sourceLanguage, targetLanguage, customPrompt, annotationPrompt }));
+  }, [apiBase, modelName, apiKey, aiConcurrency, sourceLanguage, targetLanguage, customPrompt, annotationPrompt]);
 
   // 源语言变化时，同步更新预设提示词中的语言名称
   useEffect(() => {
@@ -822,6 +823,7 @@ function App() {
         apiKey,
         customPrompt || undefined,
         recommendBatchSize,
+        aiConcurrency,
         apiBase || undefined,
         modelName || undefined,
         sourceLanguage,
@@ -918,6 +920,7 @@ function App() {
         apiKey,
         annotationPrompt || undefined,
         recommendBatchSize,
+        aiConcurrency,
         apiBase || undefined,
         modelName || undefined,
         sourceLanguage,
@@ -1008,6 +1011,7 @@ function App() {
         apiKey,
         customPrompt || undefined,
         recommendBatchSize,
+        aiConcurrency,
         apiBase || undefined,
         modelName || undefined,
         sourceLanguage,
@@ -1891,6 +1895,17 @@ function App() {
                           className="w-full px-2 py-1.5 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                         />
                       </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">{t('app.step1.aiConcurrency')} (默认 3)</label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={20}
+                          value={aiConcurrency}
+                          onChange={(e) => setAiConcurrency(parseInt(e.target.value) || 3)}
+                          className="w-full px-2 py-1.5 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                        />
+                      </div>
                       <div className="flex gap-2">
                         <Button
                           variant="secondary"
@@ -2110,16 +2125,32 @@ function App() {
                     </Button>
                   )}
                   {!!apiKey && (
-                    <label className="flex items-center gap-1.5 cursor-pointer ml-2">
-                      <input
-                        type="checkbox"
-                        checked={selectRecommendedOnly}
-                        onChange={e => setSelectRecommendedOnly(e.target.checked)}
-                        disabled={isRecommending}
-                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                      />
-                      <span className="text-xs text-gray-600 dark:text-gray-400">{t('app.step2.selectRecommendedOnly')}</span>
-                    </label>
+                    <Button
+                      variant={selectRecommendedOnly ? 'primary' : 'ghost'}
+                      size="sm"
+                      onClick={() => {
+                        if (selectRecommendedOnly) {
+                          // 关闭：恢复选中全部字幕
+                          const allDefault = new Set<number>();
+                          filteredSubtitles?.forEach(s => allDefault.add(s.index));
+                          setSelectedIndices(allDefault);
+                          setSelectRecommendedOnly(false);
+                        } else {
+                          // 开启：只选推荐项
+                          const recommended = new Set<number>();
+                          recommendations?.forEach((r, idx) => {
+                            if (r.include && !r.reason?.startsWith(t('app.error.processingFailed'))) {
+                              recommended.add(idx);
+                            }
+                          });
+                          setSelectedIndices(recommended);
+                          setSelectRecommendedOnly(true);
+                        }
+                      }}
+                      disabled={isRecommending}
+                    >
+                      {t('app.step2.selectRecommendedOnly')}
+                    </Button>
                   )}
                   {filteredSubtitles.length > 0 && (
                     <Button

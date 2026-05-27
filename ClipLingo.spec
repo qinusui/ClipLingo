@@ -2,7 +2,7 @@
 import os
 import sys
 
-VERSION = "1.4.4.0"
+VERSION = "1.4.5.0"
 
 block_cipher = None
 

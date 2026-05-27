@@ -701,7 +701,7 @@ async def ai_recommend_stream(request: AIRecommendRequest):
     # 编号
     numbered_batches = [(i + 1, b) for i, b in enumerate(batches)]
 
-    semaphore = asyncio.Semaphore(3)
+    semaphore = asyncio.Semaphore(request.ai_concurrency)
 
     async def event_generator():
         client = AsyncOpenAI(api_key=api_key, base_url=api_base)
@@ -754,7 +754,7 @@ async def ai_screen_stream(request: AIRecommendRequest):
     total_batches = len(batches)
     numbered_batches = [(i + 1, b) for i, b in enumerate(batches)]
 
-    semaphore = asyncio.Semaphore(3)
+    semaphore = asyncio.Semaphore(request.ai_concurrency)
 
     async def event_generator():
         client = AsyncOpenAI(api_key=api_key, base_url=api_base)
@@ -813,7 +813,7 @@ async def ai_annotate_stream(request: AIAnnotateRequest):
     total_batches = len(batches)
     numbered_batches = [(i + 1, b) for i, b in enumerate(batches)]
 
-    semaphore = asyncio.Semaphore(3)
+    semaphore = asyncio.Semaphore(request.ai_concurrency)
 
     # 预热缓存查找（惰性导入避免循环依赖）
     cached_lookup = None

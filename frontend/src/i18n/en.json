@@ -188,6 +188,7 @@
       "cantOpenLogFolder": "Cannot open log folder",
       "logs": "Logs",
       "collapseConfig": "Collapse",
+      "aiConcurrency": "AI Concurrency",
       "videoReady": "Video",
       "subtitlesReady": "Subtitles ({{count}} lines)",
       "subtitlesPending": "Subtitles Pending",

@@ -184,7 +184,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Anki Card Generator API",
     description="智能提取视频学习内容，生成 Anki 卡片",
-    version="1.4.4",
+    version="1.4.5",
     lifespan=lifespan
 )
 
@@ -279,7 +279,7 @@ async def root():
         return FileResponse(frontend_index)
     return {
         "message": "ClipLingo API",
-        "version": "1.4.4",
+        "version": "1.4.5",
         "docs": "/docs"
     }
 
@@ -364,7 +364,7 @@ async def check_update():
     import urllib.request
     import json as _json
 
-    current = "1.4.4"
+    current = "1.4.5"
     repo = "qinusui/ClipLingo"
     api_url = f"https://api.github.com/repos/{repo}/releases/latest"
 

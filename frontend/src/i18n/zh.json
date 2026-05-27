@@ -188,6 +188,7 @@
       "cantOpenLogFolder": "无法打开日志文件夹",
       "logs": "日志",
       "collapseConfig": "收起配置",
+      "aiConcurrency": "AI 并发数",
       "videoReady": "视频",
       "subtitlesReady": "字幕 ({{count}} 条)",
       "subtitlesPending": "字幕待加载",

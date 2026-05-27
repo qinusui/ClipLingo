@@ -1,5 +1,41 @@
 # ClipLingo Release Notes
 
+## v1.4.5 (2026-05-27)
+
+**English**
+
+### Features
+- Theme CSS now uses `var()` references to CSS variables — non-background color modifications now work correctly
+- AI concurrency now configurable (1-20, default 3) via step1 panel — controls parallel API request count during AI recommend/annotate
+- WhisperModel auto-fallback to CPU when GPU loading fails (e.g., missing cublas64_12.dll)
+
+### Bug Fixes
+- Fixed card preview overlay not taking effect — switched to pure selector rule injection
+- Fixed TemplatePane iframe div class restored to "card"
+- Improved style editor: error hints, shadow parsing, iframe key, cache invalidation
+
+### UX Improvements
+- Moved Logs button from step1 config area to header, next to feedback button
+- "Select recommended only" changed from checkbox to toggle button for clearer interaction
+
+**中文**
+
+### 新功能
+- 主题 CSS 改用 `var()` 引用 CSS 变量，修复非背景色属性修改不生效的问题
+- AI 并发数可在 step1 面板配置（1-20，默认 3），控制 AI 推荐/批注时的并行请求数
+- WhisperModel 加载失败时自动降级为 CPU 推理，解决 cublas64_12.dll 缺失导致的崩溃
+
+### Bug 修复
+- 修复卡片预览覆盖层不生效的问题 — 改为注入纯选择器规则
+- 还原 TemplatePane iframe 内 div class 为 "card"
+- 优化样式编辑器：完善错误提示、修复阴影解析、iframe key 刷新、缓存失效
+
+### 体验优化
+- 日志按钮从 step1 配置区移至 Header，与反馈按钮并列，更易发现
+- "只选推荐项"从 checkbox 改为切换按钮，交互更直观
+
+---
+
 ## v1.4.4 (2026-05-17)
 
 **English**

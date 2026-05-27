@@ -115,6 +115,7 @@ class AIRecommendRequest(BaseModel):
     model_name: Optional[str] = None
     custom_prompt: Optional[str] = None
     batch_size: int = 30
+    ai_concurrency: int = Field(default=3, ge=1, le=20, description="并发请求数")
     source_language: str = Field(default="en", description="源语言代码，如 en、ja、ko")
     target_language: str = Field(default="zh", description="目标语言代码，如 zh、en、ja")
     correct_text: bool = Field(default=False, description="是否允许 AI 修正字幕原文")
@@ -146,6 +147,7 @@ class AIAnnotateRequest(BaseModel):
     model_name: Optional[str] = None
     custom_prompt: Optional[str] = None
     batch_size: int = 30
+    ai_concurrency: int = Field(default=3, ge=1, le=20, description="并发请求数")
     source_language: str = Field(default="en", description="源语言代码")
     target_language: str = Field(default="zh", description="目标语言代码")
     task_id: Optional[str] = Field(default=None, description="任务ID，用于查询预热缓存")
