@@ -119,7 +119,7 @@ export interface ProcessProgress {
 
 // ASR 引擎和翻译服务
 export type ASREngine = 'faster_whisper' | 'bcut';
-export type TranslateService = 'bing' | 'google';
+export type TranslateService = 'bing' | 'google' | 'deepl' | 'openai';
 
 export interface ASREngineInfo {
   id: ASREngine;

@@ -161,9 +161,12 @@ class CardPreviewRequest(BaseModel):
 class TranslateBatchRequest(BaseModel):
     """批量翻译请求"""
     texts: List[str] = Field(default=[], description="待翻译的文本列表")
-    service: str = Field(default="bing", description="翻译服务 ID：bing / google")
+    service: str = Field(default="bing", description="翻译服务 ID：bing / google / deepl / openai")
     source_lang: str = Field(default="auto", description="源语言代码")
     target_lang: str = Field(default="zh", description="目标语言代码")
+    api_key: Optional[str] = Field(default=None, description="API Key（DeepL / OpenAI 翻译需要）")
+    api_base: Optional[str] = Field(default=None, description="API Base URL（OpenAI 翻译可选）")
+    model_name: Optional[str] = Field(default=None, description="模型名称（OpenAI 翻译可选）")
 
 
 class TranslateBatchResponse(BaseModel):

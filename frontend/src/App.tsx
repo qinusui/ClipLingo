@@ -159,6 +159,8 @@ function App() {
   const [whisperModel, setWhisperModel] = useState('base');
   const [asrEngine, setAsrEngine] = useState<ASREngine>('faster_whisper');
   const [mtService, setMtService] = useState<TranslateService>('bing');
+  const [deeplApiKey, setDeeplApiKey] = useState(savedConfig?.deeplApiKey || '');
+  const [mtCollapsed, setMtCollapsed] = useState(!!savedConfig?.apiKey);
   const [checkingEmbedded, setCheckingEmbedded] = useState(false);
   const [extractedSource, setExtractedSource] = useState('');
 
@@ -372,8 +374,8 @@ function App() {
 
   // AI 配置变化时自动保存到 localStorage
   useEffect(() => {
-    localStorage.setItem('anki_ai_config', JSON.stringify({ apiBase, modelName, apiKey, aiConcurrency, sourceLanguage, targetLanguage, customPrompt, annotationPrompt }));
-  }, [apiBase, modelName, apiKey, aiConcurrency, sourceLanguage, targetLanguage, customPrompt, annotationPrompt]);
+    localStorage.setItem('anki_ai_config', JSON.stringify({ apiBase, modelName, apiKey, aiConcurrency, sourceLanguage, targetLanguage, customPrompt, annotationPrompt, deeplApiKey }));
+  }, [apiBase, modelName, apiKey, aiConcurrency, sourceLanguage, targetLanguage, customPrompt, annotationPrompt, deeplApiKey]);
 
   // 源语言变化时，同步更新预设提示词中的语言名称
   useEffect(() => {
@@ -963,17 +965,24 @@ function App() {
     }
   };
 
-  // 机器翻译（无 API Key 时使用）
+  // 机器翻译（无 AI Key 时使用）
   const handleMTTranslate = async () => {
     const selectedSubs = subtitles.filter(s => selectedIndices.has(s.index));
     if (selectedSubs.length === 0) {
       alert(t('app.error.needSelectSentencesForAnnotation'));
       return;
     }
+    if (mtService === 'deepl' && !deeplApiKey) {
+      alert(t('app.error.deeplNeedApiKey'));
+      return;
+    }
     setWorkflowPhase('annotating');
     try {
       const texts = selectedSubs.map(s => s.text);
-      const { translations } = await translateAPI.batch(texts, mtService, sourceLanguage, targetLanguage);
+      const { translations } = await translateAPI.batch(
+        texts, mtService, sourceLanguage, targetLanguage,
+        deeplApiKey || undefined, undefined, undefined
+      );
       setRecommendations(prev => {
         const next = new Map(prev);
         selectedSubs.forEach((sub, i) => {
@@ -2439,36 +2448,55 @@ function App() {
             </Card>
           )}
 
-          {/* Step 3 · 机器翻译（无需 API Key） */}
-          {selectedIndices.size > 0 && !apiKey && (
-            <Card>
+          {/* Step 3 · 机器翻译（始终可见，有 AI Key 时可折叠） */}
+          {selectedIndices.size > 0 && (
+            <Card className={apiKey ? 'border-dashed' : ''}>
+              <div
+                className={apiKey ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-t-xl' : ''}
+                onClick={apiKey ? () => setMtCollapsed(!mtCollapsed) : undefined}
+              >
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <span className="bg-primary-100 text-primary-700 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold dark:bg-primary-900/40 dark:text-primary-300">3</span>
+                  {apiKey && (
+                    mtCollapsed ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronUp className="w-4 h-4 text-gray-400" />
+                  )}
+                  {!apiKey && (
+                    <span className="bg-primary-100 text-primary-700 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold dark:bg-primary-900/40 dark:text-primary-300">3</span>
+                  )}
                   {t('app.step3.mtTitle')}
                   <span className="text-sm font-normal text-gray-500 ml-2 dark:text-gray-400">
                     ({t('app.step3.countInfo', { count: selectedIndices.size })})
                   </span>
+                  {apiKey && mtCollapsed && (
+                    <span className="text-xs text-gray-400 ml-auto dark:text-gray-500">{t('app.step3.mtCollapsedHint')}</span>
+                  )}
                 </CardTitle>
               </CardHeader>
+              </div>
+              {(!apiKey || !mtCollapsed) && (
               <CardContent>
                 {(workflowPhase !== 'annotating' && workflowPhase !== 'annotated') && (
                   <div className="space-y-4">
+                    {apiKey && (
+                      <p className="text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 p-2 rounded">
+                        {t('app.step3.mtHasAiHint')}
+                      </p>
+                    )}
                     <p className="text-sm text-gray-500 dark:text-gray-400">{t('app.step3.mtDesc')}</p>
                     {/* 翻译服务选择 */}
                     <div>
                       <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                         {t('app.step3.translateService')}
                       </p>
-                      <div className="flex gap-2">
-                        {([{
-                          key: 'bing' as TranslateService, label: '微软翻译 (Bing)'
-                        }, {
-                          key: 'google' as TranslateService, label: '谷歌翻译 (备用)'
-                        }] as const).map(e => (
+                      <div className="grid grid-cols-3 gap-2">
+                        {([
+                          { key: 'bing' as TranslateService, label: 'Bing', sub: t('app.step3.mtFree') },
+                          { key: 'google' as TranslateService, label: 'Google', sub: t('app.step3.mtBackup') },
+                          { key: 'deepl' as TranslateService, label: 'DeepL', sub: t('app.step3.mtNeedKey') },
+                        ] as const).map(e => (
                           <label
                             key={e.key}
-                            className={`flex-1 flex flex-col items-center gap-1 p-2 rounded cursor-pointer border text-center transition-colors ${
+                            className={`flex flex-col items-center gap-0.5 p-2 rounded cursor-pointer border text-center transition-colors ${
                               mtService === e.key
                                 ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30 dark:border-primary-400'
                                 : 'border-gray-200 hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-700'
@@ -2483,10 +2511,29 @@ function App() {
                               className="hidden"
                             />
                             <span className="font-medium text-xs">{e.label}</span>
+                            <span className="text-[10px] text-gray-400 dark:text-gray-500">{e.sub}</span>
                           </label>
                         ))}
                       </div>
                     </div>
+                    {/* DeepL API Key 输入 */}
+                    {mtService === 'deepl' && (
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">
+                          DeepL API Key
+                        </label>
+                        <input
+                          type="password"
+                          value={deeplApiKey}
+                          onChange={(e) => setDeeplApiKey(e.target.value)}
+                          placeholder={t('app.step3.deeplKeyPlaceholder')}
+                          className="w-full px-2 py-1.5 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                        />
+                        <p className="text-[10px] text-gray-400 mt-1 dark:text-gray-500">
+                          {t('app.step3.deeplKeyHint')}
+                        </p>
+                      </div>
+                    )}
                     <button
                       onClick={handleMTTranslate}
                       disabled={processingPhase !== 'idle'}
@@ -2531,6 +2578,7 @@ function App() {
                   </div>
                 )}
               </CardContent>
+              )}
             </Card>
           )}
 

@@ -18,20 +18,28 @@ class TestTranslatorRegistry:
     """翻译器注册表"""
 
     def test_default_translators_registered(self):
-        """bing 和 google 应已注册"""
-        import core.translate.bing    # noqa: F401
-        import core.translate.google  # noqa: F401
+        """bing、google、deepl、openai 应已注册"""
+        import core.translate.bing              # noqa: F401
+        import core.translate.google            # noqa: F401
+        import core.translate.deepl             # noqa: F401
+        import core.translate.openai_translate  # noqa: F401
         assert "bing" in TRANSLATOR_REGISTRY
         assert "google" in TRANSLATOR_REGISTRY
+        assert "deepl" in TRANSLATOR_REGISTRY
+        assert "openai" in TRANSLATOR_REGISTRY
 
     def test_get_available_translators(self):
         """get_available_translators 应返回完整列表"""
-        import core.translate.bing    # noqa
-        import core.translate.google  # noqa
+        import core.translate.bing              # noqa
+        import core.translate.google            # noqa
+        import core.translate.deepl             # noqa
+        import core.translate.openai_translate  # noqa
         services = get_available_translators()
         ids = [s["id"] for s in services]
         assert "bing" in ids
         assert "google" in ids
+        assert "deepl" in ids
+        assert "openai" in ids
 
     def test_create_bing_translator(self):
         """create_translator("bing") 返回 BingTranslator"""
@@ -46,6 +54,22 @@ class TestTranslatorRegistry:
         import core.translate.google  # noqa
         translator = create_translator("google")
         assert translator.SERVICE_ID == "google"
+
+    def test_create_deepl_translator(self):
+        """create_translator("deepl", api_key=...) 返回 DeepLTranslator"""
+        import core.translate.deepl  # noqa
+        translator = create_translator("deepl", api_key="test_key:fx")
+        assert translator.SERVICE_ID == "deepl"
+        assert translator.api_key == "test_key:fx"
+
+    def test_create_openai_translator(self):
+        """create_translator("openai", ...) 返回 OpenAITranslator"""
+        import core.translate.openai_translate  # noqa
+        translator = create_translator("openai", api_key="key", api_base="https://test.com", model_name="gpt-4")
+        assert translator.SERVICE_ID == "openai"
+        assert translator.api_key == "key"
+        assert translator.api_base == "https://test.com"
+        assert translator.model_name == "gpt-4"
 
     def test_create_unknown_translator_raises(self):
         """未知服务 ID 应抛出 ValueError"""

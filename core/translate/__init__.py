@@ -61,5 +61,7 @@ def translate_batch(
 
 
 # 导入翻译器实现，触发 @register_translator 装饰器填充注册表
-import core.translate.bing    # noqa: E402, F401
-import core.translate.google  # noqa: E402, F401
+import core.translate.bing              # noqa: E402, F401
+import core.translate.google            # noqa: E402, F401
+import core.translate.deepl             # noqa: E402, F401
+import core.translate.openai_translate  # noqa: E402, F401

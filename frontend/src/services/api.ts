@@ -357,13 +357,19 @@ export const translateAPI = {
     texts: string[],
     service: TranslateService = 'bing',
     sourceLang: string = 'auto',
-    targetLang: string = 'zh'
+    targetLang: string = 'zh',
+    apiKey?: string,
+    apiBase?: string,
+    modelName?: string
   ): Promise<TranslateBatchResponse> => {
     const response = await api.post<TranslateBatchResponse>('/api/translate/batch', {
       texts,
       service,
       source_lang: sourceLang,
       target_lang: targetLang,
+      api_key: apiKey || undefined,
+      api_base: apiBase || undefined,
+      model_name: modelName || undefined,
     });
     return response.data;
   },

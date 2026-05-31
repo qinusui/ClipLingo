@@ -244,7 +244,7 @@ def run_transcribe(
         subtitles = filter_short_subtitles(subtitles, min_duration)
 
         subtitle_items = [{"index": s.index, "start_sec": s.start_sec, "end_sec": s.end_sec,
-                           "text": s.text, "duration": s.duration} for s in subtitles]
+                           "text": s.text, "duration": round(s.end_sec - s.start_sec, 3)} for s in subtitles]
 
         with lock:
             store[task_id] = {
