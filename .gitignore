@@ -13,8 +13,6 @@ __pycache__/
 venv/
 .venv/
 *.egg-info/
-dist/
-build/
 
 # 输入输出目录
 input/
@@ -33,13 +31,13 @@ logs/
 graphify-out/
 _merge.py
 
-# 前端 (Node.js)
+# Frontend (Node.js)
 frontend/node_modules/
 frontend/dist/
 frontend/.env.local
 frontend/.env.*.local
 
-# 后端
+# Backend
 backend/__pycache__/
 backend/*.pyc
 backend/venv/
@@ -50,18 +48,37 @@ backend/dist/
 .DS_Store
 Thumbs.db
 
-# 项目文档（不上传）
-CLAUDE.md
+# Chinese scratch docs (keep these local)
 待办事项.md
 待办.md
 
-# PyInstaller 打包产物
+# PyInstaller / Inno Setup build artifacts
 dist/
 dist2/
 dist3/
 dist4/
 build/
-# 测试临时目录
+*.exe
+
+# Engine & cache data (Whisper models, cached transcription outputs)
+cache/
+models/
+skills-lock.json
+
+# Runtime PID tracking
+backend/pids.json
+.port
+
+# Installed agent skills (symlinked, keep safe)
+.agents/
+
+# Custom themes during development
+themes/custom/
+
+# Binary assets
+bin/*.exe
+
+# Test runtime dirs
 *测试*/
 
 # Runtime PID tracking

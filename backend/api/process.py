@@ -29,7 +29,7 @@ else:
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from main import run as process_cards, generate_apkg
-from api.subtitles import _build_screening_prompt, _build_annotation_prompt
+from .prompts import build_screening_prompt as _build_screening_prompt, build_annotation_prompt as _build_annotation_prompt
 
 from errors import translate_error, get_message, ErrorCode, ClipLingoError
 from utils.zip_export import generate_csv_with_media_paths

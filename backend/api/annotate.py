@@ -11,7 +11,8 @@ from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks
 from openai import AsyncOpenAI
 
-from api.subtitles import _build_annotation_prompt, _call_ai_batch_async, _dynamic_batches, _inject_context
+from .prompts import build_annotation_prompt as _build_annotation_prompt
+from .ai_batch import call_ai_batch_async as _call_ai_batch_async, dynamic_batches as _dynamic_batches, inject_context as _inject_context
 from models.schemas import AIAnnotateRequest
 
 logger = logging.getLogger(__name__)
