@@ -24,7 +24,7 @@ if _project_root not in sys.path:
 from models.schemas import (
     SubtitleItem, SubtitleListResponse, AIRecommendRequest,
     AIRecommendItem, AIRecommendResponse, AIAnnotateRequest,
-    ASREngineInfo,
+    AICorrectRequest, ASREngineInfo,
 )
 from core.parse_srt import parse_srt, filter_short_subtitles
 from core.whisper_manager import is_whisper_installed, install_whisper
@@ -233,7 +233,7 @@ async def ai_recommend(request: AIRecommendRequest):
         args=(task_id, subtitle_dicts, api_key, request.api_base, request.model_name,
               request.batch_size, request.ai_concurrency, request.source_language,
               request.target_language, request.purpose,
-              request.correct_text, request.custom_prompt),
+              request.custom_prompt),
         daemon=True,
     )
     thread.start()
@@ -261,7 +261,6 @@ def _sync_ai_recommend_loop(
     source_lang: str,
     target_lang: str,
     purpose: str | None,
-    correct_text: bool,
     custom_prompt: str | None,
 ) -> None:
     """Sync wrapper: calls async ai_batch.call_and_emit via asyncio.run() in-thread."""
@@ -399,7 +398,7 @@ async def ai_recommend_stream(request: AIRecommendRequest):
         num_batches_seen = 0
         async for num, items, error in stream_batches(
             client, phase="screening", batches_raw=subtitle_dicts,
-            custom_prompt=request.custom_prompt, correct_text=request.correct_text,
+            custom_prompt=request.custom_prompt,
             source_language=request.source_language, target_language=request.target_language,
             model_name=request.model_name or "deepseek-chat",
             semaphore=semaphore,
@@ -423,30 +422,98 @@ async def ai_screen_stream(request: AIRecommendRequest):
     if not api_key:
         raise HTTPException(status_code=400, detail="需要提供 API Key")
 
+    if not request.subtitles:
+        raise HTTPException(status_code=400, detail="字幕列表不能为空")
+
     subtitle_dicts = [
         {"index": s.index, "start_sec": s.start_sec, "end_sec": s.end_sec, "text": s.text}
         for s in request.subtitles
     ]
     semaphore = asyncio.Semaphore(request.ai_concurrency)
 
-    async def event_generator():
+    # Initialize client OUTSIDE generator to catch errors early
+    try:
         client = AsyncOpenAI(api_key=api_key, base_url=request.api_base or "https://api.deepseek.com")
+    except Exception as e:
+        logger.error(f"Failed to create AI client: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"创建 AI 客户端失败: {str(e)}")
+
+    logger.info(f"Starting AI screen stream: {len(subtitle_dicts)} subtitles, concurrency={request.ai_concurrency}")
+
+    async def event_generator():
         yield f"data: {json.dumps({'type': 'start', 'total_batches': 0})}\n\n"
 
         num_batches_seen = 0
-        async for num, items, error in stream_batches(
-            client, phase="screening", batches_raw=subtitle_dicts,
-            custom_prompt=request.custom_prompt, correct_text=request.correct_text,
-            enrich_context=False,
-            source_language=request.source_language, target_language=request.target_language,
-            model_name=request.model_name or "deepseek-chat",
-            semaphore=semaphore,
-            post_process=BatchPostProcess(strip_annotation_fields=True, include_corrected=request.correct_text),
-        ):
-            if num == 0:
-                continue  # skip sentinel
-            num_batches_seen += 1
-            yield f"data: {json.dumps({'type': 'batch', 'batch': num_batches_seen, 'items': items}, ensure_ascii=False)}\n\n"
+        try:
+            async for num, items, error in stream_batches(
+                client, phase="screening", batches_raw=subtitle_dicts,
+                custom_prompt=request.custom_prompt,
+                enrich_context=False,
+                source_language=request.source_language, target_language=request.target_language,
+                model_name=request.model_name or "deepseek-chat",
+                semaphore=semaphore,
+                post_process=BatchPostProcess(strip_annotation_fields=True),
+            ):
+                if num == 0:
+                    continue  # skip sentinel
+                num_batches_seen += 1
+                yield f"data: {json.dumps({'type': 'batch', 'batch': num_batches_seen, 'items': items}, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            logger.error(f"AI screen stream error: {e}", exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@router.post("/ai-correct-stream")
+async def ai_correct_stream(request: AICorrectRequest):
+    """AI 字幕修正 — 修正 ASR 转录错误，返回 corrected_text"""
+    from .ai_batch import stream_batches
+
+    api_key = request.api_key or os.getenv("DEEPSEEK_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="需要提供 API Key")
+
+    if not request.subtitles:
+        raise HTTPException(status_code=400, detail="字幕列表不能为空")
+
+    subtitle_dicts = [
+        {"index": s.index, "start_sec": s.start_sec, "end_sec": s.end_sec, "text": s.text}
+        for s in request.subtitles
+    ]
+    semaphore = asyncio.Semaphore(request.ai_concurrency)
+
+    # Initialize client OUTSIDE generator to catch errors early
+    try:
+        client = AsyncOpenAI(api_key=api_key, base_url=request.api_base or "https://api.deepseek.com")
+    except Exception as e:
+        logger.error(f"Failed to create AI client: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"创建 AI 客户端失败: {str(e)}")
+
+    logger.info(f"Starting AI correct stream: {len(subtitle_dicts)} subtitles, concurrency={request.ai_concurrency}")
+
+    async def event_generator():
+        yield f"data: {json.dumps({'type': 'start', 'total_batches': 0})}\n\n"
+
+        num_batches_seen = 0
+        try:
+            async for num, items, error in stream_batches(
+                client, phase="correction", batches_raw=subtitle_dicts,
+                enrich_context=True,
+                source_language=request.source_language, target_language=request.target_language,
+                model_name=request.model_name or "deepseek-chat",
+                semaphore=semaphore,
+            ):
+                if num == 0:
+                    continue  # skip sentinel
+                num_batches_seen += 1
+                yield f"data: {json.dumps({'type': 'batch', 'batch': num_batches_seen, 'items': items}, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            logger.error(f"AI correct stream error: {e}", exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
 
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
@@ -461,6 +528,9 @@ async def ai_annotate_stream(request: AIAnnotateRequest):
     api_key = request.api_key or os.getenv("DEEPSEEK_API_KEY")
     if not api_key:
         raise HTTPException(status_code=400, detail="需要提供 API Key")
+
+    if not request.subtitles:
+        raise HTTPException(status_code=400, detail="字幕列表不能为空")
 
     subtitle_dicts = [
         {"index": s.index, "start_sec": s.start_sec, "end_sec": s.end_sec, "text": s.text}
@@ -477,24 +547,36 @@ async def ai_annotate_stream(request: AIAnnotateRequest):
 
     semaphore = asyncio.Semaphore(request.ai_concurrency)
 
-    async def event_generator():
+    # Initialize client OUTSIDE generator to catch errors early
+    try:
         client = AsyncOpenAI(api_key=api_key, base_url=request.api_base or "https://api.deepseek.com")
+    except Exception as e:
+        logger.error(f"Failed to create AI client: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"创建 AI 客户端失败: {str(e)}")
+
+    logger.info(f"Starting AI annotate stream: {len(subtitle_dicts)} subtitles, purpose={request.purpose}, concurrency={request.ai_concurrency}")
+
+    async def event_generator():
         yield f"data: {json.dumps({'type': 'start', 'total_batches': 0})}\n\n"
 
         num_batches_seen = 0
-        async for num, items, error in stream_batches(
-            client, phase="annotation", purpose=request.purpose,
-            batches_raw=subtitle_dicts, enrich_context=True,
-            custom_prompt=request.custom_prompt,
-            source_language=request.source_language, target_language=request.target_language,
-            model_name=request.model_name or "deepseek-chat",
-            semaphore=semaphore,
-            post_process=BatchPostProcess(cache_lookup=cached_lookup),
-        ):
-            if num == 0:
-                continue  # skip sentinel
-            num_batches_seen += 1
-            yield f"data: {json.dumps({'type': 'batch', 'batch': num_batches_seen, 'items': items}, ensure_ascii=False)}\n\n"
+        try:
+            async for num, items, error in stream_batches(
+                client, phase="annotation", purpose=request.purpose,
+                batches_raw=subtitle_dicts, enrich_context=True,
+                custom_prompt=request.custom_prompt,
+                source_language=request.source_language, target_language=request.target_language,
+                model_name=request.model_name or "deepseek-chat",
+                semaphore=semaphore,
+                post_process=BatchPostProcess(cache_lookup=cached_lookup),
+            ):
+                if num == 0:
+                    continue  # skip sentinel
+                num_batches_seen += 1
+                yield f"data: {json.dumps({'type': 'batch', 'batch': num_batches_seen, 'items': items}, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            logger.error(f"AI annotate stream error: {e}", exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
 
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 

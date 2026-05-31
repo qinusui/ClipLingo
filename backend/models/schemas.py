@@ -118,7 +118,6 @@ class AIRecommendRequest(BaseModel):
     ai_concurrency: int = Field(default=3, ge=1, le=20, description="并发请求数")
     source_language: str = Field(default="en", description="源语言代码，如 en、ja、ko")
     target_language: str = Field(default="zh", description="目标语言代码，如 zh、en、ja")
-    correct_text: bool = Field(default=False, description="是否允许 AI 修正字幕原文")
 
 
 class AIRecommendItem(BaseModel):
@@ -151,6 +150,17 @@ class AIAnnotateRequest(BaseModel):
     source_language: str = Field(default="en", description="源语言代码")
     target_language: str = Field(default="zh", description="目标语言代码")
     task_id: Optional[str] = Field(default=None, description="任务ID，用于查询预热缓存")
+
+
+class AICorrectRequest(BaseModel):
+    """AI 字幕修正请求 — 修正 ASR 转录错误"""
+    subtitles: List[SubtitleItem]
+    api_key: Optional[str] = None
+    api_base: Optional[str] = None
+    model_name: Optional[str] = None
+    source_language: str = Field(default="en", description="源语言代码")
+    target_language: str = Field(default="zh", description="目标语言代码")
+    ai_concurrency: int = Field(default=3, ge=1, le=20, description="并发请求数")
 
 
 class CardPreviewRequest(BaseModel):

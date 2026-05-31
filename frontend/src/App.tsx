@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from './i18n';
-import { Film, Download, Info, Sparkles, ChevronDown, ChevronUp, MessageSquare, Sun, Moon, Monitor, BookOpen, GraduationCap, FolderOpen, X, ExternalLink, RefreshCw, RotateCcw, FileSpreadsheet, FileJson, Palette } from 'lucide-react';
+import { Film, Download, Info, Sparkles, ChevronDown, ChevronUp, MessageSquare, Sun, Moon, Monitor, BookOpen, GraduationCap, FolderOpen, X, ExternalLink, RefreshCw, RotateCcw, FileSpreadsheet, FileJson, Palette, CheckCircle } from 'lucide-react';
 import { Button } from './components/Button';
 import { Card, CardContent, CardHeader, CardTitle } from './components/Card';
 import { ProgressBar } from './components/ProgressBar';
@@ -222,6 +222,11 @@ function App() {
   const [annotationPurpose, setAnnotationPurpose] = useState<AnnotationPurpose | null>(null);
   const [annotateBatch, setAnnotateBatch] = useState(0);
   const [annotateTotalBatches, setAnnotateTotalBatches] = useState(0);
+  // AI 字幕修正
+  const [corrections, setCorrections] = useState<Map<number, string> | null>(null);
+  const [correctBatch, setCorrectBatch] = useState(0);
+  const [correctionHandled, setCorrectionHandled] = useState(false);
+  const [deselectedCorrections, setDeselectedCorrections] = useState<Set<number>>(new Set());
   const [customPrompt, setCustomPrompt] = useState<string>(
     savedConfig?.customPrompt || buildPresetPrompt(t('app.prompt.grammarScreenBody'), savedConfig?.sourceLanguage || 'en')
   );
@@ -266,7 +271,6 @@ function App() {
   const [filterMinDuration, setFilterMinDuration] = useState(1);
   const [filterMaxDuration, setFilterMaxDuration] = useState(15);
   const [filterExcludeLearned, setFilterExcludeLearned] = useState(true);
-  const [correctText, setCorrectText] = useState(false);
   const [filterBlacklist, setFilterBlacklist] = useState('');
 
   // 心跳：每 30 秒 ping 一次，后端超时 2 分钟无心跳自动关闭
@@ -830,25 +834,41 @@ function App() {
         modelName || undefined,
         sourceLanguage,
         targetLanguage,
-        correctText,
         controller.signal
       );
 
-      for await (const event of stream) {
-        if (event.type === 'start') {
-          setRecommendTotalBatches(event.total_batches!);
-        } else if (event.type === 'batch') {
-          setRecommendBatch(event.batch!);
-          setRecommendations(prev => {
-            const next = new Map(prev || []);
-            for (const item of event.items!) {
-              next.set(item.index, item);
-            }
-            return next;
-          });
-        } else if (event.type === 'done') {
-          setIsRecommending(false);
+      let receivedDone = false;
+      try {
+        for await (const event of stream) {
+          if (event.type === 'start') {
+            setRecommendTotalBatches(event.total_batches!);
+          } else if (event.type === 'error') {
+            throw new Error(event.message || 'AI 筛选失败');
+          } else if (event.type === 'batch') {
+            setRecommendBatch(event.batch!);
+            setRecommendations(prev => {
+              const next = new Map(prev || []);
+              for (const item of event.items!) {
+                next.set(item.index, item);
+              }
+              return next;
+            });
+          } else if (event.type === 'done') {
+            setIsRecommending(false);
+            receivedDone = true;
+            break;
+          }
         }
+      } catch (error: any) {
+        if (receivedDone) {
+          console.debug('AI 筛选流已关闭:', error);
+        } else if (error?.message?.includes('input stream')) {
+          console.debug('AI 筛选流意外关闭:', error);
+        } else {
+          throw error;
+        }
+      } finally {
+        receivedDone = true;
       }
 
       // 流结束后，收集失败项、自动选中推荐的句子
@@ -931,28 +951,48 @@ function App() {
         taskId || undefined
       );
 
-      for await (const event of stream) {
-        if (event.type === 'start') {
-          setAnnotateTotalBatches(event.total_batches!);
-        } else if (event.type === 'batch') {
-          setAnnotateBatch(event.batch!);
-          setRecommendations(prev => {
-            const next = new Map(prev || []);
-            for (const item of event.items!) {
-              const existing = next.get(item.index);
-              next.set(item.index, {
-                ...(existing || { include: true, reason: '', index: item.index }),
-                translation: item.translation || '',
-                notes: item.notes || '',
-                word: item.word || '',
-                definition: item.definition || '',
-              });
-            }
-            return next;
-          });
-        } else if (event.type === 'done') {
-          setWorkflowPhase('annotated');
+      let streamEnded = false;
+      try {
+        for await (const event of stream) {
+          if (event.type === 'start') {
+            setAnnotateTotalBatches(event.total_batches!);
+          } else if (event.type === 'error') {
+            throw new Error(event.message || 'AI 注释失败');
+          } else if (event.type === 'batch') {
+            setAnnotateBatch(event.batch!);
+            setRecommendations(prev => {
+              const next = new Map(prev || []);
+              for (const item of event.items!) {
+                const existing = next.get(item.index);
+                next.set(item.index, {
+                  ...(existing || { include: true, reason: '', index: item.index }),
+                  translation: item.translation || '',
+                  notes: item.notes || '',
+                  word: item.word || '',
+                  definition: item.definition || '',
+                });
+              }
+              return next;
+            });
+          } else if (event.type === 'done') {
+            setWorkflowPhase('annotated');
+            streamEnded = true;
+            break;
+          }
         }
+      } catch (error: any) {
+        if (streamEnded || error?.name === 'AbortError') {
+          console.debug('AI 注释流已关闭:', error);
+          setWorkflowPhase('annotated');
+          return;
+        } else if (error?.message?.includes('input stream')) {
+          // 浏览器 SSE 流关闭时的假错误，忽略
+          setWorkflowPhase('annotated');
+          return;
+        }
+        throw error;
+      } finally {
+        streamEnded = true;
       }
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
@@ -963,6 +1003,97 @@ function App() {
       }
       setWorkflowPhase('screened');
     }
+  };
+
+  // AI 字幕修正
+  const handleAICorrect = async () => {
+    if (!apiKey) return;
+    if (workflowPhase === 'correcting') return; // 防止重复点击
+
+    const selectedSubs = subtitles.filter(s => selectedIndices.has(s.index));
+    if (selectedSubs.length === 0) return;
+
+    setWorkflowPhase('correcting');
+    setCorrections(new Map());
+    setCorrectBatch(0);
+    setDeselectedCorrections(new Set());
+    let streamEnded = false;
+    try {
+      const stream = subtitleAPI.startCorrectStream(
+        selectedSubs, apiKey, aiConcurrency,
+        apiBase || undefined, modelName || undefined,
+        sourceLanguage, targetLanguage
+      );
+
+      for await (const event of stream) {
+        if (event.type === 'start') {
+          // no-op
+        } else if (event.type === 'error') {
+          throw new Error(event.message || 'AI 修正失败');
+        } else if (event.type === 'batch' && event.items) {
+          setCorrectBatch(prev => prev + 1);
+          setCorrections(prev => {
+            const next = new Map(prev);
+            for (const item of event.items!) {
+              if (item.corrected_text && item.corrected_text !== '') {
+                next.set(item.index, item.corrected_text);
+              }
+            }
+            return next;
+          });
+        } else if (event.type === 'done') {
+          streamEnded = true;
+          break;
+        }
+      }
+    } catch (error: any) {
+      if (streamEnded || error?.name === 'AbortError') {
+        console.debug('AI 修正流已关闭:', error);
+      } else if (error?.message?.includes('input stream')) {
+        // 浏览器 SSE 流关闭时的假错误，忽略
+      } else {
+        console.error('AI 修正失败:', error);
+        alert(t('app.error.aiCorrectFailed') + getApiErrorMessage(error));
+        setWorkflowPhase('idle');
+        return;
+      }
+    } finally {
+      streamEnded = true;
+    }
+    setWorkflowPhase('corrected');
+  };
+
+  // 切换单条修正的选中状态
+  const toggleCorrection = (index: number) => {
+    setDeselectedCorrections(prev => {
+      const next = new Set(prev);
+      if (next.has(index)) {
+        next.delete(index);
+      } else {
+        next.add(index);
+      }
+      return next;
+    });
+  };
+
+  // 应用修正：将选中的 corrections 写入 subtitles[i].text
+  const handleApplyCorrections = () => {
+    if (!corrections) return;
+    setSubtitles(prev => prev.map(s => {
+      if (deselectedCorrections.has(s.index)) return s;
+      const corrected = corrections.get(s.index);
+      return (corrected && corrected !== s.text) ? { ...s, text: corrected } : s;
+    }));
+    setCorrectionHandled(true);
+    setCorrections(null);
+    setWorkflowPhase('idle');
+  };
+
+  // 跳过修正
+  const handleSkipCorrections = () => {
+    setCorrectionHandled(true);
+    setCorrections(null);
+    setWorkflowPhase('idle');
   };
 
   // 机器翻译（无 AI Key 时使用）
@@ -1025,25 +1156,41 @@ function App() {
         modelName || undefined,
         sourceLanguage,
         targetLanguage,
-        correctText,
         controller.signal
       );
 
-      for await (const event of stream) {
-        if (event.type === 'start') {
-          setRecommendTotalBatches(event.total_batches!);
-        } else if (event.type === 'batch') {
-          setRecommendBatch(event.batch!);
-          setRecommendations(prev => {
-            const next = new Map(prev || []);
-            for (const item of event.items!) {
-              next.set(item.index, item);
-            }
-            return next;
-          });
-        } else if (event.type === 'done') {
-          setIsRecommending(false);
+      let streamEnded = false;
+      try {
+        for await (const event of stream) {
+          if (event.type === 'start') {
+            setRecommendTotalBatches(event.total_batches!);
+          } else if (event.type === 'error') {
+            throw new Error(event.message || '重试失败');
+          } else if (event.type === 'batch') {
+            setRecommendBatch(event.batch!);
+            setRecommendations(prev => {
+              const next = new Map(prev || []);
+              for (const item of event.items!) {
+                next.set(item.index, item);
+              }
+              return next;
+            });
+          } else if (event.type === 'done') {
+            setIsRecommending(false);
+            streamEnded = true;
+            break;
+          }
         }
+      } catch (error: any) {
+        if (streamEnded || error?.name === 'AbortError') {
+          console.debug('重试流已关闭:', error);
+        } else if (error?.message?.includes('input stream')) {
+          // 浏览器 SSE 流关闭时的假错误，忽略
+        } else {
+          throw error;
+        }
+      } finally {
+        streamEnded = true;
       }
 
       // 重试后更新失败列表
@@ -1261,7 +1408,10 @@ function App() {
       setWorkflowPhase('idle');
       setAnnotationPurpose(null);
       setCardTheme('default');
-
+      setCorrectionHandled(false);
+      setCorrections(null);
+      setDeselectedCorrections(new Set());
+  
     } catch (error) {
       console.error('下载失败:', error);
       alert(t('app.error.downloadFailed') + (apkgUrl || '/download/' + encodeURIComponent(apkgPath)));
@@ -1602,7 +1752,10 @@ function App() {
                       setSubtitleCounts([]);
                       setSelectedIndices(new Set());
                       setRecommendations(null);
-                    }}
+                      setCorrectionHandled(false);
+                      setCorrections(null);
+                      setDeselectedCorrections(new Set());
+                                  }}
                     selectedFiles={videoFiles}
                     onClear={() => {
                       setVideoFiles([]);
@@ -1613,7 +1766,10 @@ function App() {
                       setSubtitles([]);
                       setSelectedIndices(new Set());
                       setRecommendations(null);
-                    }}
+                      setCorrectionHandled(false);
+                      setCorrections(null);
+                      setDeselectedCorrections(new Set());
+                                  }}
                     label={t('app.step1.videoFile')}
                     icon="video"
                     multiple
@@ -2024,8 +2180,115 @@ function App() {
             </CardContent>
           </Card>
 
-          {/* Step 2 · 筛选字幕 */}
-          {subtitles.length > 0 && (
+          {/* AI 字幕修正面板 — 筛选前显示（可选） */}
+          {selectedIndices.size > 0 && !!apiKey && workflowPhase === 'idle' && !correctionHandled && (
+            <Card className="border-dashed border-primary-300 dark:border-primary-700">
+              <CardContent className="py-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-sm font-medium text-gray-900 dark:text-gray-100">{t('app.step2.correctTitle')}</h4>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">{t('app.step2.correctDesc')}</p>
+                  </div>
+                  <Button variant="secondary" size="sm" onClick={handleAICorrect}>
+                    {t('app.step2.correctButton')}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* AI 修正进行中 */}
+          {workflowPhase === 'correcting' && (
+            <Card>
+              <CardContent className="py-4">
+                <div className="flex items-center gap-3">
+                  <div className="animate-spin w-5 h-5 border-2 border-primary-500 border-t-transparent rounded-full" />
+                  <div>
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{t('app.step2.correcting')}</p>
+                    {correctBatch > 0 && (
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {t('app.step2.correctProgress', { batch: correctBatch })}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* AI 修正完成 — diff 预览 + 应用/跳过 */}
+          {workflowPhase === 'corrected' && corrections && (() => {
+            // 只统计真正有变化的条目
+            const changedItems = subtitles.filter(s => {
+              if (!selectedIndices.has(s.index)) return false;
+              const corrected = corrections.get(s.index);
+              return corrected && corrected !== s.text;
+            });
+            const changedCount = changedItems.length;
+            const selectedCount = changedCount - deselectedCorrections.size;
+            const allSelected = deselectedCorrections.size === 0;
+            return (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <CheckCircle className="w-5 h-5 text-green-500" />
+                    {t('app.step2.correctDone', { count: changedCount })}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {changedCount > 0 && (
+                    <div className="flex items-center gap-3 mb-3">
+                      <button
+                        onClick={() => setDeselectedCorrections(allSelected ? new Set(changedItems.map(s => s.index)) : new Set())}
+                        className="text-xs text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
+                      >
+                        {allSelected ? t('app.step2.correctDeselectAll') : t('app.step2.correctSelectAll')}
+                      </button>
+                      <span className="text-xs text-gray-500 dark:text-gray-400">
+                        {t('app.step2.correctSelected', { selected: selectedCount, total: changedCount })}
+                      </span>
+                    </div>
+                  )}
+                  {/* Diff 列表 */}
+                  <div className="max-h-80 overflow-y-auto space-y-2 mb-4">
+                    {changedItems.map(s => {
+                      const corrected = corrections.get(s.index)!;
+                      const isSelected = !deselectedCorrections.has(s.index);
+                      return (
+                        <div key={s.index} className={`p-2 rounded text-sm flex items-start gap-2 transition-colors ${isSelected ? 'bg-gray-50 dark:bg-gray-800' : 'bg-gray-100 dark:bg-gray-900 opacity-50'}`}>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleCorrection(s.index)}
+                            className="mt-0.5 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="text-red-600 dark:text-red-400 line-through break-words">{s.text}</div>
+                            <div className="text-green-700 dark:text-green-400 break-words">{corrected}</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {changedCount === 0 && (
+                      <p className="text-sm text-gray-500 dark:text-gray-400">{t('app.step2.correctNoChange')}</p>
+                    )}
+                  </div>
+                  {/* 操作按钮 */}
+                  <div className="flex gap-3">
+                    <Button variant="primary" size="sm" onClick={handleApplyCorrections} disabled={selectedCount === 0}>
+                      {t('app.step2.correctApply')} ({selectedCount})
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={handleSkipCorrections}>
+                      {t('app.step2.correctSkip')}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })()}
+
+          {/* Step 2 · 筛选字幕（修正进行中/完成时隐藏） */}
+          {subtitles.length > 0 && workflowPhase !== 'correcting' && workflowPhase !== 'corrected' && (
             <div ref={step2Ref}>
             <Card>
               <CardHeader>
@@ -2182,18 +2445,6 @@ function App() {
                     </Button>
                   )}
                   {!!apiKey && (
-                    <label className="flex items-center gap-1.5 cursor-pointer ml-2">
-                      <input
-                        type="checkbox"
-                        checked={correctText}
-                        onChange={e => setCorrectText(e.target.checked)}
-                        disabled={isRecommending}
-                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                      />
-                      <span className="text-xs text-gray-600 dark:text-gray-400">{t('app.step2.correctText')}</span>
-                    </label>
-                  )}
-                  {!!apiKey && (
                     <Button
                       variant="ghost"
                       size="sm"
@@ -2284,8 +2535,9 @@ function App() {
             </div>
           )}
 
-          {/* Step 3 · AI 注释（需要 API Key） */}
-          {selectedIndices.size > 0 && !!apiKey && (
+
+          {/* Step 3 · AI 注释（需要 API Key，修正进行中/完成时隐藏） */}
+          {selectedIndices.size > 0 && !!apiKey && workflowPhase !== 'correcting' && workflowPhase !== 'corrected' && (
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">

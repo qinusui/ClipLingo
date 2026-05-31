@@ -228,3 +228,51 @@ async def test_stream_batches_emits_skip_on_api_failure():
     assert chunks[0][0] == 1         # batch number
     assert chunks[0][1] == 2         # 2 skip entries (one per original item)
     assert "API unreachable" in chunks[0][2]  # error message preserved
+
+
+# ─── Test 8: Correction phase returns corrected_text ───
+
+
+@pytest.mark.asyncio
+async def test_call_and_emit_correction_phase():
+    """call_and_emit with phase='correction' returns items with corrected_text."""
+    items_out = [
+        {"index": 1, "corrected_text": "Hello world"},
+        {"index": 2, "corrected_text": "Good morning"},
+    ]
+    client, _ = _make_async_mock_client(lambda: items_out)
+
+    results = await call_and_emit(
+        client,
+        phase="correction",
+        batches_raw=[
+            {"index": 1, "text": "Helo world"},
+            {"index": 2, "text": "Good mornng"},
+        ],
+    )
+
+    assert len(results) == 2
+    assert results[0]["corrected_text"] == "Hello world"
+    assert results[1]["corrected_text"] == "Good morning"
+
+
+# ─── Test 9: stream_batches correction phase ───
+
+
+@pytest.mark.asyncio
+async def test_stream_batches_correction_phase():
+    """stream_batches with phase='correction' yields corrected items."""
+    client, _ = _make_async_mock_client(
+        lambda: [{"index": 1, "corrected_text": "Fixed text"}]
+    )
+
+    chunks = []
+    async for num, items, error in stream_batches(
+        client, phase="correction",
+        batches_raw=[{"index": 1, "text": "Brken text"}],
+    ):
+        if num != 0:
+            chunks.extend(items)
+
+    assert len(chunks) == 1
+    assert chunks[0]["corrected_text"] == "Fixed text"

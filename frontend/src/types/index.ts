@@ -100,7 +100,7 @@ export interface CssVariableField {
 }
 
 // 工作流阶段
-export type WorkflowPhase = 'idle' | 'screening' | 'screened' | 'annotating' | 'annotated' | 'generating';
+export type WorkflowPhase = 'idle' | 'screening' | 'screened' | 'correcting' | 'corrected' | 'annotating' | 'annotated' | 'generating';
 
 // AI 注释用途
 export type AnnotationPurpose = 'grammar' | 'vocab';

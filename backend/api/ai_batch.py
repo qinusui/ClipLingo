@@ -29,7 +29,6 @@ class ProgressEvent:
 class BatchPostProcess:
     """端点特定的 post-processing hook"""
     strip_annotation_fields: bool = False
-    include_corrected: bool = False
     cache_lookup: dict[int, dict] | None = None
 
 
@@ -41,6 +40,7 @@ _RETRY_DELAYS = [2, 5, 10]
 _PROMPT_PHASES = {
     "screening": "screening",
     "annotation": "annotation",
+    "correction": "correction",
 }
 
 
@@ -117,8 +117,6 @@ def _apply_postprocess(items: list[dict], pp: BatchPostProcess) -> list[dict]:
             item.pop("notes", None)
             item.pop("word", None)
             item.pop("definition", None)
-            if not pp.include_corrected:
-                item.pop("corrected_text", None)
 
     return items
 
@@ -132,6 +130,7 @@ async def _call_single_batch(
     batch: list,
     model_name: str = "deepseek-chat",
     semaphore: asyncio.Semaphore | None = None,
+    phase: Literal["screening", "annotation", "correction"] = "screening",
 ) -> tuple[list[dict], str]:
     """异步调用一次 AI API（含指数退避抖动重试）"""
     for attempt in range(_MAX_RETRIES + 1):
@@ -164,14 +163,15 @@ async def _call_single_batch(
             parsed = json.loads(content)
             items = _parse_ai_items(parsed)
 
-            # Ensure index/keys for downstream processing
+            # Ensure index/keys for downstream processing (screening/annotation only)
             for i, item in enumerate(items):
                 if "index" not in item:
                     item["index"] = batch[i]["index"] if i < len(batch) else 0
-                if "include" not in item:
-                    item["include"] = False
-                if "reason" not in item:
-                    item["reason"] = ""
+                if phase != "correction":
+                    if "include" not in item:
+                        item["include"] = False
+                    if "reason" not in item:
+                        item["reason"] = ""
 
             return items, ""
 
@@ -191,11 +191,10 @@ async def _call_single_batch(
 async def call_and_emit(
     client,
     *,
-    phase: Literal["screening", "annotation"],
+    phase: Literal["screening", "annotation", "correction"],
     model_name: str = "deepseek-chat",
     purpose: str | None = None,
     custom_prompt: str | None = None,
-    correct_text: bool = False,
     enrich_context: bool = False,
     source_language: str = "en",
     target_language: str = "zh",
@@ -209,11 +208,13 @@ async def call_and_emit(
     Collects all results and returns at end. For batch-oriented callers
     that don't need per-batch visibility (e.g. the legacy recommend endpoint).
     """
-    from .prompts import build_screening_prompt, build_annotation_prompt
+    from .prompts import build_screening_prompt, build_annotation_prompt, build_correction_prompt
 
     # Build system prompt
     if phase == "screening":
-        system_prompt = build_screening_prompt(custom_prompt, source_language, target_language, correct_text)
+        system_prompt = build_screening_prompt(custom_prompt, source_language, target_language)
+    elif phase == "correction":
+        system_prompt = build_correction_prompt(source_language, target_language)
     else:
         system_prompt = build_annotation_prompt(purpose or "grammar", source_language, target_language, custom_prompt)
 
@@ -234,7 +235,7 @@ async def call_and_emit(
     all_results: list[dict] = []
 
     async def run_one(num: int, batch: list[dict]) -> tuple[int, list[dict], str]:
-        items, error = await _call_single_batch(client, system_prompt, batch, model_name, semaphore)
+        items, error = await _call_single_batch(client, system_prompt, batch, model_name, semaphore, phase)
         return num, items, error
 
     tasks = [asyncio.create_task(run_one(i + 1, b)) for i, b in enumerate(final_batches)]
@@ -264,11 +265,10 @@ async def call_and_emit(
 async def stream_batches(
     client,
     *,
-    phase: Literal["screening", "annotation"],
+    phase: Literal["screening", "annotation", "correction"],
     model_name: str = "deepseek-chat",
     purpose: str | None = None,
     custom_prompt: str | None = None,
-    correct_text: bool = False,
     enrich_context: bool = False,
     source_language: str = "en",
     target_language: str = "zh",
@@ -281,10 +281,12 @@ async def stream_batches(
     Async generator-style: yields (num, items, error) tuples as each batch completes.
     SSE endpoints consume this to emit batch-by-batch events.
     """
-    from .prompts import build_screening_prompt, build_annotation_prompt
+    from .prompts import build_screening_prompt, build_annotation_prompt, build_correction_prompt
 
     if phase == "screening":
-        system_prompt = build_screening_prompt(custom_prompt, source_language, target_language, correct_text)
+        system_prompt = build_screening_prompt(custom_prompt, source_language, target_language)
+    elif phase == "correction":
+        system_prompt = build_correction_prompt(source_language, target_language)
     else:
         system_prompt = build_annotation_prompt(purpose or "grammar", source_language, target_language, custom_prompt)
 
@@ -314,7 +316,7 @@ async def stream_batches(
             if all_cached:
                 return num, cached_items, ""
 
-        items, error = await _call_single_batch(client, system_prompt, batch, model_name, semaphore)
+        items, error = await _call_single_batch(client, system_prompt, batch, model_name, semaphore, phase)
         return num, items, error
 
     tasks = [asyncio.create_task(run_one(i + 1, b)) for i, b in enumerate(final_batches)]

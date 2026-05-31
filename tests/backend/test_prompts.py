@@ -13,6 +13,7 @@ sys.path.insert(0, str(BACKEND_DIR))
 from api.prompts import (
     build_screening_prompt,
     build_annotation_prompt,
+    build_correction_prompt,
     build_system_prompt,
 )
 
@@ -46,18 +47,7 @@ def test_screening_custom_replaces_default_criteria():
     assert "语法知识点" not in prompt   # default criteria removed
 
 
-# ─── Test 4: correct_text adds extra field instruction ───
-
-
-def test_screening_correct_text_adds_field_instruction():
-    """correct_text=True appends corrected_text guidance to return format."""
-    plain = build_screening_prompt(source_language="en")
-    with_correct = build_screening_prompt(source_language="en", correct_text=True)
-    assert "corrected_text" not in plain
-    assert "corrected_text" in with_correct
-
-
-# ─── Test 5: annotation purpose selects grammar vs vocab template ───
+# ─── Test 4: annotation purpose selects grammar vs vocab template ───
 
 
 def test_annotation_prompt_vocabulary_differs_from_grammar():
@@ -86,3 +76,31 @@ def test_build_system_prompt_formats_both_languages():
     prompt = build_system_prompt(source_language="fr", target_language="de")
     assert "法语" in prompt
     assert "德语" in prompt
+
+
+# ─── Test 8: correction prompt includes source language ───
+
+
+def test_correction_prompt_includes_source_language():
+    """build_correction_prompt substitutes source language display name."""
+    prompt = build_correction_prompt(source_language="en", target_language="zh")
+    assert "英语" in prompt
+
+
+# ─── Test 9: correction prompt return format ───
+
+
+def test_correction_prompt_has_corrected_text_field():
+    """Correction prompt instructs AI to return corrected_text."""
+    prompt = build_correction_prompt(source_language="en")
+    assert "corrected_text" in prompt
+    assert "index" in prompt
+
+
+# ─── Test 10: correction prompt mentions ASR errors ───
+
+
+def test_correction_prompt_mentions_asr():
+    """Correction prompt describes ASR transcription correction scope."""
+    prompt = build_correction_prompt()
+    assert "转录" in prompt or "ASR" in prompt or "校对" in prompt

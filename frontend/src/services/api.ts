@@ -136,7 +136,7 @@ export const subtitleAPI = {
     sourceLanguage?: string,
     targetLanguage?: string,
     signal?: AbortSignal
-  ): AsyncGenerator<{ type: string; total_batches?: number; batch?: number; items?: any[] }> {
+  ): AsyncGenerator<{ type: string; total_batches?: number; batch?: number; items?: any[]; message?: string }> {
     const response = await fetch(`${API_BASE_URL}/api/subtitles/ai-recommend-stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -162,19 +162,33 @@ export const subtitleAPI = {
     const reader = response.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    let doneReceived = false;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
 
-      const lines = buffer.split('\n');
-      buffer = lines.pop()!;
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          yield JSON.parse(line.slice(6));
+        const lines = buffer.split('\n');
+        buffer = lines.pop()!;
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const event = JSON.parse(line.slice(6));
+            if (event.type === 'done') {
+              doneReceived = true;
+            }
+            yield event;
+            if (doneReceived) break;
+          }
         }
+        if (doneReceived) break;
       }
+    } catch (e) {
+      // 浏览器在流关闭时可能抛出 TypeError，已收到 done 时忽略
+      if (!doneReceived) throw e;
+    } finally {
+      try { await reader.cancel(); } catch {}
     }
   },
 
@@ -189,9 +203,8 @@ export const subtitleAPI = {
     modelName?: string,
     sourceLanguage?: string,
     targetLanguage?: string,
-    correctText?: boolean,
     signal?: AbortSignal
-  ): AsyncGenerator<{ type: string; total_batches?: number; batch?: number; items?: any[] }> {
+  ): AsyncGenerator<{ type: string; total_batches?: number; batch?: number; items?: any[]; message?: string }> {
     const response = await fetch(`${API_BASE_URL}/api/subtitles/ai-screen-stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -204,8 +217,7 @@ export const subtitleAPI = {
         api_base: apiBase || undefined,
         model_name: modelName || undefined,
         source_language: sourceLanguage || 'en',
-        target_language: targetLanguage || 'zh',
-        correct_text: correctText ?? false
+        target_language: targetLanguage || 'zh'
       }),
       signal
     });
@@ -218,19 +230,97 @@ export const subtitleAPI = {
     const reader = response.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    let doneReceived = false;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
 
-      const lines = buffer.split('\n');
-      buffer = lines.pop()!;
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          yield JSON.parse(line.slice(6));
+        const lines = buffer.split('\n');
+        buffer = lines.pop()!;
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const event = JSON.parse(line.slice(6));
+            if (event.type === 'done') {
+              doneReceived = true;
+            }
+            yield event;
+            if (doneReceived) break;
+          }
         }
+        if (doneReceived) break;
       }
+    } catch (e) {
+      // 浏览器在流关闭时可能抛出 TypeError，已收到 done 时忽略
+      if (!doneReceived) throw e;
+    } finally {
+      try { await reader.cancel(); } catch {}
+    }
+  },
+
+  // AI 修正：SSE 流式（修正 ASR 转录错误）
+  startCorrectStream: async function* (
+    subtitles: SubtitleItem[],
+    apiKey?: string,
+    aiConcurrency?: number,
+    apiBase?: string,
+    modelName?: string,
+    sourceLanguage?: string,
+    targetLanguage?: string,
+    signal?: AbortSignal
+  ): AsyncGenerator<{ type: string; total_batches?: number; batch?: number; items?: any[]; message?: string }> {
+    const response = await fetch(`${API_BASE_URL}/api/subtitles/ai-correct-stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        subtitles,
+        api_key: apiKey || undefined,
+        ai_concurrency: aiConcurrency ?? 3,
+        api_base: apiBase || undefined,
+        model_name: modelName || undefined,
+        source_language: sourceLanguage || 'en',
+        target_language: targetLanguage || 'zh'
+      }),
+      signal
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(err || `HTTP ${response.status}`);
+    }
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let doneReceived = false;
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split('\n');
+        buffer = lines.pop()!;
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const event = JSON.parse(line.slice(6));
+            if (event.type === 'done') {
+              doneReceived = true;
+            }
+            yield event;
+            if (doneReceived) break;
+          }
+        }
+        if (doneReceived) break;
+      }
+    } catch (e) {
+      // 浏览器在流关闭时可能抛出 TypeError，已收到 done 时忽略
+      if (!doneReceived) throw e;
+    } finally {
+      try { await reader.cancel(); } catch {}
     }
   },
 
@@ -248,7 +338,7 @@ export const subtitleAPI = {
     targetLanguage?: string,
     signal?: AbortSignal,
     taskId?: string
-  ): AsyncGenerator<{ type: string; total_batches?: number; batch?: number; items?: any[] }> {
+  ): AsyncGenerator<{ type: string; total_batches?: number; batch?: number; items?: any[]; message?: string }> {
     const response = await fetch(`${API_BASE_URL}/api/subtitles/ai-annotate-stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -276,19 +366,33 @@ export const subtitleAPI = {
     const reader = response.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    let doneReceived = false;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
 
-      const lines = buffer.split('\n');
-      buffer = lines.pop()!;
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          yield JSON.parse(line.slice(6));
+        const lines = buffer.split('\n');
+        buffer = lines.pop()!;
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const event = JSON.parse(line.slice(6));
+            if (event.type === 'done') {
+              doneReceived = true;
+            }
+            yield event;
+            if (doneReceived) break;
+          }
         }
+        if (doneReceived) break;
       }
+    } catch (e) {
+      // 浏览器在流关闭时可能抛出 TypeError，已收到 done 时忽略
+      if (!doneReceived) throw e;
+    } finally {
+      try { await reader.cancel(); } catch {}
     }
   },
 

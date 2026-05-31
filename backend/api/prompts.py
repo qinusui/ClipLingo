@@ -34,9 +34,6 @@ SCREENING_RETURN_FORMAT = """
 - include=false 时 reason 说明原因（如：纯简单应答、无知识价值）
 - 保持原文顺序输出，每条都必须有 index 字段"""
 
-SCREENING_CORRECT_TEXT_EXTRA = """
-- 如果原文有明显转录错误（拼写错误、漏词、误识别），请在 corrected_text 字段中提供修正后的文本；如无错误则省略此字段"""
-
 
 # ── 两阶段 AI：注释专用提示词 ──
 
@@ -75,15 +72,12 @@ def build_screening_prompt(
     custom_prompt: str | None = None,
     source_language: str = "en",
     target_language: str = "zh",
-    correct_text: bool = False,
 ) -> str:
     """构建筛选专用提示词（只判断 include/reason，不返回翻译注释）"""
     src_name = get_name(source_language)
     tgt_name = get_name(target_language)
     criteria = custom_prompt if custom_prompt else SCREENING_CRITERIA.format(source_language=src_name)
     fmt = SCREENING_RETURN_FORMAT.format(target_language=tgt_name)
-    if correct_text:
-        fmt += SCREENING_CORRECT_TEXT_EXTRA
     return criteria + fmt
 
 
@@ -116,6 +110,41 @@ RETURN_FORMAT = """
 - word 为句子中最值得背诵的核心单词或词组，definition 为其释义
 - 如果句子没有明确的核心单词，word 和 definition 可以与 notes 中的重点词汇一致
 - 保持原文顺序输出，每条都必须有 index 字段"""
+
+
+# ── AI 字幕修正提示词 ──
+
+CORRECTION_CRITERIA = """你是{source_language}转录文本校对专家。修正 ASR（语音识别）转录中的错误。
+
+修正范围：
+- 拼写错误和同音误识别（如 "their" → "there"）
+- 漏词或多余词
+- 标点符号修正
+- 专有名词大小写
+
+不要改变原意，只修正明显的转录错误。如果某条字幕无需修正，直接返回原文。"""
+
+CORRECTION_RETURN_FORMAT = """
+
+返回格式（严格遵守）：
+{{"items": [{{"index": 数字, "corrected_text": "修正后的文本"}}]}}
+
+注意：
+- 必须返回一个 JSON 对象，items 是数组
+- 每条字幕都必须返回，即使无需修正也返回原文
+- corrected_text 为修正后的完整文本
+- 保持原文顺序输出"""
+
+
+def build_correction_prompt(
+    source_language: str = "en",
+    target_language: str = "zh",
+) -> str:
+    """构建字幕修正专用提示词"""
+    src_name = get_name(source_language)
+    tgt_name = get_name(target_language)
+    return (CORRECTION_CRITERIA.format(source_language=src_name)
+            + CORRECTION_RETURN_FORMAT.format(target_language=tgt_name))
 
 
 def build_annotation_prompt(
