@@ -16,10 +16,10 @@ from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
 
-# Ensure parent package is importable
-_parent = str(Path(__file__).parent.parent)
-if _parent not in sys.path:
-    sys.path.insert(0, _parent)
+# Ensure project root is importable (for core/, errors.py, models/)
+_project_root = str(Path(__file__).parent.parent.parent)
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
 
 from models.schemas import (
     SubtitleItem, SubtitleListResponse, AIRecommendRequest,

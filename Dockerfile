@@ -32,8 +32,9 @@ RUN pip install --no-cache-dir -r backend/requirements.txt
 # 复制后端代码
 COPY backend/ ./backend/
 
-# 复制核心模块
+# 复制核心模块和项目级 Python 文件
 COPY core/ ./core/
+COPY errors.py ./
 COPY main.py ./
 
 # 复制前端构建产物
