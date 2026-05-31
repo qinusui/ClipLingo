@@ -163,6 +163,41 @@ class AICorrectRequest(BaseModel):
     ai_concurrency: int = Field(default=3, ge=1, le=20, description="并发请求数")
 
 
+class BatchProcessRequest(BaseModel):
+    """批量处理剩余视频 — 复用首视频的 AI 配置"""
+    video_names: List[str] = Field(default=[], description="待处理视频文件名列表")
+    subtitle_files: Optional[List[str]] = Field(default=None, description="对应字幕文件名（空则 Whisper）")
+    task_id: str = Field(default="", description="原始任务ID，用于定位上传的视频文件目录")
+    api_key: Optional[str] = None
+    api_base: Optional[str] = None
+    model_name: Optional[str] = None
+    ai_concurrency: int = Field(default=3, ge=1, le=20, description="并发请求数")
+    source_language: str = Field(default="en", description="源语言代码")
+    target_language: str = Field(default="zh", description="目标语言代码")
+    # ── 复用首视频的 AI 开关 ──
+    run_correction: bool = True
+    run_screening: bool = True
+    custom_screen_prompt: Optional[str] = None
+    run_annotation: bool = True
+    annotation_purpose: Optional[str] = Field(default="grammar", description="'grammar' | 'vocab'")
+    custom_annotation_prompt: Optional[str] = None
+    min_duration: float = Field(default=1.0, description="最短字幕时长（秒）")
+    # ── 机器翻译（无 AI 时的替代方案）──
+    mt_service: Optional[str] = Field(default=None, description="翻译服务 ID（bing/google/deepl/openai）")
+    mt_api_key: Optional[str] = Field(default=None, description="翻译服务 API Key（DeepL/OpenAI 需要）")
+    mt_api_base: Optional[str] = Field(default=None, description="翻译服务 API Base（OpenAI 可选）")
+    mt_model_name: Optional[str] = Field(default=None, description="翻译模型名称（OpenAI 可选）")
+
+
+class BatchProcessResponse(BaseModel):
+    """批量处理响应"""
+    success: bool
+    message: str
+    videos_processed: int
+    total_cards: int
+    task_id: str
+
+
 class CardPreviewRequest(BaseModel):
     """卡片预览请求"""
     cards: List[ProcessedCard]

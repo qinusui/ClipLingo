@@ -501,7 +501,11 @@ export const processAPI = {
     screenPrompt?: string,
     annotationPurpose?: string,
     annotationPrompt?: string,
-    selectRecommendedOnly?: boolean
+    selectRecommendedOnly?: boolean,
+    mtService?: string,
+    mtApiKey?: string,
+    mtApiBase?: string,
+    mtModelName?: string,
   ): Promise<{ task_id: string; status: string; merge: boolean }> => {
     const formData = new FormData();
     videoFiles.forEach(f => formData.append('videos', f));
@@ -553,6 +557,10 @@ export const processAPI = {
     if (selectRecommendedOnly !== undefined) {
       formData.append('select_recommended_only', selectRecommendedOnly.toString());
     }
+    if (mtService) formData.append('mt_service', mtService);
+    if (mtApiKey) formData.append('mt_api_key', mtApiKey);
+    if (mtApiBase) formData.append('mt_api_base', mtApiBase);
+    if (mtModelName) formData.append('mt_model_name', mtModelName);
 
     const response = await api.post<{ task_id: string; status: string; merge: boolean }>(
       '/api/process/upload-and-process',
@@ -580,7 +588,11 @@ export const processAPI = {
     screenPrompt?: string,
     annotationPurpose?: string,
     annotationPrompt?: string,
-    selectRecommendedOnly?: boolean
+    selectRecommendedOnly?: boolean,
+    mtService?: string,
+    mtApiKey?: string,
+    mtApiBase?: string,
+    mtModelName?: string,
   ): Promise<{ task_id: string; status: string; merge: boolean }> => {
     const formData = new FormData();
     videoFiles.forEach(f => formData.append('videos', f));
@@ -600,6 +612,10 @@ export const processAPI = {
     if (annotationPurpose) formData.append('annotation_purpose', annotationPurpose);
     if (annotationPrompt) formData.append('annotation_prompt_criteria', annotationPrompt);
     if (selectRecommendedOnly !== undefined) formData.append('select_recommended_only', selectRecommendedOnly.toString());
+    if (mtService) formData.append('mt_service', mtService);
+    if (mtApiKey) formData.append('mt_api_key', mtApiKey);
+    if (mtApiBase) formData.append('mt_api_base', mtApiBase);
+    if (mtModelName) formData.append('mt_model_name', mtModelName);
 
     const response = await api.post<{ task_id: string; status: string; merge: boolean }>(
       '/api/process/upload-and-process',
@@ -721,6 +737,89 @@ export const processAPI = {
   // 导出带媒体的 ZIP
   exportZipUrl: (taskId: string) => {
     return `${API_BASE_URL}/api/process/export-zip/${taskId}`;
+  },
+
+  // 批量处理剩余视频（SSE 流式）
+  startBatchProcess: async function* (
+    request: {
+      video_names: string[];
+      subtitle_files?: string[];
+      api_key?: string;
+      api_base?: string;
+      model_name?: string;
+      ai_concurrency?: number;
+      source_language?: string;
+      target_language?: string;
+      run_correction?: boolean;
+      run_screening?: boolean;
+      custom_screen_prompt?: string;
+      run_annotation?: boolean;
+      annotation_purpose?: string;
+      custom_annotation_prompt?: string;
+      min_duration?: number;
+      mt_service?: string;
+      mt_api_key?: string;
+      mt_api_base?: string;
+      mt_model_name?: string;
+    },
+    taskId: string,
+    signal?: AbortSignal
+  ): AsyncGenerator<{ type: string; total_videos?: number; video_index?: number; step?: number; message?: string; video_name?: string; cards?: number; videos_processed?: number; total_cards?: number; error?: string }> {
+    const response = await fetch(`${API_BASE_URL}/api/process/batch-process`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...request, task_id: taskId }),
+      signal
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(err || `HTTP ${response.status}`);
+    }
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let doneReceived = false;
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split('\n');
+        buffer = lines.pop()!;
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const event = JSON.parse(line.slice(6));
+              yield event;
+              if (event.type === 'complete') {
+                doneReceived = true;
+              }
+            } catch (parseErr) {
+              console.warn('SSE 解析失败:', line, parseErr);
+            }
+          }
+        }
+        if (doneReceived) break;
+      }
+    } catch (e) {
+      if (!doneReceived) {
+        // 流异常关闭时，发送一个合成的 complete 事件而非抛出异常
+        console.warn('SSE 流异常关闭:', e);
+        yield {
+          type: 'complete',
+          videos_processed: 0,
+          total_cards: 0,
+          error: `流连接中断: ${e instanceof Error ? e.message : String(e)}`,
+          message: `流连接中断: ${e instanceof Error ? e.message : String(e)}`,
+        };
+      }
+    } finally {
+      try { await reader.cancel(); } catch {}
+    }
   },
 };
 

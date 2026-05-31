@@ -69,6 +69,10 @@ def _process_video_to_media(
     screen_system_prompt: str = None,
     annotation_system_prompt: str = None,
     select_recommended_only: bool = False,
+    mt_service: str = None,
+    mt_api_key: str = None,
+    mt_api_base: str = None,
+    mt_model_name: str = None,
 ) -> tuple[list[dict], str]:
     """
     处理单个视频的字幕解析 + AI + 媒体切割，返回 (processed_items, video_stem)
@@ -188,7 +192,32 @@ def _process_video_to_media(
                     "notes": "",
                     "reason": ""
                 })
-            progress(2, f"跳过 AI 注释（未配置 API Key），共 {len(processed)} 条")
+
+            # 机器翻译（无 AI Key 时的替代方案）
+            if mt_service:
+                try:
+                    from core.translate import create_translator
+                    kwargs = {}
+                    if mt_service == "deepl" and mt_api_key:
+                        kwargs["api_key"] = mt_api_key
+                    elif mt_service == "openai":
+                        if mt_api_key:
+                            kwargs["api_key"] = mt_api_key
+                        if mt_api_base:
+                            kwargs["api_base"] = mt_api_base
+                        if mt_model_name:
+                            kwargs["model_name"] = mt_model_name
+                    translator = create_translator(mt_service, **kwargs)
+                    texts = [p["text"] for p in processed]
+                    translations = translator.translate(texts, source_language, target_language)
+                    for p, t in zip(processed, translations):
+                        p["translation"] = t
+                    progress(2, f"机器翻译完成（{mt_service}），共 {len(processed)} 条")
+                except Exception as e:
+                    print(f"机器翻译失败: {e}")
+                    progress(2, f"机器翻译失败，跳过翻译，共 {len(processed)} 条")
+            else:
+                progress(2, f"跳过 AI 注释（未配置 API Key），共 {len(processed)} 条")
 
     # 应用 index 偏移
     processed = _apply_index_offset(processed, index_offset)
@@ -252,6 +281,10 @@ def run(
     annotation_system_prompt: str = None,
     select_recommended_only: bool = False,
     stop_after_media: bool = False,  # True=仅处理媒体不打包, False=完整流程
+    mt_service: str = None,
+    mt_api_key: str = None,
+    mt_api_base: str = None,
+    mt_model_name: str = None,
 ) -> dict:
     """
     运行完整流程
@@ -320,6 +353,10 @@ def run(
         screen_system_prompt=screen_system_prompt,
         annotation_system_prompt=annotation_system_prompt,
         select_recommended_only=select_recommended_only,
+        mt_service=mt_service,
+        mt_api_key=mt_api_key,
+        mt_api_base=mt_api_base,
+        mt_model_name=mt_model_name,
     )
 
     print("=" * 50)
@@ -342,7 +379,13 @@ def run(
     all_processed = []  # 合并模式收集所有视频的卡片
     results = []        # 独立模式收集每个视频的结果
 
-    for i, (vp, sp) in enumerate(zip(video_paths, subtitle_paths)):
+    # 两阶段模式（stop_after_media=True）只处理第一个视频，剩余视频留给批处理
+    videos_to_process = zip(video_paths, subtitle_paths)
+    if stop_after_media and total_videos > 1:
+        videos_to_process = [(video_paths[0], subtitle_paths[0])]
+        print(f"[两阶段模式] Phase 1 只处理第 1 个视频，剩余 {total_videos - 1} 个视频将在批处理阶段处理")
+
+    for i, (vp, sp) in enumerate(videos_to_process):
         index_offset = i * 10000
 
         # 获取该视频的预处理数据
@@ -521,6 +564,9 @@ def generate_apkg(
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     audio_dir = output_dir / "audio"
     screenshot_dir = output_dir / "screenshots"
+
+    processed_count = len(manifest.get("processed", []))
+    print(f"[Phase 2] 读取 manifest: {processed_count} 张卡片, merge={manifest.get('merge', True)}")
 
     def progress(step, message):
         print(message)

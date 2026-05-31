@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from './i18n';
 import { Film, Download, Info, Sparkles, ChevronDown, ChevronUp, MessageSquare, Sun, Moon, Monitor, BookOpen, GraduationCap, FolderOpen, X, ExternalLink, RefreshCw, RotateCcw, FileSpreadsheet, FileJson, Palette, CheckCircle } from 'lucide-react';
@@ -23,6 +23,7 @@ import { pingAnki, fetchWordsFromAnki } from './services/ankiConnect';
 
 import { useTheme } from './hooks/useTheme';
 import { getFriendlyMessage, getApiErrorMessage } from './utils/errors';
+import { toast } from './utils/toast';
 
 // 格式化时间为 SRT 格式
 function formatSRTTime(seconds: number): string {
@@ -227,6 +228,14 @@ function App() {
   const [correctBatch, setCorrectBatch] = useState(0);
   const [correctionHandled, setCorrectionHandled] = useState(false);
   const [deselectedCorrections, setDeselectedCorrections] = useState<Set<number>>(new Set());
+
+  // 多视频批处理
+  const [isBatchProcessing, setIsBatchProcessing] = useState(false);
+  const [batchRemaining, setBatchRemaining] = useState(0);
+  const [batchCompleted, setBatchCompleted] = useState(0);
+  const [batchStepMessage, setBatchStepMessage] = useState('');
+  const [batchDone, setBatchDone] = useState(false);
+  const [pendingPack, setPendingPack] = useState(false); // 批处理完成后自动打包
   const [customPrompt, setCustomPrompt] = useState<string>(
     savedConfig?.customPrompt || buildPresetPrompt(t('app.prompt.grammarScreenBody'), savedConfig?.sourceLanguage || 'en')
   );
@@ -529,6 +538,93 @@ function App() {
     }
   }, [workflowPhase, taskId, apiKey]);
 
+  // 多视频手动批处理触发函数（在步骤 4 中调用）
+  const batchTriggeredRef = useRef(false);
+  const handleTriggerBatch = useCallback(async () => {
+    console.log('[批处理] handleTriggerBatch 被调用:', { isBatchProcessing, batchTriggered: batchTriggeredRef.current, videoCount: videoFiles.length, batchDone });
+    if (isBatchProcessing || batchTriggeredRef.current) {
+      console.warn('[批处理] 提前返回: isBatchProcessing=', isBatchProcessing, 'batchTriggered=', batchTriggeredRef.current);
+      return;
+    }
+    if (videoFiles.length < 2) return;
+    batchTriggeredRef.current = true;
+    console.log('[批处理] 开始处理剩余视频...');
+
+    const remainingNames = videoFiles.slice(1).map(f => f.name);
+    // 保留 1:1 映射：null → 空字符串（不能 filter 掉，否则索引错位）
+    const remainingSubs = subtitleFiles.slice(1).map(f => f ? f.name : "");
+
+    const runCorrection = corrections !== null && !correctionHandled;
+    const runScreening = recommendations !== null && !recommendations?.size ? false : true;
+    const runAnnotation = annotationPurpose !== null;
+
+    // 检测是否使用了机器翻译（workflowPhase 为 annotated 但 annotationPurpose 为 null）
+    const usedMT = workflowPhase === 'annotated' && annotationPurpose === null;
+
+    setBatchRemaining(remainingNames.length);
+    setBatchCompleted(0);
+    setIsBatchProcessing(true);
+
+    try {
+      for await (const event of processAPI.startBatchProcess({
+        video_names: remainingNames,
+        subtitle_files: remainingSubs,
+        api_key: apiKey || undefined,
+        api_base: apiBase || undefined,
+        model_name: modelName || undefined,
+        ai_concurrency: aiConcurrency,
+        source_language: sourceLanguage,
+        target_language: targetLanguage,
+        run_correction: runCorrection,
+        run_screening: runScreening,
+        custom_screen_prompt: customPrompt || undefined,
+        run_annotation: runAnnotation,
+        annotation_purpose: annotationPurpose || undefined,
+        custom_annotation_prompt: annotationPrompt || undefined,
+        min_duration: filterMinDuration,
+        mt_service: usedMT ? mtService : undefined,
+        mt_api_key: usedMT ? (mtService === 'deepl' ? deeplApiKey : mtService === 'openai' ? apiKey : undefined) : undefined,
+        mt_api_base: usedMT && mtService === 'openai' ? (apiBase || undefined) : undefined,
+        mt_model_name: usedMT && mtService === 'openai' ? (modelName || undefined) : undefined,
+      }, taskId || '')) {
+        if (event.type === 'video_progress') {
+          setBatchStepMessage(event.message || '');
+        } else if (event.type === 'video_done') {
+          setBatchCompleted(prev => prev + 1);
+        } else if (event.type === 'complete') {
+          if (event.error) {
+            // 流异常关闭的兜底事件，不要当作成功完成
+            console.warn('[批处理] 流异常关闭，未完成批处理');
+            toast.error(t('app.batch.error') + (event.message || '连接中断，请重试'));
+            setBatchDone(false);
+            setPendingPack(false);
+            batchTriggeredRef.current = false;
+            return;
+          }
+          console.log(`批量处理完成：${event.total_cards} 张卡片`);
+          setBatchDone(true);
+        } else if (event.type === 'error') {
+          console.error('批量处理错误:', event.error || event.message);
+          toast.error(t('app.batch.error') + (event.error || event.message || ''));
+          setBatchDone(false);
+          setPendingPack(false);
+          batchTriggeredRef.current = false; // 允许重试
+          return;
+        }
+      }
+    } catch (error: any) {
+      console.error('批量处理失败:', error);
+      toast.error(t('app.batch.error') + getApiErrorMessage(error));
+      setBatchDone(false);
+      setPendingPack(false);
+      batchTriggeredRef.current = false; // 允许重试
+    } finally {
+      setIsBatchProcessing(false);
+    }
+  }, [isBatchProcessing, videoFiles.length, subtitleFiles, corrections, correctionHandled, recommendations,
+    annotationPurpose, apiKey, apiBase, modelName, aiConcurrency, sourceLanguage, targetLanguage,
+    customPrompt, annotationPrompt, filterMinDuration, processAPI, taskId, t, mtService, deeplApiKey, workflowPhase]);
+
   // Esc 退出应用
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -561,7 +657,7 @@ function App() {
         if (result.ok) {
           setThemeOverrides(prev => ({ ...prev, [cardTheme]: { ...pendingOverrides } }));
         } else {
-          alert(result.detail || '保存失败，请重试');
+          toast.error(result.detail || '保存失败，请重试');
         }
       } catch { /* save failed silently */ }
       setHasUnsavedOverrides(false);
@@ -580,7 +676,7 @@ function App() {
       setThemeOverrides(prev => ({ ...prev, [cardTheme]: { ...pendingOverrides } }));
       setHasUnsavedOverrides(false);
     } else {
-      alert(result.detail || '保存样式失败，请重试');
+      toast.error(result.detail || '保存样式失败，请重试');
     }
   };
 
@@ -661,7 +757,7 @@ function App() {
     try {
       const whisperStatus = await subtitleAPI.getWhisperStatus();
       if (!whisperStatus.installed) {
-        alert(t('app.error.whisperNotInstalled'));
+        toast.error(t('app.error.whisperNotInstalled'));
         return;
       }
     } catch (e) {
@@ -719,7 +815,7 @@ function App() {
             clearInterval(pollInterval);
             setIsTranscribing(false);
             transcribingRef.current = false;
-            alert(getFriendlyMessage(progress.error_code, progress.error));
+            toast.error(getFriendlyMessage(progress.error_code, progress.error));
           }
         } catch (e) {
           // 轮询失败不中断
@@ -730,7 +826,7 @@ function App() {
 
     } catch (error) {
       console.error('转录失败:', error);
-      alert(t('app.error.transcribeFailed') + getApiErrorMessage(error));
+      toast.error(t('app.error.transcribeFailed') + getApiErrorMessage(error));
       setIsTranscribing(false);
       transcribingRef.current = false;
     }
@@ -784,15 +880,15 @@ function App() {
   // AI 筛选字幕（第一阶段：只返回 include/reason）
   const handleAIScreen = async () => {
     if (!apiKey) {
-      alert(t('app.error.needApiKey'));
+      toast.error(t('app.error.needApiKey'));
       return;
     }
     if (subtitles.length === 0) {
-      alert(t('app.error.needSubtitles'));
+      toast.error(t('app.error.needSubtitles'));
       return;
     }
     if (selectedIndices.size === 0) {
-      alert(t('app.error.needSelectSentences'));
+      toast.error(t('app.error.needSelectSentences'));
       return;
     }
 
@@ -818,7 +914,7 @@ function App() {
         return true;
       });
       if (screenSubs.length === 0) {
-        alert(t('app.error.allLearned'));
+        toast.error(t('app.error.allLearned'));
         setIsRecommending(false);
         setWorkflowPhase('idle');
         return;
@@ -898,7 +994,7 @@ function App() {
         console.log('AI 筛选已中止');
       } else {
         console.error('AI 筛选失败:', error);
-        alert(t('app.error.aiScreenFailed') + getApiErrorMessage(error));
+        toast.error(t('app.error.aiScreenFailed') + getApiErrorMessage(error));
       }
       setIsRecommending(false);
       // 保留已有部分结果，回到 screened 状态（而非 idle）
@@ -916,14 +1012,14 @@ function App() {
   // AI 注释字幕（第二阶段：根据用途生成翻译和注释）
   const handleAIAnnotate = async (purpose: AnnotationPurpose) => {
     if (!apiKey) {
-      alert(t('app.error.needApiKey'));
+      toast.error(t('app.error.needApiKey'));
       return;
     }
 
     const selectedSubs = subtitles.filter(s => selectedIndices.has(s.index));
 
     if (selectedSubs.length === 0) {
-      alert(t('app.error.needSelectSentencesForAnnotation'));
+      toast.error(t('app.error.needSelectSentencesForAnnotation'));
       return;
     }
 
@@ -999,7 +1095,7 @@ function App() {
         console.log('AI 注释已中止');
       } else {
         console.error('AI 注释失败:', error);
-        alert(t('app.error.aiAnnotateFailed') + getApiErrorMessage(error));
+        toast.error(t('app.error.aiAnnotateFailed') + getApiErrorMessage(error));
       }
       setWorkflowPhase('screened');
     }
@@ -1053,7 +1149,7 @@ function App() {
         // 浏览器 SSE 流关闭时的假错误，忽略
       } else {
         console.error('AI 修正失败:', error);
-        alert(t('app.error.aiCorrectFailed') + getApiErrorMessage(error));
+        toast.error(t('app.error.aiCorrectFailed') + getApiErrorMessage(error));
         setWorkflowPhase('idle');
         return;
       }
@@ -1100,11 +1196,11 @@ function App() {
   const handleMTTranslate = async () => {
     const selectedSubs = subtitles.filter(s => selectedIndices.has(s.index));
     if (selectedSubs.length === 0) {
-      alert(t('app.error.needSelectSentencesForAnnotation'));
+      toast.error(t('app.error.needSelectSentencesForAnnotation'));
       return;
     }
     if (mtService === 'deepl' && !deeplApiKey) {
-      alert(t('app.error.deeplNeedApiKey'));
+      toast.error(t('app.error.deeplNeedApiKey'));
       return;
     }
     setWorkflowPhase('annotating');
@@ -1125,7 +1221,7 @@ function App() {
       setWorkflowPhase('annotated');
     } catch (error) {
       console.error('机器翻译失败:', error);
-      alert(t('app.error.mtTranslateFailed') + getApiErrorMessage(error));
+      toast.error(t('app.error.mtTranslateFailed') + getApiErrorMessage(error));
       setWorkflowPhase('screened');
     }
   };
@@ -1211,7 +1307,7 @@ function App() {
         console.log('重试已中止');
       } else {
         console.error('重试失败:', error);
-        alert(t('app.error.retryFailed') + getApiErrorMessage(error));
+        toast.error(t('app.error.retryFailed') + getApiErrorMessage(error));
       }
       setIsRecommending(false);
     }
@@ -1219,10 +1315,13 @@ function App() {
 
   // ── Phase 1: 处理媒体（不打包） ──
   const handleProcessMedia = async () => {
-    if (videoFiles.length === 0) { alert(t('app.error.needUploadVideo')); return; }
-    if (subtitles.length === 0) { alert(t('app.error.needLoadSubtitles')); return; }
-    if (selectedIndices.size === 0) { alert(t('app.error.needSelectOne')); return; }
-    if (isRecommending || workflowPhase === 'screening' || workflowPhase === 'annotating') return;
+    if (videoFiles.length === 0) { toast.error(t('app.error.needUploadVideo')); return; }
+    if (subtitles.length === 0) { toast.error(t('app.error.needLoadSubtitles')); return; }
+    if (selectedIndices.size === 0) { toast.error(t('app.error.needSelectOne')); return; }
+    if (isRecommending || workflowPhase === 'screening' || workflowPhase === 'annotating') {
+      toast.error(t('app.error.aiProcessingInProgress', 'AI 正在处理中，请等待完成后再操作'));
+      return;
+    }
 
     setProcessingPhase('media_processing');
     setProcessingSteps(MEDIA_PROCESSING_STEPS.map(s => ({ ...s, status: 'pending' as const })));
@@ -1266,13 +1365,20 @@ function App() {
       }
     }
 
+    // 检测是否使用了机器翻译（workflowPhase 为 annotated 但 annotationPurpose 为 null）
+    const usedMT = workflowPhase === 'annotated' && annotationPurpose === null;
+
     try {
       const { task_id } = await processAPI.uploadAndProcessMedia(
         videoFiles, perVideoSRTFiles, mergeMode, minDuration,
         apiKey || undefined, perVideoPreProcessed, apiBase || undefined, modelName || undefined,
         paddingStartMs, paddingEndMs, sourceLanguage, targetLanguage,
         customPrompt || undefined, annotationPurpose || undefined, annotationPrompt || undefined,
-        selectRecommendedOnly
+        selectRecommendedOnly,
+        usedMT ? mtService : undefined,
+        usedMT ? (mtService === 'deepl' ? deeplApiKey : mtService === 'openai' ? apiKey : undefined) : undefined,
+        usedMT && mtService === 'openai' ? (apiBase || undefined) : undefined,
+        usedMT && mtService === 'openai' ? (modelName || undefined) : undefined,
       );
       setTaskId(task_id);
 
@@ -1303,7 +1409,7 @@ function App() {
           if (progress.status === 'error') {
             clearInterval(pollInterval);
             const errMsg = getFriendlyMessage(progress.error_code, progress.error || undefined);
-            alert(t('app.error.processingFailedPoll', { error: errMsg }));
+            toast.error(t('app.error.processingFailedPoll', { error: errMsg }));
             setProcessingSteps(s => s.map(step => step.status === 'processing' ? { ...step, status: 'error' as const, error: errMsg } : step));
             setProcessingPhase('idle');
           }
@@ -1311,7 +1417,7 @@ function App() {
       }, 1000);
     } catch (error) {
       console.error('媒体处理失败:', error);
-      alert(t('app.error.processingFailedPoll', { error: getApiErrorMessage(error) }));
+      toast.error(t('app.error.processingFailedPoll', { error: getApiErrorMessage(error) }));
       setProcessingPhase('idle');
     }
   };
@@ -1353,7 +1459,7 @@ function App() {
           if (progress.status === 'error') {
             clearInterval(pollInterval);
             const errMsg = getFriendlyMessage(progress.error_code, progress.error || undefined);
-            alert(t('app.error.processingFailedPoll', { error: errMsg }));
+            toast.error(t('app.error.processingFailedPoll', { error: errMsg }));
             setProcessingSteps(s => s.map(step => step.status === 'processing' ? { ...step, status: 'error' as const, error: errMsg } : step));
             setProcessingPhase('awaiting_styles');
           }
@@ -1361,10 +1467,24 @@ function App() {
       }, 1000);
     } catch (error) {
       console.error('打包失败:', error);
-      alert(t('app.error.processingFailedPoll', { error: getApiErrorMessage(error) }));
+      toast.error(t('app.error.processingFailedPoll', { error: getApiErrorMessage(error) }));
       setProcessingPhase('awaiting_styles');
     }
   };
+
+  // 用 ref 保存 handleGenerateApkg 的最新版本，避免 useEffect 依赖问题
+  const handleGenerateApkgRef = useRef(handleGenerateApkg);
+  handleGenerateApkgRef.current = handleGenerateApkg;
+
+  // 批处理完成后自动触发打包
+  useEffect(() => {
+    console.log('[useEffect] batchDone/pendingPack 变化:', { batchDone, pendingPack });
+    if (batchDone && pendingPack) {
+      console.log('[useEffect] 自动触发打包');
+      setPendingPack(false);
+      handleGenerateApkgRef.current();
+    }
+  }, [batchDone, pendingPack]);
 
   // 下载文件
   const handleDownload = async () => {
@@ -1407,6 +1527,9 @@ function App() {
       transcribedVideoName.current = null;
       setWorkflowPhase('idle');
       setAnnotationPurpose(null);
+      batchTriggeredRef.current = false;
+      setIsBatchProcessing(false);
+      setBatchDone(false);
       setCardTheme('default');
       setCorrectionHandled(false);
       setCorrections(null);
@@ -1414,7 +1537,7 @@ function App() {
   
     } catch (error) {
       console.error('下载失败:', error);
-      alert(t('app.error.downloadFailed') + (apkgUrl || '/download/' + encodeURIComponent(apkgPath)));
+      toast.error(t('app.error.downloadFailed') + (apkgUrl || '/download/' + encodeURIComponent(apkgPath)));
     }
   };
 
@@ -1525,7 +1648,7 @@ function App() {
                   try {
                     await processAPI.openLogs();
                   } catch {
-                    alert(t('app.step1.cantOpenLogFolder'));
+                    toast.error(t('app.step1.cantOpenLogFolder'));
                   }
                 }}
               >
@@ -1769,6 +1892,9 @@ function App() {
                       setCorrectionHandled(false);
                       setCorrections(null);
                       setDeselectedCorrections(new Set());
+                      batchTriggeredRef.current = false;
+                      setIsBatchProcessing(false);
+                      setBatchDone(false);
                                   }}
                     label={t('app.step1.videoFile')}
                     icon="video"
@@ -2550,8 +2676,8 @@ function App() {
               </CardHeader>
               <CardContent>
 
-                {/* 3a: 选择用途 */}
-                {(workflowPhase !== 'annotating' && workflowPhase !== 'annotated') && (
+                {/* 3a: 选择用途（注释进行中/完成时隐藏，但仅机器翻译完成时仍可选） */}
+                {(workflowPhase !== 'annotating' && (workflowPhase !== 'annotated' || annotationPurpose === null)) && (
                   <>
                   {/* 注释提示词编辑器 */}
                   <div className="mb-4">
@@ -2669,8 +2795,8 @@ function App() {
                   </div>
                 )}
 
-                {/* 3c: 注释完成 */}
-                {workflowPhase === 'annotated' && (
+                {/* 3c: 注释完成（仅当使用了 AI 注释时显示，机器翻译不会设置 annotationPurpose） */}
+                {workflowPhase === 'annotated' && annotationPurpose !== null && (
                   <div className="space-y-4">
                     <div className="flex items-center gap-3">
                       <div className="p-3 bg-green-50 border border-green-200 rounded-lg dark:bg-green-900/20 dark:border-green-800 flex-1">
@@ -2807,8 +2933,8 @@ function App() {
                     </div>
                   </div>
                 )}
-                {/* 翻译完成 */}
-                {workflowPhase === 'annotated' && (
+                {/* 翻译完成（仅当使用了机器翻译时显示，即 annotationPurpose 为 null） */}
+                {workflowPhase === 'annotated' && annotationPurpose === null && (
                   <div className="space-y-4">
                     <div className="flex items-center gap-3">
                       <div className="p-3 bg-green-50 border border-green-200 rounded-lg dark:bg-green-900/20 dark:border-green-800 flex-1">
@@ -2854,10 +2980,12 @@ function App() {
                       variant="primary"
                       className="w-full"
                       onClick={handleProcessMedia}
-                      disabled={selectedIndices.size === 0 || videoFiles.length === 0}
                     >
                       {t('app.step4.processMedia', { count: selectedIndices.size })}
                     </Button>
+                    {selectedIndices.size === 0 && (
+                      <p className="text-xs text-amber-600 dark:text-amber-400">{t('app.step4.needSelectSubtitles', '请至少在步骤 2 中选中一条字幕')}</p>
+                    )}
                   </div>
                 )}
 
@@ -2937,12 +3065,60 @@ function App() {
                         )}
                       </>
                     )}
+                    {videoFiles.length > 1 && isBatchProcessing && (
+                      <Card className="border-primary-300 dark:border-primary-700">
+                        <CardContent className="py-4">
+                          <div className="flex items-center gap-3">
+                            <div className="animate-spin w-5 h-5 border-2 border-primary-500 border-t-transparent rounded-full" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                                {t('app.batch.title')}
+                              </p>
+                              <p className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
+                                {batchStepMessage || t('app.batch.processing', { completed: batchCompleted, total: batchRemaining })}
+                              </p>
+                              <div className="mt-2 bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">
+                                <div
+                                  className="bg-primary-500 h-1.5 rounded-full transition-all duration-300"
+                                  style={{ width: `${batchRemaining > 0 ? (batchCompleted / batchRemaining) * 100 : 0}%` }}
+                                />
+                              </div>
+                            </div>
+                            <span className="text-xs text-gray-400 flex-shrink-0">
+                              {batchCompleted}/{batchRemaining}
+                            </span>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+                    {videoFiles.length > 1 && batchDone && (
+                      <p className="text-sm text-green-600 dark:text-green-400">
+                        {t('app.batch.title')} — {batchCompleted}/{batchRemaining} {t('app.batch.done', '完成')}
+                      </p>
+                    )}
                     <Button
                       variant="primary"
                       className="w-full"
-                      onClick={handleGenerateApkg}
+                      disabled={isBatchProcessing}
+                      onClick={() => {
+                        console.log('[按钮点击] 状态:', { videoCount: videoFiles.length, batchDone, isBatchProcessing });
+                        if (videoFiles.length > 1 && !batchDone && !isBatchProcessing) {
+                          // 多视频且未批处理：先触发批处理，完成后自动打包
+                          console.log('[按钮点击] 触发批处理 + 延迟打包');
+                          setPendingPack(true);
+                          handleTriggerBatch();
+                        } else {
+                          // 单视频或批处理已完成：直接打包
+                          console.log('[按钮点击] 直接打包');
+                          handleGenerateApkg();
+                        }
+                      }}
                     >
-                      {t('app.step4.generateApkg', { count: processedCards?.length || 0 })}
+                      {videoFiles.length > 1 && !batchDone
+                        ? (isBatchProcessing
+                          ? t('app.batch.processing', { completed: batchCompleted, total: batchRemaining })
+                          : t('app.step4.generateApkgWithBatch', { count: videoFiles.length - 1 }))
+                        : t('app.step4.generateApkg', { count: processedCards?.length || 0 })}
                     </Button>
                   </div>
                 )}

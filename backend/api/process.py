@@ -17,6 +17,9 @@ import asyncio
 import zipfile
 import tempfile
 from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
 
 from models.schemas import ProcessRequest, ProcessResult, ProcessedCard, ProcessProgress
 
@@ -28,8 +31,9 @@ if getattr(sys, 'frozen', False):
 else:
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from main import run as process_cards, generate_apkg
+from main import run as process_cards, generate_apkg, _process_video_to_media
 from .prompts import build_screening_prompt as _build_screening_prompt, build_annotation_prompt as _build_annotation_prompt
+from models.schemas import BatchProcessRequest, BatchProcessResponse
 
 from errors import translate_error, get_message, ErrorCode, ClipLingoError
 from utils.zip_export import generate_csv_with_media_paths
@@ -101,6 +105,10 @@ async def upload_and_process(
     annotation_prompt_criteria: Optional[str] = Form(None),
     select_recommended_only: bool = Form(False),
     stop_after_media: bool = Form(False),
+    mt_service: Optional[str] = Form(None),
+    mt_api_key: Optional[str] = Form(None),
+    mt_api_base: Optional[str] = Form(None),
+    mt_model_name: Optional[str] = Form(None),
 ):
     """
     上传视频和字幕文件，后台异步处理
@@ -130,13 +138,16 @@ async def upload_and_process(
     task_dir = TEMP_DIR / task_id
     task_dir.mkdir(exist_ok=True)
 
-    # 保存所有上传的文件
+    # 保存所有上传的文件（视频存到 videos/ 子目录，供批处理复用）
+    videos_subdir = task_dir / "videos"
+    videos_subdir.mkdir(exist_ok=True)
+
     video_paths = []
     subtitle_paths = []
     video_names = []
 
     for i, video in enumerate(videos):
-        v_path = task_dir / video.filename
+        v_path = videos_subdir / video.filename
         with open(v_path, "wb") as f:
             shutil.copyfileobj(video.file, f)
         video_paths.append(str(v_path))
@@ -200,6 +211,7 @@ async def upload_and_process(
             "output_dir": output_dir,
             "merge": merge,
             "total_videos": len(videos),
+            "select_recommended_only": select_recommended_only,
         }
 
     def progress_callback(step, total_steps, message, details=None):
@@ -252,6 +264,10 @@ async def upload_and_process(
                 annotation_system_prompt=annotation_full_prompt,
                 select_recommended_only=select_recommended_only,
                 stop_after_media=stop_after_media,
+                mt_service=mt_service,
+                mt_api_key=mt_api_key,
+                mt_api_base=mt_api_base,
+                mt_model_name=mt_model_name,
             )
             # 完整模式才传样式参数；两阶段模式在 Phase 2 才传
             if not stop_after_media:
@@ -393,7 +409,9 @@ async def upload_and_process(
                     "error_code": error_code.value
                 })
         finally:
-            shutil.rmtree(task_dir, ignore_errors=True)
+            # stop_after_media=True 时保留 task_dir（含 videos/），供批处理复用
+            if not stop_after_media:
+                shutil.rmtree(task_dir, ignore_errors=True)
 
     # 在后台线程中执行
     thread = threading.Thread(target=run_processing, daemon=True)
@@ -563,6 +581,10 @@ async def generate_apkg_endpoint(
                     "error": error_msg,
                     "error_code": error_code.value,
                 })
+        finally:
+            # Phase 2 完成，清理 Phase 1 保留的 task_dir（含 videos/）
+            task_dir = TEMP_DIR / task_id
+            shutil.rmtree(task_dir, ignore_errors=True)
 
     thread = threading.Thread(target=run_packing, daemon=True)
     thread.start()
@@ -755,3 +777,323 @@ async def list_models(
     except Exception as e:
         _, error_msg = translate_error(e)
         raise HTTPException(status_code=500, detail=f"获取模型列表失败: {error_msg}")
+
+
+# ─── Batch Process Endpoint ─────────────────────────────────────────────
+
+def _sse_encode(data: dict) -> str:
+    """Encode a dict as an SSE data line."""
+    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+@router.post("/batch-process")
+async def batch_process(request: BatchProcessRequest):
+    """
+    批量处理剩余视频 — 复用首视频的 AI 配置。
+
+    每个视频运行完整 pipeline（Whisper → 解析 → 修正 → 筛选 → 注释 → 媒体切割），
+    通过 SSE 返回逐视频进度，处理完成后返回结构化结果。
+    """
+    from collections import deque
+
+    # 从 task_id 查找 temp 目录
+    original_task_dir = TEMP_DIR / request.task_id
+    if not original_task_dir.exists():
+        return StreamingResponse(
+            iter([_sse_encode({"type": "error", "message": "原始任务目录不存在"})]),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache"},
+        )
+
+    videos_dir = original_task_dir / "videos"
+    if not videos_dir.exists():
+        return StreamingResponse(
+            iter([_sse_encode({"type": "error", "message": "未找到视频文件目录"})]),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache"},
+        )
+
+    # 只处理前端发送的剩余视频（跳过第一个，已在 Phase 1 处理）
+    all_video_paths = sorted(videos_dir.iterdir())
+    if request.video_names:
+        # 按前端指定的文件名过滤
+        video_names = [
+            p for p in all_video_paths
+            if p.name in request.video_names
+        ]
+    else:
+        # 兼容旧逻辑：处理所有视频
+        video_names = all_video_paths
+
+    if len(video_names) == 0:
+        return StreamingResponse(
+            iter([_sse_encode({"type": "error", "message": "没有需要批量处理的视频"})]),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache"},
+        )
+
+    total_videos = len(video_names)
+    output_dir = str(original_task_dir.parent.parent / "output" / request.task_id)
+
+    # 复用首视频的 select_recommended_only 设置
+    with task_store_lock:
+        original_task = task_store.get(request.task_id, {})
+    original_select_recommended_only = original_task.get("select_recommended_only", False)
+
+    # 构建公共提示词
+    screen_full_prompt = None
+    annotation_full_prompt = None
+    if request.run_screening or request.run_annotation:
+        screen_full_prompt = _build_screening_prompt(
+            custom_prompt=request.custom_screen_prompt,
+            source_language=request.source_language,
+            target_language=request.target_language,
+        )
+
+        if request.run_annotation and request.annotation_purpose:
+            annotation_full_prompt = _build_annotation_prompt(
+                purpose=request.annotation_purpose,
+                source_language=request.source_language,
+                target_language=request.target_language,
+                custom_criteria=request.custom_annotation_prompt,
+            )
+
+    # 构建视频名 → 字幕文件名的精确映射（来自前端 subtitle_files）
+    subtitle_map: dict[str, str] = {}
+    if request.subtitle_files:
+        for idx, vname in enumerate(request.video_names):
+            if idx < len(request.subtitle_files) and request.subtitle_files[idx]:
+                subtitle_map[vname] = request.subtitle_files[idx]
+
+    async def event_generator():
+        all_processed = []
+        total_cards = 0
+
+        yield _sse_encode({"type": "start", "total_videos": total_videos})
+
+        try:
+            for i, vp in enumerate(video_names):
+                # 优先使用前端传递的精确字幕映射
+                subtitle_path = ""
+                sub_name = subtitle_map.get(vp.name)
+                if sub_name:
+                    sub_file = original_task_dir / sub_name
+                    if sub_file.exists() and sub_file.stat().st_size > 0:
+                        subtitle_path = str(sub_file)
+
+                # 回退：按视频 stem 匹配字幕文件
+                if not subtitle_path:
+                    srt_candidates = list(original_task_dir.glob(f"{vp.stem}*.*"))
+                    srt_paths = [s for s in srt_candidates if s.suffix.lower() in ('.srt', '.ass', '.vtt')]
+                    subtitle_path = str(srt_paths[0]) if srt_paths else ""
+
+                # 线程池执行同步的 _process_video_to_media
+                # 使用 list 代替 deque（线程安全 + 可被 async 轮询）
+                progress_queue: list = []
+                processing_error: list = []  # [exc] if failed
+                processing_done = asyncio.Event()
+
+                def thread_progress(step, total_steps, message, details=None):
+                    progress_queue.append({"step": step, "message": message})
+
+                def run_in_thread():
+                    try:
+                        result = _process_video_to_media(
+                            video_path=str(vp),
+                            subtitle_path=subtitle_path,
+                            output_dir=output_dir,
+                            index_offset=(i + 1) * 10000,
+                            video_index=i + 1,
+                            total_videos=total_videos + 1,
+                            pre_processed=None,
+                            api_key=request.api_key,
+                            api_base=request.api_base,
+                            model_name=request.model_name,
+                            min_duration=request.min_duration,
+                            padding_start_ms=200,
+                            padding_end_ms=200,
+                            source_language=request.source_language,
+                            target_language=request.target_language,
+                            screen_system_prompt=screen_full_prompt,
+                            annotation_system_prompt=annotation_full_prompt,
+                            select_recommended_only=original_select_recommended_only,
+                            mt_service=request.mt_service,
+                            mt_api_key=request.mt_api_key,
+                            mt_api_base=request.mt_api_base,
+                            mt_model_name=request.mt_model_name,
+                            progress_callback=thread_progress,
+                        )
+                        # 把结果放进队列，主循环取出
+                        progress_queue.append(("__result__", result))
+                    except Exception as exc:
+                        processing_error.append(exc)
+                    finally:
+                        # 线程安全：在事件循环中设置 event
+                        asyncio.run_coroutine_threadsafe(
+                            _set_event(processing_done),
+                            loop,
+                        )
+
+                async def _set_event(ev):
+                    ev.set()
+
+                loop = asyncio.get_event_loop()
+                thread = threading.Thread(target=run_in_thread, daemon=True)
+                thread.start()
+
+                # 边处理边发送进度事件（防止 SSE 超时断开）
+                pp_result = None
+                while not processing_done.is_set():
+                    # 发送积攒的进度消息
+                    while progress_queue:
+                        item = progress_queue.pop(0)
+                        if isinstance(item, tuple) and item[0] == "__result__":
+                            pp_result = item[1]
+                        else:
+                            yield _sse_encode({
+                                "type": "video_progress",
+                                "video_index": i,
+                                "step": item["step"],
+                                "message": item["message"],
+                            })
+                    await asyncio.sleep(0.5)
+                    # 发送心跳保持连接活跃
+                    yield _sse_encode({
+                        "type": "video_progress",
+                        "video_index": i,
+                        "step": 0,
+                        "message": "处理中...",
+                    })
+
+                # 处理剩余队列
+                while progress_queue:
+                    item = progress_queue.pop(0)
+                    if isinstance(item, tuple) and item[0] == "__result__":
+                        pp_result = item[1]
+                    else:
+                        yield _sse_encode({
+                            "type": "video_progress",
+                            "video_index": i,
+                            "step": item["step"],
+                            "message": item["message"],
+                        })
+
+                if processing_error:
+                    exc = processing_error[0]
+                    yield _sse_encode({"type": "error", "message": f"处理视频失败: {exc}"})
+                    yield _sse_encode({
+                        "type": "complete",
+                        "videos_processed": i,
+                        "total_cards": total_cards,
+                        "error": True,
+                    })
+                    return
+
+                if pp_result is None:
+                    yield _sse_encode({"type": "error", "message": "处理视频返回空结果"})
+                    yield _sse_encode({
+                        "type": "complete",
+                        "videos_processed": i,
+                        "total_cards": total_cards,
+                        "error": True,
+                    })
+                    return
+
+                processed, video_stem = pp_result
+                cards_count = len(processed)
+
+                # 为每个处理结果添加 video_stem 字段（用于独立模式分组）
+                for p in processed:
+                    p["video_stem"] = vp.stem
+
+                yield _sse_encode({
+                    "type": "video_done",
+                    "video_index": i,
+                    "video_name": vp.stem,
+                    "cards": cards_count,
+                })
+
+                all_processed.extend(processed)
+                total_cards += cards_count
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            yield _sse_encode({"type": "error", "message": str(e)})
+            # 即使出错也必须发送 complete 事件，否则前端 SSE 流会异常关闭
+            yield _sse_encode({
+                "type": "complete",
+                "videos_processed": 0,
+                "total_cards": 0,
+                "error": True,
+            })
+            return
+
+        # 录制已学单词
+        try:
+            from services.progress import mark_words_learned
+            words_to_record = [
+                {"word": p.get("word", ""), "definition": p.get("definition", "")}
+                for p in all_processed
+                if p.get("word")
+            ]
+            if words_to_record:
+                mark_words_learned(words_to_record)
+        except Exception as e:
+            print(f"记录已学单词失败（不影响主流程）: {e}")
+
+        # 合并批处理结果到 manifest（供 generate_apkg 使用）
+        manifest_path = Path(output_dir) / "processed_cards.json"
+        print(f"[批处理] 准备合并结果到 manifest: {manifest_path}")
+        print(f"[批处理] 本次处理了 {len(all_processed)} 张卡片")
+
+        if manifest_path.exists():
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                original_count = len(manifest.get("processed", []))
+                print(f"[批处理] manifest 已存在，原有 {original_count} 张卡片")
+
+                if manifest.get("merge", True):
+                    # 合并模式：追加到 processed 列表
+                    manifest["processed"].extend(all_processed)
+                    print(f"[批处理] 合并后共 {len(manifest['processed'])} 张卡片")
+                else:
+                    # 独立模式：按 video_stem 分组并追加到 results
+                    if "results" not in manifest:
+                        manifest["results"] = []
+
+                    # 按 video_stem 分组
+                    grouped = {}
+                    for p in all_processed:
+                        stem = p.get("video_stem", "unknown")
+                        if stem not in grouped:
+                            grouped[stem] = []
+                        grouped[stem].append(p)
+
+                    # 追加每个视频的 result
+                    for stem, items in grouped.items():
+                        manifest["results"].append({
+                            "video_name": stem,
+                            "cards_count": len(items),
+                            "processed": items,
+                        })
+
+                    # 更新总卡片数
+                    if "total_cards" in manifest:
+                        manifest["total_cards"] = sum(r["cards_count"] for r in manifest["results"])
+
+                manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+                logger.info(f"[批处理] manifest 写入成功: {manifest_path}")
+            except Exception as e:
+                logger.error(f"[批处理] 合并结果到 manifest 失败: {e}", exc_info=True)
+        else:
+            logger.warning(f"[批处理] manifest 文件不存在，无法合并: {manifest_path}")
+
+        yield _sse_encode({
+            "type": "complete",
+            "videos_processed": total_videos,
+            "total_cards": total_cards,
+        })
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
