@@ -105,6 +105,7 @@
       "advancedBatch1": "Multi-video is always available — after uploading the first video, an \"Add More\" drop zone stays visible for easy batch import",
       "advancedBatch2": "Assign subtitles per video; videos without subtitles auto-trigger ASR transcription. Remove individual videos at any time.",
       "advancedBatch3": "Merge mode (default): all videos' cards combined into one deck. Independent mode: each video gets its own deck. The progress bar shows \"Video X/N\" in real time.",
+      "advancedBatch4": "Failure-tolerant: if a video fails mid-batch, it is skipped automatically and the remaining videos continue; on completion you see \"X succeeded / Y failed\". Successful results are kept — re-run the batch to fill in only the failed videos (completed ones are skipped, no duplicate cards).",
       "advancedAiTitle": "AI Features (Optional)",
       "advancedAi1": "Two-phase AI workflow: Screening (learning value assessment) → Annotation (translation + notes)",
       "advancedAi2": "Both phase prompts independently customizable with preset templates",

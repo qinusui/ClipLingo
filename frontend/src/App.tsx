@@ -1789,6 +1789,7 @@ function App() {
                       <li>{t('app.help.advancedBatch1')}</li>
                       <li>{t('app.help.advancedBatch2')}</li>
                       <li>{t('app.help.advancedBatch3')}</li>
+                      <li>{t('app.help.advancedBatch4')}</li>
                     </ul>
                   </div>
                   <div>
