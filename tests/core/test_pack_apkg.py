@@ -274,7 +274,24 @@ class TestCreateApkg:
         assert Path(result).exists()
         assert result.endswith(".apkg")
 
-    def test_create_apkg_deck_name_from_stem(self, tmp_path):
+    def test_create_apkg_missing_output_raises_cliplingo_error(self, tmp_path):
+        """保存后输出文件不存在应抛出 ClipLingoError(INTERNAL_ERROR)"""
+        from errors import ClipLingoError, ErrorCode
+
+        # 不创建 output 目录：mock 保存为 no-op 后，output_path 必然不存在
+        output_dir = tmp_path / "output"
+
+        with patch("core.pack_apkg.save_deck_with_media") as mock_save:
+            mock_save.return_value = None
+            with pytest.raises(ClipLingoError) as exc_info:
+                create_apkg(
+                    video_name="test_video.mp4",
+                    cards=[],
+                    output_dir=str(output_dir),
+                    audio_dir=str(tmp_path),
+                    screenshot_dir=str(tmp_path),
+                )
+        assert exc_info.value.code == ErrorCode.INTERNAL_ERROR
         """牌组名应取自视频文件名的 stem"""
         output_dir = tmp_path / "output"
         output_dir.mkdir()

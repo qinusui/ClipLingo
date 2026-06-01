@@ -160,6 +160,19 @@ class TestParseSRTBoundary:
         with pytest.raises(FileNotFoundError):
             parse_srt(tmp_path / "nonexistent.srt")
 
+    def test_non_utf8_encoding_raises_cliplingo_error(self, tmp_path):
+        """非 UTF-8 编码（如 GBK）应抛出 ClipLingoError(SUBTITLE_PARSE_FAILED)"""
+        from errors import ClipLingoError, ErrorCode
+
+        # GBK 编码的中文，含 UTF-8 无法解码的字节
+        p = tmp_path / "gbk.srt"
+        p.write_bytes(
+            "1\n00:00:01,000 --> 00:00:02,000\n你好世界\n".encode("gbk")
+        )
+        with pytest.raises(ClipLingoError) as exc_info:
+            parse_srt(p)
+        assert exc_info.value.code == ErrorCode.SUBTITLE_PARSE_FAILED
+
     def test_malformed_block_missing_lines(self, tmp_path):
         """字幕块少于3行应被跳过"""
         content = """\

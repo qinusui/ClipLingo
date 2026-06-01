@@ -3,8 +3,14 @@
 """
 
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+_root = str(Path(__file__).parent.parent)
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+from errors import ClipLingoError, ErrorCode
 
 
 @dataclass
@@ -46,8 +52,14 @@ def parse_srt(file_path: str | Path) -> list[Subtitle]:
     if not path.exists():
         raise FileNotFoundError(f"字幕文件不存在: {path}")
 
-    with open(path, 'r', encoding='utf-8') as f:
-        content = f.read()
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            content = f.read()
+    except UnicodeDecodeError as e:
+        raise ClipLingoError(
+            ErrorCode.SUBTITLE_PARSE_FAILED,
+            f"字幕文件不是 UTF-8 编码，请转换后重试: {e}"
+        ) from e
 
     subtitles = []
     # 分割每条字幕块

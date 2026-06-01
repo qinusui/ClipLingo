@@ -5,9 +5,15 @@
 import genanki
 import hashlib
 import os
+import sys
 from pathlib import Path
 from dataclasses import dataclass
 from core.templates import get_theme
+
+_root = str(Path(__file__).parent.parent)
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+from errors import ClipLingoError, ErrorCode
 
 
 @dataclass
@@ -287,7 +293,7 @@ def create_apkg(
         print(f"文件大小: {output_path.stat().st_size} bytes")
         return str(output_path)
     else:
-        raise Exception(f"牌组生成失败: {output_path} 不存在")
+        raise ClipLingoError(ErrorCode.INTERNAL_ERROR, f"牌组生成失败: {output_path} 不存在")
 
 
 if __name__ == '__main__':
