@@ -96,3 +96,31 @@ class TestWhisperEngine:
             result = engine.transcribe("/fake/audio.mp3")
             assert len(result) == 1
             assert result[0]["text"] == "Hello world"
+
+    def test_transcribe_raises_when_whisper_not_installed(self):
+        """load_model 返回 None（whisper 不可用）应抛出 ClipLingoError(WHISPER_NOT_INSTALLED)"""
+        import core.asr.whisper_engine  # noqa
+        import pytest
+        from errors import ClipLingoError, ErrorCode
+
+        engine = create_engine("faster_whisper", model_name="tiny")
+        with patch("core.whisper_manager.load_model", return_value=None):
+            with pytest.raises(ClipLingoError) as exc_info:
+                engine.transcribe("/fake/audio.mp3")
+        assert exc_info.value.code == ErrorCode.WHISPER_NOT_INSTALLED
+
+    def test_transcribe_wraps_runtime_errors(self):
+        """转录过程异常应归类为 ClipLingoError(WHISPER_TRANSCRIBE_FAILED)"""
+        import core.asr.whisper_engine  # noqa
+        import pytest
+        from errors import ClipLingoError, ErrorCode
+
+        engine = create_engine("faster_whisper", model_name="tiny")
+
+        mock_model = MagicMock()
+        mock_model.transcribe.side_effect = Exception("CUDA out of memory")
+
+        with patch("core.whisper_manager.load_model", return_value=mock_model):
+            with pytest.raises(ClipLingoError) as exc_info:
+                engine.transcribe("/fake/audio.mp3")
+        assert exc_info.value.code == ErrorCode.WHISPER_TRANSCRIBE_FAILED
