@@ -976,6 +976,28 @@ def _persist_batch_results(output_dir: str, all_processed: list, partial: bool =
         logger.error(f"[批处理] 合并结果到 manifest 失败: {e}", exc_info=True)
 
 
+def _completed_stems(output_dir: str) -> set:
+    """从 manifest 读取已成功处理的视频 stem 集合（合并/独立模式兼容）。
+
+    供 resume 判定哪些视频已完成、无需重跑。
+    """
+    manifest_path = Path(output_dir) / "processed_cards.json"
+    if not manifest_path.exists():
+        return set()
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception:
+        return set()
+    stems = set()
+    for p in manifest.get("processed", []):
+        if p.get("video_stem"):
+            stems.add(p["video_stem"])
+    for r in manifest.get("results", []):
+        if r.get("video_name"):
+            stems.add(r["video_name"])
+    return stems
+
+
 @router.post("/batch-process")
 async def batch_process(request: BatchProcessRequest):
     """
@@ -1271,3 +1293,39 @@ async def batch_process(request: BatchProcessRequest):
 
     return StreamingResponse(event_generator(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@router.post("/resume/{task_id}")
+async def resume_batch(task_id: str, request: BatchProcessRequest):
+    """
+    恢复中断 / 部分失败的批处理：仅重跑 manifest 中尚未完成的视频。
+
+    依赖 C3 持久化恢复的 task_store（video_names_order）与磁盘 manifest
+    （已完成视频 stem）。完成集合从 manifest 推导，未完成集合 = 上传序 - 已完成。
+    复用 batch_process 全流程的幂等去重，避免重复加卡；视频之间的边界生效。
+
+    AI 配置（提示词/语言/字幕映射）仍由请求体提供（与 batch_process 同 schema）。
+    """
+    with task_store_lock:
+        task = task_store.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在或已过期")
+
+    order = task.get("video_names_order") or []
+    if not order:
+        raise HTTPException(status_code=400, detail="任务缺少上传序信息，无法恢复")
+
+    # manifest 位于批处理 output 目录（与 batch_process 计算方式一致）
+    original_task_dir = TEMP_DIR / task_id
+    output_dir = str(original_task_dir.parent.parent / "output" / task_id)
+    completed = _completed_stems(output_dir)
+
+    remaining = [name for name in order if Path(name).stem not in completed]
+    if not remaining:
+        return {"task_id": task_id, "status": "nothing_to_resume", "remaining": []}
+
+    # 覆盖目标视频为待重跑集合，复用 batch_process 全流程（幂等去重保证不重复加卡）
+    request.task_id = task_id
+    request.video_names = remaining
+    return await batch_process(request)
+
