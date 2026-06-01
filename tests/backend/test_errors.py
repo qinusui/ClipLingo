@@ -1,4 +1,7 @@
 """测试 translate_error 错误归类，确保不会误判"""
+import errno
+import os
+
 import pytest
 from errors import translate_error, ErrorCode, ClipLingoError
 
@@ -52,3 +55,30 @@ class TestTranslateError:
         assert code == ErrorCode.SUBTITLE_PARSE_FAILED
         code2, _ = translate_error(RuntimeError("无法解析字幕，请检查编码"))
         assert code2 == ErrorCode.SUBTITLE_PARSE_FAILED
+
+
+class TestDiskSpaceError:
+    """磁盘空间不足应归类为 DISK_SPACE_INSUFFICIENT，而非被 ffmpeg/internal 误判"""
+
+    def test_enospc_oserror(self):
+        """文件写入 OSError(ENOSPC)，应归类为磁盘空间不足"""
+        exc = OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
+        code, msg = translate_error(exc)
+        assert code == ErrorCode.DISK_SPACE_INSUFFICIENT
+        assert "磁盘空间不足" in msg
+
+    def test_ffmpeg_wrapped_no_space_not_misclassified(self):
+        """含 ffmpeg 字样的磁盘满报错不应被误判为 FFMPEG_NOT_FOUND"""
+        exc = RuntimeError("ffmpeg failed: Output #0 ... No space left on device")
+        code, _ = translate_error(exc)
+        assert code == ErrorCode.DISK_SPACE_INSUFFICIENT
+
+    def test_plain_text_no_space(self):
+        """纯文本 No space left on device 也应匹配"""
+        code, _ = translate_error(Exception("[Errno 28] No space left on device"))
+        assert code == ErrorCode.DISK_SPACE_INSUFFICIENT
+
+    def test_not_enough_space_variant(self):
+        """Windows 'not enough space' 文案变体也应匹配"""
+        code, _ = translate_error(OSError("There is not enough space on the disk"))
+        assert code == ErrorCode.DISK_SPACE_INSUFFICIENT

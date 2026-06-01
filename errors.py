@@ -31,6 +31,7 @@ class ErrorCode(str, Enum):
     BCUT_TASK_FAILED = "BCUT_TASK_FAILED"
     TRANSLATE_SERVICE_FAILED = "TRANSLATE_SERVICE_FAILED"
     TRANSLATE_AUTH_FAILED = "TRANSLATE_AUTH_FAILED"
+    DISK_SPACE_INSUFFICIENT = "DISK_SPACE_INSUFFICIENT"
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
 
@@ -56,6 +57,7 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.BCUT_TASK_FAILED: "必剪语音识别任务失败，请重试或切换为本地 Whisper",
     ErrorCode.TRANSLATE_SERVICE_FAILED: "翻译服务请求失败，请检查网络或切换翻译服务",
     ErrorCode.TRANSLATE_AUTH_FAILED: "翻译服务认证失败，请稍后重试",
+    ErrorCode.DISK_SPACE_INSUFFICIENT: "磁盘空间不足，请清理磁盘后重试",
     ErrorCode.INTERNAL_ERROR: "程序内部错误，请重启程序后重试。如仍出现，请查看日志或提交 issue",
 }
 
@@ -104,6 +106,11 @@ _KEYWORD_MAP: list[tuple[str, ErrorCode]] = [
     # 模型
     ("model does not exist", ErrorCode.API_MODEL_NOT_FOUND),
     ("model_not_found", ErrorCode.API_MODEL_NOT_FOUND),
+    # 磁盘空间（须排在 ffmpeg 之前：磁盘满的报错常含 ffmpeg 字样，否则会被误判为"未安装"）
+    ("no space left on device", ErrorCode.DISK_SPACE_INSUFFICIENT),
+    ("enospc", ErrorCode.DISK_SPACE_INSUFFICIENT),
+    ("errno 28", ErrorCode.DISK_SPACE_INSUFFICIENT),
+    ("not enough space", ErrorCode.DISK_SPACE_INSUFFICIENT),
     # ffmpeg
     ("ffmpeg", ErrorCode.FFMPEG_NOT_FOUND),
     ("ffprobe", ErrorCode.FFMPEG_NOT_FOUND),
