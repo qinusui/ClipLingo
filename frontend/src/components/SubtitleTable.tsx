@@ -83,7 +83,7 @@ export const SubtitleTable = ({
           const rec = recommendations?.get(subtitle.index);
           return (
             <div
-              key={subtitle.index}
+              key={`${subtitle.index}-${subtitle.start_sec}`}
               onClick={() => onToggleSelection(subtitle.index)}
               className={cn(
                 'grid grid-cols-12 gap-2 px-4 py-3 border-b border-gray-100 transition-colors cursor-pointer dark:border-gray-700',

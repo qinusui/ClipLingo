@@ -130,6 +130,13 @@ function loadAIConfig() {
   return null;
 }
 
+// 全局重排字幕 index 为 1..N。selectedIndices / recommendations / corrections
+// 均以 index 为键，后端按文件从 1 编号，多视频拼接会导致 index 冲突、跨视频串号。
+// 所有 setSubtitles 入口都必须经过此函数，保证 index 全局唯一这一不变量。
+function reindexSubtitles(subs: SubtitleItem[]): SubtitleItem[] {
+  return subs.map((s, i) => ({ ...s, index: i + 1 }));
+}
+
 function App() {
   const { t, i18n } = useTranslation();
 
@@ -735,11 +742,12 @@ function App() {
       const result = await subtitleAPI.extractEmbeddedSubs(videoFiles[0], 0, minDuration);
 
       if (result.found && result.extracted) {
-        setSubtitles(result.extracted.subtitles as SubtitleItem[]);
-        setSelectedIndices(new Set(result.extracted.subtitles.map((s: SubtitleItem) => s.index)));
+        const extracted = reindexSubtitles(result.extracted.subtitles as SubtitleItem[]);
+        setSubtitles(extracted);
+        setSelectedIndices(new Set(extracted.map((s: SubtitleItem) => s.index)));
         setRecommendations(null);
         const counts = new Array(videoFiles.length).fill(0);
-        counts[0] = result.extracted.subtitles.length;
+        counts[0] = extracted.length;
         setSubtitleCounts(counts);
         transcribedVideoName.current = videoFiles[0].name;
         setExtractedSource(t('app.subtitleSource.extractedFromVideo', { codec: result.extracted.codec, language: result.extracted.language, total: result.extracted.total }));
@@ -805,11 +813,12 @@ function App() {
             setIsTranscribing(false);
             transcribingRef.current = false;
 
-            setSubtitles(progress.result.subtitles);
-            setSelectedIndices(new Set(progress.result.subtitles.map((s: SubtitleItem) => s.index)));
+            const transcribed = reindexSubtitles(progress.result.subtitles);
+            setSubtitles(transcribed);
+            setSelectedIndices(new Set(transcribed.map((s: SubtitleItem) => s.index)));
             setRecommendations(null);
             const counts = new Array(videoFiles.length).fill(0);
-            counts[0] = progress.result.subtitles.length;
+            counts[0] = transcribed.length;
             setSubtitleCounts(counts);
             transcribedVideoName.current = videoFiles[0].name;
             scrollToStep2();
@@ -866,7 +875,7 @@ function App() {
       // 并触发 React key 重复。这里全局重排成唯一 index。
       // 安全性：后端 _process_video_to_media 按位置 zip pre_processed，
       // 最终卡片 index 取自各视频重新解析的 SRT（本地 1..N），不依赖此处的值。
-      allSubtitles = allSubtitles.map((s, i) => ({ ...s, index: i + 1 }));
+      allSubtitles = reindexSubtitles(allSubtitles);
 
       setSubtitleCounts(counts);
       setSubtitles(allSubtitles);
