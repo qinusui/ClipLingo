@@ -82,3 +82,40 @@ class TestDiskSpaceError:
         """Windows 'not enough space' 文案变体也应匹配"""
         code, _ = translate_error(OSError("There is not enough space on the disk"))
         assert code == ErrorCode.DISK_SPACE_INSUFFICIENT
+
+
+class TestPermissionError:
+    """无写入权限应归类为 PERMISSION_DENIED，而非被 ffmpeg/internal 误判"""
+
+    def test_eacces_oserror(self):
+        """文件写入 OSError(EACCES)，应归类为权限不足"""
+        exc = OSError(errno.EACCES, os.strerror(errno.EACCES))
+        code, msg = translate_error(exc)
+        assert code == ErrorCode.PERMISSION_DENIED
+        assert "权限" in msg
+
+    def test_plain_text_permission_denied(self):
+        """纯文本 Permission denied 也应匹配"""
+        code, _ = translate_error(Exception("[Errno 13] Permission denied: 'output.apkg'"))
+        assert code == ErrorCode.PERMISSION_DENIED
+
+    def test_ffmpeg_wrapped_permission_not_misclassified(self):
+        """含 ffmpeg 字样的权限报错不应被误判为 FFMPEG_NOT_FOUND"""
+        exc = RuntimeError("ffmpeg failed: Permission denied")
+        code, _ = translate_error(exc)
+        assert code == ErrorCode.PERMISSION_DENIED
+
+
+class TestFfmpegFailedError:
+    """损坏视频的 ffmpeg 报错应归类为 FFMPEG_FAILED，而非 FFMPEG_NOT_FOUND"""
+
+    def test_invalid_data_found(self):
+        """ffmpeg 'Invalid data found' 应归类为媒体处理失败（文件损坏）"""
+        exc = RuntimeError("ffmpeg: Invalid data found when processing input")
+        code, _ = translate_error(exc)
+        assert code == ErrorCode.FFMPEG_FAILED
+
+    def test_ffmpeg_not_found_still_matches(self):
+        """ffmpeg 未找到仍归类为 FFMPEG_NOT_FOUND"""
+        code, _ = translate_error(FileNotFoundError("ffmpeg not found in PATH"))
+        assert code == ErrorCode.FFMPEG_NOT_FOUND

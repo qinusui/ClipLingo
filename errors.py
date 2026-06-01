@@ -32,6 +32,7 @@ class ErrorCode(str, Enum):
     TRANSLATE_SERVICE_FAILED = "TRANSLATE_SERVICE_FAILED"
     TRANSLATE_AUTH_FAILED = "TRANSLATE_AUTH_FAILED"
     DISK_SPACE_INSUFFICIENT = "DISK_SPACE_INSUFFICIENT"
+    PERMISSION_DENIED = "PERMISSION_DENIED"
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
 
@@ -58,6 +59,7 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.TRANSLATE_SERVICE_FAILED: "翻译服务请求失败，请检查网络或切换翻译服务",
     ErrorCode.TRANSLATE_AUTH_FAILED: "翻译服务认证失败，请稍后重试",
     ErrorCode.DISK_SPACE_INSUFFICIENT: "磁盘空间不足，请清理磁盘后重试",
+    ErrorCode.PERMISSION_DENIED: "无写入权限，请检查目标路径或以管理员身份运行",
     ErrorCode.INTERNAL_ERROR: "程序内部错误，请重启程序后重试。如仍出现，请查看日志或提交 issue",
 }
 
@@ -111,6 +113,13 @@ _KEYWORD_MAP: list[tuple[str, ErrorCode]] = [
     ("enospc", ErrorCode.DISK_SPACE_INSUFFICIENT),
     ("errno 28", ErrorCode.DISK_SPACE_INSUFFICIENT),
     ("not enough space", ErrorCode.DISK_SPACE_INSUFFICIENT),
+    # 权限（同理须排在 ffmpeg 之前：写入失败的报错常含 ffmpeg 字样）
+    ("permission denied", ErrorCode.PERMISSION_DENIED),
+    ("eacces", ErrorCode.PERMISSION_DENIED),
+    ("errno 13", ErrorCode.PERMISSION_DENIED),
+    # ffmpeg 处理失败（文件损坏）须排在宽泛 ffmpeg 之前，否则被误判为"未安装"
+    ("invalid data found", ErrorCode.FFMPEG_FAILED),
+    ("moov atom not found", ErrorCode.FFMPEG_FAILED),
     # ffmpeg
     ("ffmpeg", ErrorCode.FFMPEG_NOT_FOUND),
     ("ffprobe", ErrorCode.FFMPEG_NOT_FOUND),
