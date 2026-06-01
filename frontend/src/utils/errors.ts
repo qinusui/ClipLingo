@@ -31,6 +31,19 @@ export const ERROR_MESSAGES: Record<string, string> = {
   // AI 处理
   AI_PROCESS_FAILED: 'AI 处理失败，请检查 API 配置',
 
+  // 必剪 ASR（Bcut）
+  BCUT_RATE_LIMITED: '必剪语音识别次数已达上限，请12小时后再试或切换为本地 Whisper',
+  BCUT_UPLOAD_FAILED: '必剪语音上传失败，请检查网络连接或切换为本地 Whisper',
+  BCUT_TASK_FAILED: '必剪语音识别任务失败，请重试或切换为本地 Whisper',
+
+  // 翻译服务
+  TRANSLATE_SERVICE_FAILED: '翻译服务请求失败，请检查网络或切换翻译服务',
+  TRANSLATE_AUTH_FAILED: '翻译服务认证失败，请稍后重试',
+
+  // 文件系统
+  DISK_SPACE_INSUFFICIENT: '磁盘空间不足，请清理磁盘后重试',
+  PERMISSION_DENIED: '无写入权限，请检查目标路径或以管理员身份运行',
+
   // 通用
   INTERNAL_ERROR: '程序内部错误，请重启程序后重试。如仍出现，请查看日志或提交 issue',
 }
