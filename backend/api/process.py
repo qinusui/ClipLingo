@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 import threading
+import time
 import uuid
 import asyncio
 import zipfile
@@ -50,6 +51,77 @@ TEMP_DIR.mkdir(parents=True, exist_ok=True)
 # 任务进度存储 (task_id -> progress dict)
 task_store: dict = {}
 task_store_lock = threading.Lock()
+
+# 任务持久化文件（重启恢复 + TTL 清理）：frozen 模式写 %APPDATA%
+if getattr(sys, 'frozen', False):
+    TASKS_FILE = Path(os.environ.get('APPDATA', os.path.expanduser('~'))) / 'ClipLingo' / 'tasks.json'
+else:
+    TASKS_FILE = TEMP_DIR / "tasks.json"
+
+# 过期任务保留时长（秒）：超过则启动加载时丢弃
+TASK_TTL_SECONDS = 24 * 3600
+
+# 仅持久化重启恢复 / resume 所需的耐久字段，
+# 排除大块 result/cards 与高频心跳字段（step/message/details）
+_DURABLE_TASK_FIELDS = (
+    "status",
+    "output_dir",
+    "merge",
+    "total_videos",
+    "select_recommended_only",
+    "video_names_order",
+    "error",
+    "error_code",
+    "created_at",
+)
+
+
+def _durable_task_view(task: dict) -> dict:
+    """提取单个 task 的耐久子集（用于落盘）。"""
+    return {k: task[k] for k in _DURABLE_TASK_FIELDS if k in task}
+
+
+def _flush_tasks() -> None:
+    """将 task_store 的耐久子集原子写入 tasks.json。
+
+    注意：调用方必须已持有 task_store_lock（本函数不再加锁，避免重入死锁）。
+    """
+    try:
+        snapshot = {tid: _durable_task_view(t) for tid, t in task_store.items()}
+        TASKS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = TASKS_FILE.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(TASKS_FILE)
+    except Exception as e:
+        logger.warning("持久化 tasks.json 失败: %s", e)
+
+
+def _load_tasks() -> None:
+    """启动时从 tasks.json 恢复 task_store，并按 TTL 丢弃过期任务。"""
+    if not TASKS_FILE.exists():
+        return
+    try:
+        data = json.loads(TASKS_FILE.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning("加载 tasks.json 失败，已忽略: %s", e)
+        return
+    if not isinstance(data, dict):
+        return
+    now = time.time()
+    with task_store_lock:
+        for tid, t in data.items():
+            if not isinstance(t, dict):
+                continue
+            created = t.get("created_at", now)
+            if now - created > TASK_TTL_SECONDS:
+                continue
+            task_store[tid] = t
+        # 写回已清理过期项的快照
+        _flush_tasks()
+
+
+# 模块加载时从磁盘恢复任务并清理过期项（重启后 resume 可用）
+_load_tasks()
 
 
 def _to_url(file_path: str) -> str:
@@ -215,7 +287,9 @@ async def upload_and_process(
             # 上传序的视频名列表：批处理据此定位 video_{idx}_selected.srt，
             # 避免用 videos_dir 字典序索引导致字幕错配
             "video_names_order": list(video_names),
+            "created_at": time.time(),
         }
+        _flush_tasks()
 
     def progress_callback(step, total_steps, message, details=None):
         with task_store_lock:
@@ -319,6 +393,7 @@ async def upload_and_process(
                                 "cards": [c.model_dump() for c in cards],
                             }
                         })
+                        _flush_tasks()
                 else:
                     all_results = result.get("results", [])
                     flat_cards = []
@@ -343,6 +418,7 @@ async def upload_and_process(
                                 "cards": [c.model_dump() for c in cards],
                             }
                         })
+                        _flush_tasks()
 
             elif merge:
                 apkg_filename = Path(result["apkg_path"]).name
@@ -365,6 +441,7 @@ async def upload_and_process(
                             "cards": [c.model_dump() for c in cards]
                         }
                     })
+                    _flush_tasks()
             else:
                 # 独立模式：返回多个牌组结果
                 all_results = result.get("results", [])
@@ -399,6 +476,7 @@ async def upload_and_process(
                             "cards": [c.model_dump() for c in cards]
                         }
                     })
+                    _flush_tasks()
 
         except Exception as e:
             import traceback
@@ -411,6 +489,7 @@ async def upload_and_process(
                     "error": error_msg,
                     "error_code": error_code.value
                 })
+                _flush_tasks()
         finally:
             # stop_after_media=True 时保留 task_dir（含 videos/），供批处理复用
             if not stop_after_media:
@@ -552,6 +631,7 @@ async def generate_apkg_endpoint(
                             "cards": [c.model_dump() for c in cards],
                         }
                     })
+                    _flush_tasks()
             else:
                 all_results = result.get("results", [])
                 flat_cards = []
@@ -585,6 +665,7 @@ async def generate_apkg_endpoint(
                             "cards": [c.model_dump() for c in cards],
                         }
                     })
+                    _flush_tasks()
 
         except Exception as e:
             import traceback
@@ -597,6 +678,7 @@ async def generate_apkg_endpoint(
                     "error": error_msg,
                     "error_code": error_code.value,
                 })
+                _flush_tasks()
         finally:
             # Phase 2 完成，清理 Phase 1 保留的 task_dir（含 videos/）
             task_dir = TEMP_DIR / task_id
@@ -632,6 +714,7 @@ async def cleanup_output(task_id: str):
     # 清理 task_store 中的记录
     with task_store_lock:
         task_store.pop(task_id, None)
+        _flush_tasks()
 
     return {"cleaned": cleaned}
 
