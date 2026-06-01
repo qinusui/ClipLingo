@@ -986,6 +986,8 @@ async def batch_process(request: BatchProcessRequest):
     async def event_generator():
         all_processed = []
         total_cards = 0
+        successes = 0
+        failures: list = []  # [{"video_index", "video_name", "message"}]
 
         yield _sse_encode({"type": "start", "total_videos": total_videos})
 
@@ -1106,28 +1108,38 @@ async def batch_process(request: BatchProcessRequest):
 
                 if processing_error:
                     exc = processing_error[0]
-                    # 持久化失败前已完成视频的结果，支持重试时跳过它们（可恢复批处理）
+                    # 单视频失败：持久化失败前已完成结果（幂等去重支持重试），
+                    # 记录失败并继续处理下一个视频，不再中止整批。
                     _persist_batch_results(output_dir, all_processed, partial=True)
-                    yield _sse_encode({"type": "error", "message": f"处理视频失败: {exc}"})
-                    yield _sse_encode({
-                        "type": "complete",
-                        "videos_processed": i,
-                        "total_cards": total_cards,
-                        "error": True,
+                    message = f"处理视频失败: {exc}"
+                    failures.append({
+                        "video_index": i,
+                        "video_name": vp.stem,
+                        "message": message,
                     })
-                    return
+                    yield _sse_encode({
+                        "type": "video_failed",
+                        "video_index": i,
+                        "video_name": vp.stem,
+                        "message": message,
+                    })
+                    continue
 
                 if pp_result is None:
-                    # 持久化失败前已完成视频的结果，支持重试时跳过它们（可恢复批处理）
                     _persist_batch_results(output_dir, all_processed, partial=True)
-                    yield _sse_encode({"type": "error", "message": "处理视频返回空结果"})
-                    yield _sse_encode({
-                        "type": "complete",
-                        "videos_processed": i,
-                        "total_cards": total_cards,
-                        "error": True,
+                    message = "处理视频返回空结果"
+                    failures.append({
+                        "video_index": i,
+                        "video_name": vp.stem,
+                        "message": message,
                     })
-                    return
+                    yield _sse_encode({
+                        "type": "video_failed",
+                        "video_index": i,
+                        "video_name": vp.stem,
+                        "message": message,
+                    })
+                    continue
 
                 processed, video_stem = pp_result
                 cards_count = len(processed)
@@ -1145,6 +1157,7 @@ async def batch_process(request: BatchProcessRequest):
 
                 all_processed.extend(processed)
                 total_cards += cards_count
+                successes += 1
 
         except Exception as e:
             import traceback
@@ -1162,12 +1175,15 @@ async def batch_process(request: BatchProcessRequest):
             return
 
         # 记录已学单词并合并结果到 manifest（供 generate_apkg 使用）
-        _persist_batch_results(output_dir, all_processed)
+        # 有失败时标记 partial，供前端与打包结果提示客户「牌组不完整」
+        _persist_batch_results(output_dir, all_processed, partial=bool(failures))
 
         yield _sse_encode({
             "type": "complete",
-            "videos_processed": total_videos,
+            "videos_processed": successes,
             "total_cards": total_cards,
+            "successes": successes,
+            "failures": failures,
         })
 
     return StreamingResponse(event_generator(), media_type="text/event-stream",

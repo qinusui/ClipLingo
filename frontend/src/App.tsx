@@ -600,6 +600,10 @@ function App() {
           setBatchStepMessage(event.message || '');
         } else if (event.type === 'video_done') {
           setBatchCompleted(prev => prev + 1);
+        } else if (event.type === 'video_failed') {
+          // 单视频失败：批处理继续，仅标记部分失败，最终在 complete 汇总
+          console.warn('[批处理] 视频失败，跳过继续:', event.video_name, event.message);
+          setBatchPartialFailed(true);
         } else if (event.type === 'complete') {
           if (event.error) {
             // 流异常关闭的兜底事件，不要当作成功完成
@@ -610,6 +614,14 @@ function App() {
             setPendingPack(false);
             batchTriggeredRef.current = false;
             return;
+          }
+          const failed = event.failures?.length ?? 0;
+          if (failed > 0) {
+            // 部分视频失败：成功项已落盘，提示「X 成功 / Y 失败」并允许重试失败项
+            console.warn(`[批处理] 完成（部分失败）：${event.successes ?? 0} 成功 / ${failed} 失败`);
+            toast.error(t('app.batch.partialFailed', { success: event.successes ?? 0, failed }));
+            setBatchPartialFailed(true);
+            batchTriggeredRef.current = false; // 允许对失败项重试
           }
           console.log(`批量处理完成：${event.total_cards} 张卡片`);
           setBatchDone(true);

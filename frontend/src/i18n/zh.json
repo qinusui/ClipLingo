@@ -310,6 +310,7 @@
       "button": "继续处理 {{count}} 个视频并打包",
       "processing": "正在批量处理... ({{completed}}/{{total}})",
       "error": "批量处理失败：",
+      "partialFailed": "批处理完成：{{success}} 个成功，{{failed}} 个失败。可重新触发批处理以补齐失败的视频。",
       "partialWarning": "部分视频处理失败，已保存已完成视频的结果。现在打包将生成不完整的牌组（仅含已成功的视频）；可重新触发批处理以补齐失败的视频。",
       "done": "完成",
       "progress": "{{done}}/{{total}} 完成",

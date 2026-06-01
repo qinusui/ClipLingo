@@ -764,7 +764,7 @@ export const processAPI = {
     },
     taskId: string,
     signal?: AbortSignal
-  ): AsyncGenerator<{ type: string; total_videos?: number; video_index?: number; step?: number; message?: string; video_name?: string; cards?: number; videos_processed?: number; total_cards?: number; error?: string }> {
+  ): AsyncGenerator<{ type: string; total_videos?: number; video_index?: number; step?: number; message?: string; video_name?: string; cards?: number; videos_processed?: number; total_cards?: number; successes?: number; failures?: { video_index: number; video_name: string; message: string }[]; error?: string }> {
     const response = await fetch(`${API_BASE_URL}/api/process/batch-process`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

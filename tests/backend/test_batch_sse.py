@@ -471,10 +471,10 @@ class TestSSEEventFormat:
 
 
 class TestBatchMidFailure:
-    """批处理中途失败：错误事件和部分结果"""
+    """批处理中途失败：失败跳过、继续处理后续视频（C1）"""
 
-    def test_second_video_fails_error_event(self, tmp_path):
-        """第一个视频成功后第二个失败，应发送 error 和 error=True 的 complete"""
+    def test_second_video_fails_emits_video_failed_and_continues(self, tmp_path):
+        """第二个视频失败应发送 video_failed，并继续；complete 汇总 successes/failures"""
         task_id = "test-midfail"
         temp_dir, output_dir = _make_fake_task(tmp_path, task_id, ["v2.mp4", "v3.mp4"])
         process_module.TEMP_DIR = temp_dir
@@ -502,16 +502,65 @@ class TestBatchMidFailure:
         # 第一个视频成功
         assert "video_done" in types
 
-        # 第二个视频失败
-        error_events = [e for e in events if e["type"] == "error"]
-        assert len(error_events) >= 1
-        assert "处理视频失败" in error_events[-1]["message"]
+        # 第二个视频失败：发送 video_failed（不再是 error/abort）
+        failed_events = [e for e in events if e["type"] == "video_failed"]
+        assert len(failed_events) == 1
+        assert failed_events[0]["video_index"] == 1
+        assert "处理视频失败" in failed_events[0]["message"]
 
-        # complete 事件带 error=True
+        # complete 正常结束（非 error），带 successes/failures 汇总
         complete = next(e for e in events if e["type"] == "complete")
-        assert complete.get("error") is True
-        # 只处理了 1 个视频
+        assert complete.get("error") is not True
+        assert complete["successes"] == 1
         assert complete["videos_processed"] == 1
+        assert len(complete["failures"]) == 1
+        assert complete["failures"][0]["video_name"] == "v3"
+
+    def test_middle_video_fails_third_still_processed(self, tmp_path):
+        """三视频，中间失败：第三个仍处理，最终汇总 2 成功 1 失败"""
+        task_id = "test-skip-continue"
+        temp_dir, output_dir = _make_fake_task(
+            tmp_path, task_id, ["v2.mp4", "v3.mp4", "v4.mp4"]
+        )
+        process_module.TEMP_DIR = temp_dir
+
+        v2_cards = [{"index": 10001, "text": "V2", "audio_path": "", "screenshot_path": ""}]
+        v4_cards = [{"index": 30001, "text": "V4", "audio_path": "", "screenshot_path": ""}]
+
+        call_count = [0]
+        def mock_process(**kwargs):
+            idx = call_count[0]
+            call_count[0] += 1
+            if idx == 0:
+                return v2_cards, "v2"
+            if idx == 1:
+                raise RuntimeError("第二个视频损坏")
+            return v4_cards, "v4"
+
+        with patch.object(process_module, "_process_video_to_media", side_effect=mock_process):
+            resp = client.post("/api/process/batch-process", json={
+                "task_id": task_id,
+                "video_names": ["v2.mp4", "v3.mp4", "v4.mp4"],
+                "subtitle_files": ["", "", ""],
+            })
+
+        events = _parse_sse_events(resp)
+
+        # 三个视频都尝试处理：v2、v4 成功，v3 失败
+        assert call_count[0] == 3
+        done = [e for e in events if e["type"] == "video_done"]
+        failed = [e for e in events if e["type"] == "video_failed"]
+        assert {e["video_name"] for e in done} == {"v2", "v4"}
+        assert [e["video_name"] for e in failed] == ["v3"]
+
+        complete = next(e for e in events if e["type"] == "complete")
+        assert complete["successes"] == 2
+        assert len(complete["failures"]) == 1
+
+        # 两个成功视频的卡片都已落盘
+        manifest = json.loads((output_dir / "processed_cards.json").read_text(encoding="utf-8"))
+        stems = {c.get("video_stem") for c in manifest["processed"]}
+        assert {"v2", "v4"} <= stems
 
     def test_partial_manifest_after_failure(self, tmp_path):
         """中途失败时，失败前已完成视频的卡片仍写入 manifest（可恢复批处理）"""
@@ -690,8 +739,8 @@ class TestBatchMidFailure:
         manifest = json.loads((output_dir / "processed_cards.json").read_text(encoding="utf-8"))
         assert manifest.get("partial") is False
 
-    def test_first_video_returns_none_error(self, tmp_path):
-        """_process_video_to_media 返回 None 时触发 error"""
+    def test_first_video_returns_none_failed(self, tmp_path):
+        """_process_video_to_media 返回 None 时记为失败（video_failed），不中止"""
         task_id = "test-none-result"
         temp_dir, _ = _make_fake_task(tmp_path, task_id, ["v2.mp4"])
         process_module.TEMP_DIR = temp_dir
@@ -707,11 +756,14 @@ class TestBatchMidFailure:
             })
 
         events = _parse_sse_events(resp)
-        error_events = [e for e in events if e["type"] == "error"]
-        assert any("空结果" in e["message"] for e in error_events)
+        failed = [e for e in events if e["type"] == "video_failed"]
+        assert len(failed) == 1
+        assert "空结果" in failed[0]["message"]
 
         complete = next(e for e in events if e["type"] == "complete")
-        assert complete.get("error") is True
+        assert complete.get("error") is not True
+        assert complete["successes"] == 0
+        assert len(complete["failures"]) == 1
 
 
 # ─── 字幕映射测试 ─────────────────────────────────────────────
