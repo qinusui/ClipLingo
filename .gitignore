@@ -84,4 +84,5 @@ bin/*.exe
 # E2E 测试与浏览器自动化产物（临时大文件，不入库）
 .playwright-mcp/
 tests/temp_videos/
+tests/e2e_fixtures/*.mp4
 subtitle-table.md
