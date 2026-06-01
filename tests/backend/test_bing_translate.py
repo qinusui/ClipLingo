@@ -28,8 +28,9 @@ class TestBingAuth:
             assert "edge.microsoft.com" in session.get.call_args[0][0]
 
     def test_auth_failure_raises(self):
-        """认证失败应抛出 RuntimeError"""
+        """认证失败应抛出 ClipLingoError(TRANSLATE_AUTH_FAILED)"""
         from core.translate.bing import BingTranslator
+        from errors import ClipLingoError, ErrorCode
 
         session = MagicMock()
         session.get.side_effect = Exception("Connection refused")
@@ -38,7 +39,8 @@ class TestBingAuth:
             try:
                 BingTranslator()
                 assert False, "应抛出异常"
-            except RuntimeError as e:
+            except ClipLingoError as e:
+                assert e.code == ErrorCode.TRANSLATE_AUTH_FAILED
                 assert "认证失败" in str(e)
 
 

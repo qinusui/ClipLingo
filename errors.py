@@ -88,6 +88,7 @@ _KEYWORD_MAP: list[tuple[str, ErrorCode]] = [
     ("authentication", ErrorCode.API_KEY_INVALID),
     ("unauthorized", ErrorCode.API_KEY_INVALID),
     ("401", ErrorCode.API_KEY_INVALID),
+    ("403", ErrorCode.API_KEY_INVALID),
     # 余额
     ("insufficient", ErrorCode.API_QUOTA_EXCEEDED),
     ("quota", ErrorCode.API_QUOTA_EXCEEDED),
@@ -133,16 +134,10 @@ _KEYWORD_MAP: list[tuple[str, ErrorCode]] = [
     ("无法解析字幕", ErrorCode.SUBTITLE_PARSE_FAILED),
     ("could not parse subtitle", ErrorCode.SUBTITLE_PARSE_FAILED),
     # Bcut ASR
-    ("rate limit", ErrorCode.BCUT_RATE_LIMITED),
     ("duration limit", ErrorCode.BCUT_RATE_LIMITED),
     ("call count limit", ErrorCode.BCUT_RATE_LIMITED),
     ("upload", ErrorCode.BCUT_UPLOAD_FAILED),
     ("asr task", ErrorCode.BCUT_TASK_FAILED),
-    # Translation
-    ("translate", ErrorCode.TRANSLATE_SERVICE_FAILED),
-    ("auth", ErrorCode.TRANSLATE_AUTH_FAILED),
-    ("401", ErrorCode.TRANSLATE_AUTH_FAILED),
-    ("403", ErrorCode.TRANSLATE_AUTH_FAILED),
 ]
 
 

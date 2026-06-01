@@ -14,6 +14,11 @@ import requests
 from .base import BaseTranslator
 from . import register_translator
 
+_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+from errors import ClipLingoError, ErrorCode
+
 logger = logging.getLogger(__name__)
 
 # DeepL 免费版和付费版的 API 端点不同
@@ -127,7 +132,7 @@ class DeepLTranslator(BaseTranslator):
             return []
 
         if not self.api_key:
-            raise RuntimeError("DeepL 翻译需要 API Key，请在设置中配置")
+            raise ClipLingoError(ErrorCode.API_KEY_MISSING, "DeepL 翻译需要 API Key，请在设置中配置")
 
         # 检查缓存
         cache = _get_diskcache()
@@ -167,13 +172,13 @@ class DeepLTranslator(BaseTranslator):
         except requests.exceptions.HTTPError as e:
             status = e.response.status_code if e.response is not None else 0
             if status == 403:
-                raise RuntimeError("DeepL API Key 无效或已过期")
+                raise ClipLingoError(ErrorCode.TRANSLATE_AUTH_FAILED, "DeepL API Key 无效或已过期")
             elif status == 456:
-                raise RuntimeError("DeepL API 配额已用尽（免费版每月 50 万字符）")
-            raise RuntimeError(f"DeepL 翻译请求失败: {e}")
+                raise ClipLingoError(ErrorCode.API_QUOTA_EXCEEDED, "DeepL API 配额已用尽（免费版每月 50 万字符）")
+            raise ClipLingoError(ErrorCode.TRANSLATE_SERVICE_FAILED, f"DeepL 翻译请求失败: {e}")
         except Exception as e:
             logger.error(f"DeepL 翻译请求失败: {e}")
-            raise RuntimeError(f"DeepL 翻译请求失败: {e}")
+            raise ClipLingoError(ErrorCode.TRANSLATE_SERVICE_FAILED, f"DeepL 翻译请求失败: {e}")
 
         # 缓存结果
         cache.set(ck, result, expire=CACHE_EXPIRE)

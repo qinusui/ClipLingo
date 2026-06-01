@@ -119,3 +119,27 @@ class TestFfmpegFailedError:
         """ffmpeg 未找到仍归类为 FFMPEG_NOT_FOUND"""
         code, _ = translate_error(FileNotFoundError("ffmpeg not found in PATH"))
         assert code == ErrorCode.FFMPEG_NOT_FOUND
+
+
+class TestAuthAndTranslateCodes:
+    """验证删除死规则后，认证/翻译错误码仍正确可达"""
+
+    def test_401_maps_to_api_key_invalid(self):
+        """401 归类为 API_KEY_INVALID（不被已删除的 translate 死规则影响）"""
+        code, _ = translate_error(RuntimeError("HTTP 401 Unauthorized"))
+        assert code == ErrorCode.API_KEY_INVALID
+
+    def test_403_maps_to_api_key_invalid(self):
+        """403 归类为 API_KEY_INVALID，而非旧的 TRANSLATE_AUTH_FAILED 死规则"""
+        code, _ = translate_error(RuntimeError("HTTP 403 Forbidden"))
+        assert code == ErrorCode.API_KEY_INVALID
+
+    def test_translate_auth_reachable_via_cliplingo_error(self):
+        """翻译认证失败通过 ClipLingoError 精确携带 TRANSLATE_AUTH_FAILED"""
+        code, _ = translate_error(ClipLingoError(ErrorCode.TRANSLATE_AUTH_FAILED, "DeepL Key 无效"))
+        assert code == ErrorCode.TRANSLATE_AUTH_FAILED
+
+    def test_translate_service_reachable_via_cliplingo_error(self):
+        """翻译服务失败通过 ClipLingoError 精确携带 TRANSLATE_SERVICE_FAILED"""
+        code, _ = translate_error(ClipLingoError(ErrorCode.TRANSLATE_SERVICE_FAILED, "Bing 请求失败"))
+        assert code == ErrorCode.TRANSLATE_SERVICE_FAILED

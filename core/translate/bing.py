@@ -18,6 +18,11 @@ import requests
 from .base import BaseTranslator
 from . import register_translator
 
+_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+from errors import ClipLingoError, ErrorCode
+
 logger = logging.getLogger(__name__)
 
 BING_AUTH_URL = "https://edge.microsoft.com/translate/auth"
@@ -88,7 +93,7 @@ class BingTranslator(BaseTranslator):
             self.auth_token = resp.text
         except Exception as e:
             logger.error(f"Bing 翻译认证失败: {e}")
-            raise RuntimeError(f"Bing 翻译认证失败: {e}")
+            raise ClipLingoError(ErrorCode.TRANSLATE_AUTH_FAILED, f"Bing 翻译认证失败: {e}")
 
     def translate(
         self,
@@ -141,9 +146,11 @@ class BingTranslator(BaseTranslator):
 
             resp.raise_for_status()
             result = [t["translations"][0]["text"] for t in resp.json()]
+        except ClipLingoError:
+            raise
         except Exception as e:
             logger.error(f"Bing 翻译请求失败: {e}")
-            raise RuntimeError(f"Bing 翻译请求失败: {e}")
+            raise ClipLingoError(ErrorCode.TRANSLATE_SERVICE_FAILED, f"Bing 翻译请求失败: {e}")
 
         # 缓存结果
         cache.set(ck, result, expire=CACHE_EXPIRE)

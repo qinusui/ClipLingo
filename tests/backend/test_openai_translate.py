@@ -64,14 +64,16 @@ class TestOpenAITranslate:
             assert call_kwargs["temperature"] == 0.3
 
     def test_no_api_key_raises(self):
-        """无 API Key 应抛出 RuntimeError"""
+        """无 API Key 应抛出 ClipLingoError(API_KEY_MISSING)"""
         from core.translate.openai_translate import OpenAITranslator
+        from errors import ClipLingoError, ErrorCode
 
         translator = OpenAITranslator(api_key="")
         try:
             translator.translate(["Hello"], "en", "zh")
             assert False, "应抛出异常"
-        except RuntimeError as e:
+        except ClipLingoError as e:
+            assert e.code == ErrorCode.API_KEY_MISSING
             assert "API Key" in str(e)
 
     def test_empty_input(self):
@@ -124,8 +126,9 @@ class TestOpenAITranslate:
             assert result[2] == ""
 
     def test_invalid_json_raises(self):
-        """AI 返回非 JSON 内容应抛出错误"""
+        """AI 返回非 JSON 内容应抛出 ClipLingoError(TRANSLATE_SERVICE_FAILED)"""
         from core.translate.openai_translate import OpenAITranslator
+        from errors import ClipLingoError, ErrorCode
 
         mock_cache = MagicMock()
         mock_cache.get.return_value = None
@@ -145,7 +148,8 @@ class TestOpenAITranslate:
             try:
                 translator.translate(["Hello"], "en", "zh")
                 assert False, "应抛出异常"
-            except RuntimeError as e:
+            except ClipLingoError as e:
+                assert e.code == ErrorCode.TRANSLATE_SERVICE_FAILED
                 assert "格式错误" in str(e)
 
     def test_text_truncation(self):

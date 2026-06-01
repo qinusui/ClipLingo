@@ -13,6 +13,11 @@ import sys
 from .base import BaseTranslator
 from . import register_translator
 
+_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+from errors import ClipLingoError, ErrorCode, translate_error
+
 logger = logging.getLogger(__name__)
 
 CACHE_EXPIRE = 86400 * 7  # 7 天
@@ -89,7 +94,7 @@ class OpenAITranslator(BaseTranslator):
             return []
 
         if not self.api_key:
-            raise RuntimeError("AI 翻译需要 API Key，请在设置中配置")
+            raise ClipLingoError(ErrorCode.API_KEY_MISSING, "AI 翻译需要 API Key，请在设置中配置")
 
         # 检查缓存
         cache = _get_diskcache()
@@ -132,10 +137,15 @@ class OpenAITranslator(BaseTranslator):
             result = result[:len(texts)]
         except json.JSONDecodeError:
             logger.error(f"AI 翻译返回非 JSON 内容: {content[:200] if content else 'empty'}")
-            raise RuntimeError("AI 翻译返回格式错误，请重试")
+            raise ClipLingoError(ErrorCode.TRANSLATE_SERVICE_FAILED, "AI 翻译返回格式错误，请重试")
         except Exception as e:
+            # 复用 translate_error 保留底层 API 错误的精确归类（Key 无效/配额/限流/超时），
+            # 无法识别时回退到 TRANSLATE_SERVICE_FAILED
+            code, _ = translate_error(e)
+            if code == ErrorCode.INTERNAL_ERROR:
+                code = ErrorCode.TRANSLATE_SERVICE_FAILED
             logger.error(f"AI 翻译请求失败: {e}")
-            raise RuntimeError(f"AI 翻译请求失败: {e}")
+            raise ClipLingoError(code, f"AI 翻译请求失败: {e}") from e
 
         # 缓存结果
         cache.set(ck, result, expire=CACHE_EXPIRE)

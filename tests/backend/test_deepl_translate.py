@@ -82,14 +82,16 @@ class TestDeepLTranslate:
             assert ("source_lang", "EN-US") in data
 
     def test_no_api_key_raises(self):
-        """无 API Key 应抛出 RuntimeError"""
+        """无 API Key 应抛出 ClipLingoError(API_KEY_MISSING)"""
         from core.translate.deepl import DeepLTranslator
+        from errors import ClipLingoError, ErrorCode
 
         translator = DeepLTranslator(api_key="")
         try:
             translator.translate(["Hello"], "en", "zh")
             assert False, "应抛出异常"
-        except RuntimeError as e:
+        except ClipLingoError as e:
+            assert e.code == ErrorCode.API_KEY_MISSING
             assert "API Key" in str(e)
 
     def test_empty_input(self):
@@ -119,9 +121,10 @@ class TestDeepLTranslate:
             session.post.assert_not_called()
 
     def test_quota_exceeded_raises(self):
-        """456 状态码应抛出配额用尽错误"""
+        """456 状态码应抛出配额用尽错误 ClipLingoError(API_QUOTA_EXCEEDED)"""
         import requests
         from core.translate.deepl import DeepLTranslator
+        from errors import ClipLingoError, ErrorCode
 
         mock_cache = MagicMock()
         mock_cache.get.return_value = None
@@ -141,13 +144,15 @@ class TestDeepLTranslate:
             try:
                 translator.translate(["Hello"], "en", "zh")
                 assert False, "应抛出异常"
-            except RuntimeError as e:
+            except ClipLingoError as e:
+                assert e.code == ErrorCode.API_QUOTA_EXCEEDED
                 assert "配额" in str(e)
 
     def test_invalid_key_raises(self):
-        """403 状态码应抛出 Key 无效错误"""
+        """403 状态码应抛出 Key 无效错误 ClipLingoError(TRANSLATE_AUTH_FAILED)"""
         import requests
         from core.translate.deepl import DeepLTranslator
+        from errors import ClipLingoError, ErrorCode
 
         mock_cache = MagicMock()
         mock_cache.get.return_value = None
@@ -167,7 +172,8 @@ class TestDeepLTranslate:
             try:
                 translator.translate(["Hello"], "en", "zh")
                 assert False, "应抛出异常"
-            except RuntimeError as e:
+            except ClipLingoError as e:
+                assert e.code == ErrorCode.TRANSLATE_AUTH_FAILED
                 assert "无效" in str(e)
 
 
