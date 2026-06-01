@@ -310,6 +310,7 @@
       "button": "Process {{count}} More Video(s) & Pack",
       "processing": "Processing batch... ({{completed}}/{{total}})",
       "error": "Batch processing failed: ",
+      "partialWarning": "Some videos failed to process. Results from completed videos have been saved. Packing now will produce an incomplete deck (only successful videos); re-run the batch to fill in the failed videos.",
       "done": "Done",
       "progress": "{{done}}/{{total}} completed",
       "downloadAllZip": "Download All ZIP",

@@ -6,3 +6,5 @@ faster-whisper==1.2.1
 certifi==2026.4.22
 modelscope>=1.27.0
 diskcache>=5.6
+pytest>=8.0
+pytest-asyncio>=1.0

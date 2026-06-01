@@ -81,9 +81,7 @@ bin/*.exe
 # Test runtime dirs
 *测试*/
 
-# Runtime PID tracking
-backend/pids.json
-.port
-
-# Binary files
-bin/*.exe
+# E2E 测试与浏览器自动化产物（临时大文件，不入库）
+.playwright-mcp/
+tests/temp_videos/
+subtitle-table.md

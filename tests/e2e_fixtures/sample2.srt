@@ -1,0 +1,15 @@
+1
+00:00:01,000 --> 00:00:04,000
+The quick brown fox jumps.
+
+2
+00:00:05,000 --> 00:00:08,000
+Over the lazy dog.
+
+3
+00:00:09,000 --> 00:00:12,000
+Pack my box with five dozen liquor jugs.
+
+4
+00:00:12,500 --> 00:00:14,500
+Goodbye for now.

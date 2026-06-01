@@ -404,6 +404,10 @@ def run(
             **common_kwargs,
         )
 
+        # 为每个卡片添加 video_stem 字段（用于独立模式分组和批处理合并一致性）
+        for p in processed:
+            p["video_stem"] = video_stem
+
         if merge:
             all_processed.extend(processed)
         elif stop_after_media:

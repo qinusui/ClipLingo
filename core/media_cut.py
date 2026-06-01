@@ -262,6 +262,13 @@ def process_media_items(
     video_duration = get_video_duration(video_path)
     items = apply_padding(items, video_duration, padding_start_ms, padding_end_ms)
 
+    # 过滤掉超出视频时长的条目（字幕时间戳可能超出视频范围）
+    original_count = len(items)
+    items = [item for item in items if item.get('snapshot_time', 0) < video_duration]
+    if len(items) < original_count:
+        skipped = original_count - len(items)
+        print(f"跳过 {skipped} 条超出视频时长的字幕（视频时长: {video_duration:.2f}s）")
+
     # Step 1: 提取完整音轨（视频只解码一次）
     full_audio_path = str(audio_dir / "_full.mp3")
     if Path(full_audio_path).exists() and Path(full_audio_path).stat().st_size > 0:

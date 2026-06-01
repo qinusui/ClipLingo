@@ -190,6 +190,7 @@ After every version bump, update `RELEASE_NOTES.md` with the new version's chang
 
 ## Communication & Error Handling
 
+- **Always respond in Chinese**: every reply to the user — including status updates, summaries, questions, and explanations — must be written in Chinese. Never use other languages (e.g. English/Spanish) for user-facing text.
 - **Chinese first**: all code explanations, error analysis, and comments must be in Chinese
 - When the user pastes a traceback: translate the core meaning of the error in Chinese before analyzing
 

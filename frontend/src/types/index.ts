@@ -21,6 +21,7 @@ export interface ProcessResult {
   apkg_path: string | null;
   apkg_url?: string;
   task_id?: string;
+  partial?: boolean;
   cards: ProcessedCard[];
 }
 

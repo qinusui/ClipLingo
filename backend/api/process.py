@@ -212,6 +212,9 @@ async def upload_and_process(
             "merge": merge,
             "total_videos": len(videos),
             "select_recommended_only": select_recommended_only,
+            # 上传序的视频名列表：批处理据此定位 video_{idx}_selected.srt，
+            # 避免用 videos_dir 字典序索引导致字幕错配
+            "video_names_order": list(video_names),
         }
 
     def progress_callback(step, total_steps, message, details=None):
@@ -517,6 +520,17 @@ async def generate_apkg_endpoint(
                 progress_callback=progress_callback,
             )
 
+            # 读取 manifest 的 partial 标记：批处理中途失败会置 True，
+            # 用于提示客户当前牌组不完整（仅含已成功的视频）
+            is_partial = False
+            try:
+                _mf = Path(output_dir) / "processed_cards.json"
+                if _mf.exists():
+                    is_partial = bool(_json.loads(_mf.read_text(encoding="utf-8")).get("partial"))
+            except Exception:
+                is_partial = False
+            partial_suffix = "（注意：部分视频处理失败，此牌组不完整，仅含已成功的视频）" if is_partial else ""
+
             is_merge = result.get("apkg_path") is not None  # merge=True 返回 apkg_path
             if is_merge:
                 apkg_filename = Path(result["apkg_path"]).name
@@ -526,14 +540,15 @@ async def generate_apkg_endpoint(
                         "status": "completed",
                         "step": 1,
                         "total_steps": 2,
-                        "message": f"处理完成，生成了 {result['cards_count']} 张卡片",
+                        "message": f"处理完成，生成了 {result['cards_count']} 张卡片" + partial_suffix,
                         "result": {
                             "success": True,
-                            "message": f"处理完成，生成了 {result['cards_count']} 张卡片",
+                            "message": f"处理完成，生成了 {result['cards_count']} 张卡片" + partial_suffix,
                             "task_id": task_id,
                             "cards_count": result["cards_count"],
                             "apkg_path": apkg_filename,
                             "apkg_url": f"/output/{task_id}/{apkg_filename}",
+                            "partial": is_partial,
                             "cards": [c.model_dump() for c in cards],
                         }
                     })
@@ -558,14 +573,15 @@ async def generate_apkg_endpoint(
                         "status": "completed",
                         "step": 1,
                         "total_steps": 2,
-                        "message": f"处理完成，{len(all_results)} 个视频共 {result['total_cards']} 张卡片",
+                        "message": f"处理完成，{len(all_results)} 个视频共 {result['total_cards']} 张卡片" + partial_suffix,
                         "result": {
                             "success": True,
-                            "message": f"处理完成，{len(all_results)} 个视频共 {result['total_cards']} 张卡片",
+                            "message": f"处理完成，{len(all_results)} 个视频共 {result['total_cards']} 张卡片" + partial_suffix,
                             "task_id": task_id,
                             "merge": False,
                             "total_cards": result["total_cards"],
                             "videos": apkg_list,
+                            "partial": is_partial,
                             "cards": [c.model_dump() for c in cards],
                         }
                     })
@@ -786,6 +802,97 @@ def _sse_encode(data: dict) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def _persist_batch_results(output_dir: str, all_processed: list, partial: bool = False) -> None:
+    """
+    将已处理卡片记录已学单词并合并进 manifest（供 generate_apkg 使用）。
+
+    成功完成与中途失败都调用：失败时持久化失败前已完成视频的结果，
+    配合 stem/index 幂等去重，重试可跳过已完成视频、只重跑失败的（可恢复批处理）。
+
+    partial=True 时在 manifest 写入 partial 标记，供打包结果提示客户「牌组不完整」；
+    重试全部成功后以 partial=False 调用会清除该标记。
+    """
+    # 录制已学单词
+    if all_processed:
+        try:
+            from services.progress import mark_words_learned
+            words_to_record = [
+                {"word": p.get("word", ""), "definition": p.get("definition", "")}
+                for p in all_processed
+                if p.get("word")
+            ]
+            if words_to_record:
+                mark_words_learned(words_to_record)
+        except Exception as e:
+            print(f"记录已学单词失败（不影响主流程）: {e}")
+
+    # 合并批处理结果到 manifest
+    manifest_path = Path(output_dir) / "processed_cards.json"
+    print(f"[批处理] 准备合并结果到 manifest: {manifest_path}")
+    print(f"[批处理] 本次处理了 {len(all_processed)} 张卡片（partial={partial}）")
+
+    if not manifest_path.exists():
+        if all_processed:
+            logger.warning(f"[批处理] manifest 文件不存在，无法合并: {manifest_path}")
+        return
+
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        original_count = len(manifest.get("processed", []))
+        print(f"[批处理] manifest 已存在，原有 {original_count} 张卡片")
+
+        # 标记部分完成状态（失败置 True / 全部成功置 False），供前端与打包结果提示客户
+        manifest["partial"] = partial
+
+        if not all_processed:
+            # 无新结果（如首个视频即失败）：仅更新 partial 标记后落盘
+            manifest_path.write_text(
+                json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            return
+
+        if manifest.get("merge", True):
+            # 合并模式：追加到 processed 列表（按 index 去重，保证重跑幂等）
+            existing_indices = {p.get("index") for p in manifest.get("processed", [])}
+            new_cards = [
+                p for p in all_processed
+                if p.get("index") not in existing_indices
+            ]
+            manifest["processed"].extend(new_cards)
+            print(f"[批处理] 合并后共 {len(manifest['processed'])} 张卡片")
+        else:
+            # 独立模式：按 video_stem 分组并追加到 results
+            if "results" not in manifest:
+                manifest["results"] = []
+
+            # 已存在的视频分组，跳过以保证重跑幂等
+            existing_stems = {r.get("video_name") for r in manifest["results"]}
+
+            grouped = {}
+            for p in all_processed:
+                stem = p.get("video_stem", "unknown")
+                grouped.setdefault(stem, []).append(p)
+
+            for stem, items in grouped.items():
+                if stem in existing_stems:
+                    continue
+                manifest["results"].append({
+                    "video_name": stem,
+                    "cards_count": len(items),
+                    "processed": items,
+                })
+
+            if "total_cards" in manifest:
+                manifest["total_cards"] = sum(r["cards_count"] for r in manifest["results"])
+
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        logger.info(f"[批处理] manifest 写入成功: {manifest_path}")
+    except Exception as e:
+        logger.error(f"[批处理] 合并结果到 manifest 失败: {e}", exc_info=True)
+
+
 @router.post("/batch-process")
 async def batch_process(request: BatchProcessRequest):
     """
@@ -815,6 +922,17 @@ async def batch_process(request: BatchProcessRequest):
 
     # 只处理前端发送的剩余视频（跳过第一个，已在 Phase 1 处理）
     all_video_paths = sorted(videos_dir.iterdir())
+    # 构建 视频文件名 → 上传序索引 的映射（用于查找 video_{idx}_selected.srt）。
+    # 优先用 Phase 1 持久化的上传序；前端 video_{vi}_selected.srt 的 vi 即上传序，
+    # 若改用 videos_dir 字典序会在「上传序 != 文件名序」时把字幕配错。
+    with task_store_lock:
+        _stored_task = task_store.get(request.task_id, {})
+    _upload_order = _stored_task.get("video_names_order")
+    if _upload_order:
+        video_name_to_idx: dict[str, int] = {name: i for i, name in enumerate(_upload_order)}
+    else:
+        # 兼容旧任务（无持久化上传序）：回退到文件名排序索引
+        video_name_to_idx = {p.name: i for i, p in enumerate(all_video_paths)}
     if request.video_names:
         # 按前端指定的文件名过滤
         video_names = [
@@ -881,7 +999,15 @@ async def batch_process(request: BatchProcessRequest):
                     if sub_file.exists() and sub_file.stat().st_size > 0:
                         subtitle_path = str(sub_file)
 
-                # 回退：按视频 stem 匹配字幕文件
+                # 回退1：按 video_{original_index}_selected.srt 匹配（Phase 1 生成的筛选字幕）
+                if not subtitle_path:
+                    original_idx = video_name_to_idx.get(vp.name)
+                    if original_idx is not None:
+                        selected_srt = original_task_dir / f"video_{original_idx}_selected.srt"
+                        if selected_srt.exists() and selected_srt.stat().st_size > 0:
+                            subtitle_path = str(selected_srt)
+
+                # 回退2：按视频 stem 匹配字幕文件
                 if not subtitle_path:
                     srt_candidates = list(original_task_dir.glob(f"{vp.stem}*.*"))
                     srt_paths = [s for s in srt_candidates if s.suffix.lower() in ('.srt', '.ass', '.vtt')]
@@ -980,6 +1106,8 @@ async def batch_process(request: BatchProcessRequest):
 
                 if processing_error:
                     exc = processing_error[0]
+                    # 持久化失败前已完成视频的结果，支持重试时跳过它们（可恢复批处理）
+                    _persist_batch_results(output_dir, all_processed, partial=True)
                     yield _sse_encode({"type": "error", "message": f"处理视频失败: {exc}"})
                     yield _sse_encode({
                         "type": "complete",
@@ -990,6 +1118,8 @@ async def batch_process(request: BatchProcessRequest):
                     return
 
                 if pp_result is None:
+                    # 持久化失败前已完成视频的结果，支持重试时跳过它们（可恢复批处理）
+                    _persist_batch_results(output_dir, all_processed, partial=True)
                     yield _sse_encode({"type": "error", "message": "处理视频返回空结果"})
                     yield _sse_encode({
                         "type": "complete",
@@ -1019,6 +1149,8 @@ async def batch_process(request: BatchProcessRequest):
         except Exception as e:
             import traceback
             traceback.print_exc()
+            # 持久化已完成视频的结果，支持重试时跳过它们（可恢复批处理）
+            _persist_batch_results(output_dir, all_processed, partial=True)
             yield _sse_encode({"type": "error", "message": str(e)})
             # 即使出错也必须发送 complete 事件，否则前端 SSE 流会异常关闭
             yield _sse_encode({
@@ -1029,65 +1161,8 @@ async def batch_process(request: BatchProcessRequest):
             })
             return
 
-        # 录制已学单词
-        try:
-            from services.progress import mark_words_learned
-            words_to_record = [
-                {"word": p.get("word", ""), "definition": p.get("definition", "")}
-                for p in all_processed
-                if p.get("word")
-            ]
-            if words_to_record:
-                mark_words_learned(words_to_record)
-        except Exception as e:
-            print(f"记录已学单词失败（不影响主流程）: {e}")
-
-        # 合并批处理结果到 manifest（供 generate_apkg 使用）
-        manifest_path = Path(output_dir) / "processed_cards.json"
-        print(f"[批处理] 准备合并结果到 manifest: {manifest_path}")
-        print(f"[批处理] 本次处理了 {len(all_processed)} 张卡片")
-
-        if manifest_path.exists():
-            try:
-                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-                original_count = len(manifest.get("processed", []))
-                print(f"[批处理] manifest 已存在，原有 {original_count} 张卡片")
-
-                if manifest.get("merge", True):
-                    # 合并模式：追加到 processed 列表
-                    manifest["processed"].extend(all_processed)
-                    print(f"[批处理] 合并后共 {len(manifest['processed'])} 张卡片")
-                else:
-                    # 独立模式：按 video_stem 分组并追加到 results
-                    if "results" not in manifest:
-                        manifest["results"] = []
-
-                    # 按 video_stem 分组
-                    grouped = {}
-                    for p in all_processed:
-                        stem = p.get("video_stem", "unknown")
-                        if stem not in grouped:
-                            grouped[stem] = []
-                        grouped[stem].append(p)
-
-                    # 追加每个视频的 result
-                    for stem, items in grouped.items():
-                        manifest["results"].append({
-                            "video_name": stem,
-                            "cards_count": len(items),
-                            "processed": items,
-                        })
-
-                    # 更新总卡片数
-                    if "total_cards" in manifest:
-                        manifest["total_cards"] = sum(r["cards_count"] for r in manifest["results"])
-
-                manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-                logger.info(f"[批处理] manifest 写入成功: {manifest_path}")
-            except Exception as e:
-                logger.error(f"[批处理] 合并结果到 manifest 失败: {e}", exc_info=True)
-        else:
-            logger.warning(f"[批处理] manifest 文件不存在，无法合并: {manifest_path}")
+        # 记录已学单词并合并结果到 manifest（供 generate_apkg 使用）
+        _persist_batch_results(output_dir, all_processed)
 
         yield _sse_encode({
             "type": "complete",

@@ -18,7 +18,7 @@ export default defineConfig(({ mode }) => {
         '/api': {
           target: `http://localhost:${backendPort}`,
           changeOrigin: true,
-          timeout: 60000,
+          timeout: 600000,
         },
         '/download': {
           target: `http://localhost:${backendPort}`,

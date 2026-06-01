@@ -113,3 +113,27 @@ def test_main_index_matching_prevents_misalignment():
     assert processed[2]["audio_path"] == "audio/3.mp3", \
         f"错位！card_3 拿到了 {processed[2]['audio_path']} 而非 audio/3.mp3"
     assert processed[2]["screenshot_path"] == "ss/3.jpg"
+
+
+def test_filter_items_exceeding_video_duration(tmp_path):
+    """Items with snapshot_time >= video_duration should be filtered out."""
+    from core.media_cut import apply_padding
+
+    items = [
+        {"index": 1, "start_sec": 10.0, "end_sec": 15.0},
+        {"index": 2, "start_sec": 1370.0, "end_sec": 1375.0},  # Beyond video duration
+        {"index": 3, "start_sec": 1380.0, "end_sec": 1385.0},  # Beyond video duration
+    ]
+    video_duration = 1369.48
+
+    result = apply_padding(items, video_duration)
+
+    # snapshot_time should be calculated
+    assert result[0]["snapshot_time"] == 12.5  # (10 + 15) / 2
+    assert result[1]["snapshot_time"] == 1372.5  # (1370 + 1375) / 2
+    assert result[2]["snapshot_time"] == 1382.5  # (1380 + 1385) / 2
+
+    # Filter items exceeding video duration
+    filtered = [item for item in result if item.get('snapshot_time', 0) < video_duration]
+    assert len(filtered) == 1
+    assert filtered[0]["index"] == 1

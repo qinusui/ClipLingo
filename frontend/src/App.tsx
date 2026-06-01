@@ -235,6 +235,7 @@ function App() {
   const [batchCompleted, setBatchCompleted] = useState(0);
   const [batchStepMessage, setBatchStepMessage] = useState('');
   const [batchDone, setBatchDone] = useState(false);
+  const [batchPartialFailed, setBatchPartialFailed] = useState(false); // 批处理中途失败：牌组将不完整
   const [pendingPack, setPendingPack] = useState(false); // 批处理完成后自动打包
   const [customPrompt, setCustomPrompt] = useState<string>(
     savedConfig?.customPrompt || buildPresetPrompt(t('app.prompt.grammarScreenBody'), savedConfig?.sourceLanguage || 'en')
@@ -563,6 +564,7 @@ function App() {
 
     setBatchRemaining(remainingNames.length);
     setBatchCompleted(0);
+    setBatchPartialFailed(false); // 新一轮批处理：清除上次的部分失败提示
     setIsBatchProcessing(true);
 
     try {
@@ -597,6 +599,7 @@ function App() {
             console.warn('[批处理] 流异常关闭，未完成批处理');
             toast.error(t('app.batch.error') + (event.message || '连接中断，请重试'));
             setBatchDone(false);
+            setBatchPartialFailed(true); // 已完成视频结果已落盘，提示客户牌组将不完整
             setPendingPack(false);
             batchTriggeredRef.current = false;
             return;
@@ -607,6 +610,7 @@ function App() {
           console.error('批量处理错误:', event.error || event.message);
           toast.error(t('app.batch.error') + (event.error || event.message || ''));
           setBatchDone(false);
+          setBatchPartialFailed(true); // 已完成视频结果已落盘，提示客户牌组将不完整
           setPendingPack(false);
           batchTriggeredRef.current = false; // 允许重试
           return;
@@ -856,6 +860,13 @@ function App() {
           allSubtitles = allSubtitles.concat(response.subtitles);
         }
       }
+
+      // 后端按文件从 1 开始编号，多视频拼接会导致 index 冲突，
+      // 进而让 selectedIndices / recommendations（按 index 索引）跨视频互相干扰、
+      // 并触发 React key 重复。这里全局重排成唯一 index。
+      // 安全性：后端 _process_video_to_media 按位置 zip pre_processed，
+      // 最终卡片 index 取自各视频重新解析的 SRT（本地 1..N），不依赖此处的值。
+      allSubtitles = allSubtitles.map((s, i) => ({ ...s, index: i + 1 }));
 
       setSubtitleCounts(counts);
       setSubtitles(allSubtitles);
@@ -3096,6 +3107,11 @@ function App() {
                         {t('app.batch.title')} — {batchCompleted}/{batchRemaining} {t('app.batch.done', '完成')}
                       </p>
                     )}
+                    {batchPartialFailed && (
+                      <div className="rounded-md border border-amber-400 bg-amber-50 dark:border-amber-600 dark:bg-amber-950/40 p-3 text-sm text-amber-800 dark:text-amber-300">
+                        {t('app.batch.partialWarning')}
+                      </div>
+                    )}
                     <Button
                       variant="primary"
                       className="w-full"
@@ -3138,6 +3154,11 @@ function App() {
                 {/* 4e: 处理完成：卡片预览 + 下载（两阶段模式） */}
                 {processingPhase === 'completed' && result && result.length > 0 && (
                   <div className="space-y-4">
+                    {batchPartialFailed && (
+                      <div className="rounded-md border border-amber-400 bg-amber-50 dark:border-amber-600 dark:bg-amber-950/40 p-3 text-sm text-amber-800 dark:text-amber-300">
+                        {t('app.batch.partialWarning')}
+                      </div>
+                    )}
                     <CardPreview
                       cards={previewResult}
                       cardStyles={Array.from(cardStyles)}
