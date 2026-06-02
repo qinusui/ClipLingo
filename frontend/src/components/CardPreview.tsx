@@ -60,7 +60,7 @@ async function fetchBaseTemplate(theme: string): Promise<ThemeTemplate> {
     body: JSON.stringify({ theme }),
   });
 
-  const parse = (data: any): ThemeTemplate => ({
+  const parse = (data: { name: string; css: string; sentence: { front: string; back: string }; vocab: { front: string; back: string }; isCustom: boolean }): ThemeTemplate => ({
     name: data.name,
     css: data.css,
     sentence: data.sentence,
@@ -195,7 +195,6 @@ export const CardPreview = ({
   onNext,
   theme = 'default',
   themeOverrides,
-  videoFile: _videoFile,
 }: CardPreviewProps) => {
   const { t } = useTranslation();
   const [isPlaying, setIsPlaying] = useState(false);
@@ -227,7 +226,7 @@ export const CardPreview = ({
   // 覆盖变化时通过 API 获取覆盖层 CSS（debounced）
   useEffect(() => {
     if (overrideTimerRef.current) clearTimeout(overrideTimerRef.current);
-    if (!themeOverrides || Object.keys(themeOverrides).filter(k => (themeOverrides as any)[k]).length === 0) {
+    if (!themeOverrides || Object.keys(themeOverrides).filter(k => themeOverrides[k]).length === 0) {
       setOverrideCss('');
       return;
     }

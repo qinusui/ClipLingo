@@ -401,7 +401,7 @@ export const StyleGenerator = ({ onClose, onImported, initialTheme, previewCard 
     } finally {
       setLoading(false);
     }
-  }, [input, messages, loading, provider]);
+  }, [input, messages, loading, provider, isModifyMode]);
 
   const handleExport = useCallback(async () => {
     if (!template) return;

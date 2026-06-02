@@ -1010,5 +1010,223 @@ class TestBatchMTPassthrough:
         assert all(c["translation"] for c in v2_cards)
 
 
+# ─── 取消机制测试 ─────────────────────────────────────────────────
+
+
+class TestBatchCancellation:
+    """批处理取消：cancel 端点、event_generator 取消检查、持久化、恢复"""
+
+    def test_cancel_endpoint_sets_flag(self, tmp_path):
+        """POST /cancel/{task_id} 应在 task_store 中设置 _cancelled 标志"""
+        task_id = "test-cancel-flag"
+        process_module.task_store[task_id] = {
+            "video_names_order": ["v1.mp4", "v2.mp4"],
+        }
+
+        resp = client.post(f"/api/process/cancel/{task_id}")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "cancelling"
+        assert process_module.task_store[task_id].get("_cancelled") is True
+
+    def test_cancel_nonexistent_task_404(self):
+        """不存在或已过期的任务 cancel 时返回 404"""
+        resp = client.post("/api/process/cancel/nonexistent-id")
+        assert resp.status_code == 404
+        assert "不存在" in resp.json()["detail"]
+
+    def test_event_generator_breaks_on_cancelled(self, tmp_path):
+        """event_generator 检测到 _cancelled 后应发送 cancelled + complete(cancelled=True) 事件并返回"""
+        task_id = "test-cancel-events"
+        temp_dir, output_dir = _make_fake_task(tmp_path, task_id, ["v2.mp4", "v3.mp4"])
+        process_module.TEMP_DIR = temp_dir
+
+        # 构造 task_store，让第一个视频处理完、第二个视频前检测取消
+        process_module.task_store[task_id] = {
+            "video_names_order": ["video1.mp4", "v2.mp4", "v3.mp4"],
+            "select_recommended_only": False,
+        }
+
+        call_count = [0]
+
+        def mock_process(**__):
+            call_count[0] += 1
+            # 第一个视频处理完后设置取消标志（模拟并发 cancel 调用）
+            if call_count[0] == 1:
+                process_module.task_store[task_id]["_cancelled"] = True
+            return (
+                [{"index": 1, "text": "Hello", "audio_path": "", "screenshot_path": ""}],
+                f"video{call_count[0] + 1}",
+            )
+
+        with patch.object(process_module, "_process_video_to_media", side_effect=mock_process):
+            resp = client.post("/api/process/batch-process", json={
+                "task_id": task_id,
+                "video_names": ["v2.mp4", "v3.mp4"],
+                "subtitle_files": ["", ""],
+            })
+
+        events = _parse_sse_events(resp)
+
+        # 只应处理完第一个视频
+        assert call_count[0] == 1
+
+        # 必须有 cancelled 事件
+        cancelled_events = [e for e in events if e["type"] == "cancelled"]
+        assert len(cancelled_events) >= 1
+        assert "已取消" in cancelled_events[0]["message"]
+
+        # 必须有 complete 事件且 cancelled=True
+        complete_events = [e for e in events if e["type"] == "complete"]
+        assert any(e.get("cancelled") for e in complete_events)
+
+    def test_results_persisted_after_cancel(self, tmp_path):
+        """取消前已完成视频的结果应持久化到 processed_cards.json"""
+        task_id = "test-cancel-persist"
+        temp_dir, output_dir = _make_fake_task(tmp_path, task_id, ["v2.mp4", "v3.mp4", "v4.mp4"])
+        process_module.TEMP_DIR = temp_dir
+
+        process_module.task_store[task_id] = {
+            "video_names_order": ["video1.mp4", "v2.mp4", "v3.mp4", "v4.mp4"],
+            "select_recommended_only": False,
+        }
+
+        call_count = [0]
+
+        def mock_process(**__):
+            call_count[0] += 1
+            if call_count[0] >= 2:
+                # 第二个视频完成后设置取消标志
+                process_module.task_store[task_id]["_cancelled"] = True
+            return (
+                [
+                    {"index": call_count[0] * 10 + 1, "text": f"Card {call_count[0]}-1",
+                     "audio_path": "", "screenshot_path": ""},
+                    {"index": call_count[0] * 10 + 2, "text": f"Card {call_count[0]}-2",
+                     "audio_path": "", "screenshot_path": ""},
+                ],
+                f"video{call_count[0] + 1}",
+            )
+
+        with patch.object(process_module, "_process_video_to_media", side_effect=mock_process):
+            client.post("/api/process/batch-process", json={
+                "task_id": task_id,
+                "video_names": ["v2.mp4", "v3.mp4", "v4.mp4"],
+                "subtitle_files": ["", "", ""],
+            })
+
+        # 已验证完 2 个视频后取消
+        assert call_count[0] == 2
+
+        # 持久化文件应存在且包含已完成视频的卡片
+        manifest_path = output_dir / "processed_cards.json"
+        assert manifest_path.exists()
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        processed_cards = manifest["processed"]
+        # 初始 10 + 2 视频 * 2 卡 = 14
+        assert len(processed_cards) == 10 + 4
+        # video_stem 来自 vp.stem，视频文件名为 v2.mp4 / v3.mp4
+        assert any(c["video_stem"] == "v2" for c in processed_cards)
+        assert any(c["video_stem"] == "v3" for c in processed_cards)
+
+    def test_resume_after_cancel(self, tmp_path):
+        """取消后 resume 端点应仅重跑未完成的视频，不重复已完成视频"""
+        task_id = "test-resume-after-cancel"
+        temp_dir, output_dir = _make_fake_task(tmp_path, task_id, ["v2.mp4", "v3.mp4", "v4.mp4"])
+        process_module.TEMP_DIR = temp_dir
+
+        process_module.task_store[task_id] = {
+            "video_names_order": ["video1.mp4", "v2.mp4", "v3.mp4", "v4.mp4"],
+            "select_recommended_only": False,
+        }
+
+        call_count = [0]
+
+        def mock_process(**__):
+            call_count[0] += 1
+            # 第一轮：处理 2 个后取消；第二轮回合 resume 只跑剩余
+            if call_count[0] >= 2 and not process_module.task_store[task_id].get("_cancelled"):
+                process_module.task_store[task_id]["_cancelled"] = True
+            return (
+                [{"index": call_count[0] * 10 + 1, "text": f"Card {call_count[0]}",
+                  "audio_path": "", "screenshot_path": ""}],
+                f"video{call_count[0] + 1}",
+            )
+
+        # 全程 patch _process_video_to_media，避免 resume 轮触发真实处理
+        with patch.object(process_module, "_process_video_to_media", side_effect=mock_process):
+            # 第一轮：处理，中途取消
+            client.post("/api/process/batch-process", json={
+                "task_id": task_id,
+                "video_names": ["v2.mp4", "v3.mp4", "v4.mp4"],
+                "subtitle_files": ["", "", ""],
+            })
+
+            first_round_count = call_count[0]
+            assert first_round_count == 2  # 两个视频后被取消
+
+            # 清除取消标志（模拟正常 resume）
+            process_module.task_store[task_id].pop("_cancelled", None)
+
+            # 第二轮：resume（应跳过已完成的 v2、v3，只处理 v4）
+            resp = client.post(f"/api/process/resume/{task_id}", json={
+                "task_id": task_id,
+                "video_names": ["v2.mp4", "v3.mp4", "v4.mp4"],
+                "subtitle_files": ["", "", ""],
+            })
+
+            events = _parse_sse_events(resp)
+            # resume 应只再调用 1 次（v4），总计 3 次
+            assert call_count[0] == first_round_count + 1
+
+        # 最终 manifest 应有初始 10 + 3 视频的卡片（不重复）
+        manifest = json.loads((output_dir / "processed_cards.json").read_text(encoding="utf-8"))
+        assert len(manifest["processed"]) == 10 + 3  # 无重复
+
+    def test_persist_on_disconnect(self, tmp_path):
+        """模拟客户端断开 SSE 时 finally 块应持久化已完成结果"""
+        task_id = "test-disconnect-persist"
+        temp_dir, output_dir = _make_fake_task(tmp_path, task_id, ["v2.mp4", "v3.mp4"])
+        process_module.TEMP_DIR = temp_dir
+
+        process_module.task_store[task_id] = {
+            "video_names_order": ["video1.mp4", "v2.mp4", "v3.mp4"],
+            "select_recommended_only": False,
+        }
+
+        call_count = [0]
+
+        def mock_process(**__):
+            call_count[0] += 1
+            if call_count[0] >= 2:
+                # 模拟客户端断开：抛出 CancelledError（BaseException，不被 except Exception 捕获）
+                raise asyncio.CancelledError("client disconnected")
+            return (
+                [{"index": call_count[0] * 10 + 1, "text": f"Card {call_count[0]}",
+                  "audio_path": "", "screenshot_path": ""}],
+                f"video{call_count[0] + 1}",
+            )
+
+        import asyncio
+
+        with patch.object(process_module, "_process_video_to_media", side_effect=mock_process):
+            resp = client.post("/api/process/batch-process", json={
+                "task_id": task_id,
+                "video_names": ["v2.mp4", "v3.mp4"],
+                "subtitle_files": ["", ""],
+            })
+
+        # 第二个视频抛出 CancelledError
+        assert call_count[0] == 2
+
+        # finally 块应已持久化第一个视频的结果
+        manifest_path = output_dir / "processed_cards.json"
+        assert manifest_path.exists()
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        processed = manifest["processed"]
+        # 初始 10 + 第一个视频的 1 张卡 = 11
+        assert len(processed) == 11
+        assert any(c.get("video_stem") == "v2" for c in processed)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

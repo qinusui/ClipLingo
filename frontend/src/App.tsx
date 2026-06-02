@@ -126,7 +126,7 @@ function loadAIConfig() {
   try {
     const raw = localStorage.getItem('anki_ai_config');
     if (raw) return JSON.parse(raw);
-  } catch {}
+  } catch { /* localStorage 解析失败，返回默认配置 */ }
   return null;
 }
 
@@ -242,7 +242,9 @@ function App() {
   const [batchCompleted, setBatchCompleted] = useState(0);
   const [batchStepMessage, setBatchStepMessage] = useState('');
   const [batchDone, setBatchDone] = useState(false);
+  const [batchCancelled, setBatchCancelled] = useState(false);
   const [batchPartialFailed, setBatchPartialFailed] = useState(false); // 批处理中途失败：牌组将不完整
+  const batchAbortControllerRef = useRef<AbortController | null>(null);
   const [pendingPack, setPendingPack] = useState(false); // 批处理完成后自动打包
   const [customPrompt, setCustomPrompt] = useState<string>(
     savedConfig?.customPrompt || buildPresetPrompt(t('app.prompt.grammarScreenBody'), savedConfig?.sourceLanguage || 'en')
@@ -315,7 +317,7 @@ function App() {
         }
         setLearnedWords(map);
       }
-    } catch {}
+    } catch { /* 加载已学词汇失败，静默忽略 */ }
   };
 
   const syncFromAnki = async (fullSync: boolean = false) => {
@@ -345,6 +347,7 @@ function App() {
       // 延迟 5 秒后尝试从 Anki 同步（不阻塞主流程）
       setTimeout(syncFromAnki, 5000);
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 同步 subtitleFiles 长度与 videoFiles
@@ -423,6 +426,9 @@ function App() {
         }
       }
     }
+    // annotationPrompt/customPrompt/presetTemplates/annotationTemplates 的变化会触发本 effect 内 setState，
+    // 加入依赖数组将形成循环更新，此处仅需响应语言变化
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceLanguage, targetLanguage]);
 
   // 转录进度动画
@@ -544,6 +550,8 @@ function App() {
     if (workflowPhase === 'screening' || workflowPhase === 'idle') {
       preheatTriggeredRef.current = false;
     }
+    // 仅需在 workflowPhase / taskId / apiKey 变化时触发预热，其他 deps 加入后会导致预热频繁重启
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workflowPhase, taskId, apiKey]);
 
   // 多视频手动批处理触发函数（在步骤 4 中调用）
@@ -572,7 +580,11 @@ function App() {
     setBatchRemaining(remainingNames.length);
     setBatchCompleted(0);
     setBatchPartialFailed(false); // 新一轮批处理：清除上次的部分失败提示
+    setBatchCancelled(false);
     setIsBatchProcessing(true);
+
+    const controller = new AbortController();
+    batchAbortControllerRef.current = controller;
 
     try {
       for await (const event of processAPI.startBatchProcess({
@@ -595,7 +607,7 @@ function App() {
         mt_api_key: usedMT ? (mtService === 'deepl' ? deeplApiKey : mtService === 'openai' ? apiKey : undefined) : undefined,
         mt_api_base: usedMT && mtService === 'openai' ? (apiBase || undefined) : undefined,
         mt_model_name: usedMT && mtService === 'openai' ? (modelName || undefined) : undefined,
-      }, taskId || '')) {
+      }, taskId || '', controller.signal)) {
         if (event.type === 'video_progress') {
           setBatchStepMessage(event.message || '');
         } else if (event.type === 'video_done') {
@@ -625,6 +637,13 @@ function App() {
           }
           console.log(`批量处理完成：${event.total_cards} 张卡片`);
           setBatchDone(true);
+        } else if (event.type === 'cancelled') {
+          console.log('[批处理] 已取消');
+          setBatchCancelled(true);
+          setBatchDone(false);
+          setPendingPack(false);
+          batchTriggeredRef.current = false;
+          toast(t('app.batch.cancelled'));
         } else if (event.type === 'error') {
           console.error('批量处理错误:', event.error || event.message);
           toast.error(t('app.batch.error') + (event.error || event.message || ''));
@@ -635,18 +654,30 @@ function App() {
           return;
         }
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('批量处理失败:', error);
       toast.error(t('app.batch.error') + getApiErrorMessage(error));
       setBatchDone(false);
       setPendingPack(false);
       batchTriggeredRef.current = false; // 允许重试
     } finally {
+      batchAbortControllerRef.current = null;
       setIsBatchProcessing(false);
     }
-  }, [isBatchProcessing, videoFiles.length, subtitleFiles, corrections, correctionHandled, recommendations,
+  }, [isBatchProcessing, videoFiles, subtitleFiles, corrections, correctionHandled, recommendations,
     annotationPurpose, apiKey, apiBase, modelName, aiConcurrency, sourceLanguage, targetLanguage,
-    customPrompt, annotationPrompt, filterMinDuration, processAPI, taskId, t, mtService, deeplApiKey, workflowPhase]);
+    customPrompt, annotationPrompt, filterMinDuration, taskId, t, mtService, deeplApiKey, workflowPhase, batchDone]);
+
+  // 取消批处理
+  const handleCancelBatch = useCallback(async () => {
+    if (!taskId) return;
+    // 1. 断开前端 SSE 连接
+    batchAbortControllerRef.current?.abort();
+    // 2. 通知后端取消
+    try {
+      await fetch(`${API_BASE_URL}/api/process/cancel/${taskId}`, { method: 'POST' });
+    } catch { /* 后端取消失败不影响前端的取消状态 */ }
+  }, [taskId]);
 
   // Esc 退出应用
   useEffect(() => {
@@ -847,7 +878,7 @@ function App() {
         }
       }, 1000);
 
-      (window as any).__transcribePoll = pollInterval;
+      (window as unknown as Record<string, unknown>).__transcribePoll = pollInterval;
 
     } catch (error) {
       console.error('转录失败:', error);
@@ -977,7 +1008,7 @@ function App() {
             setRecommendations(prev => {
               const next = new Map(prev || []);
               for (const item of event.items!) {
-                next.set(item.index, item);
+                next.set(item.index, item as unknown as AIRecommendation);
               }
               return next;
             });
@@ -987,10 +1018,10 @@ function App() {
             break;
           }
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         if (receivedDone) {
           console.debug('AI 筛选流已关闭:', error);
-        } else if (error?.message?.includes('input stream')) {
+        } else if ((error as Error)?.message?.includes('input stream')) {
           console.debug('AI 筛选流意外关闭:', error);
         } else {
           throw error;
@@ -1094,10 +1125,10 @@ function App() {
                 const existing = next.get(item.index);
                 next.set(item.index, {
                   ...(existing || { include: true, reason: '', index: item.index }),
-                  translation: item.translation || '',
-                  notes: item.notes || '',
-                  word: item.word || '',
-                  definition: item.definition || '',
+                  translation: (item as Record<string, unknown>).translation as string || '',
+                  notes: (item as Record<string, unknown>).notes as string || '',
+                  word: (item as Record<string, unknown>).word as string || '',
+                  definition: (item as Record<string, unknown>).definition as string || '',
                 });
               }
               return next;
@@ -1108,12 +1139,12 @@ function App() {
             break;
           }
         }
-      } catch (error: any) {
-        if (streamEnded || error?.name === 'AbortError') {
+      } catch (error: unknown) {
+        if (streamEnded || (error as Error)?.name === 'AbortError') {
           console.debug('AI 注释流已关闭:', error);
           setWorkflowPhase('annotated');
           return;
-        } else if (error?.message?.includes('input stream')) {
+        } else if ((error as Error)?.message?.includes('input stream')) {
           // 浏览器 SSE 流关闭时的假错误，忽略
           setWorkflowPhase('annotated');
           return;
@@ -1164,7 +1195,7 @@ function App() {
             const next = new Map(prev);
             for (const item of event.items!) {
               if (item.corrected_text && item.corrected_text !== '') {
-                next.set(item.index, item.corrected_text);
+                next.set(item.index, item.corrected_text as string);
               }
             }
             return next;
@@ -1174,10 +1205,10 @@ function App() {
           break;
         }
       }
-    } catch (error: any) {
-      if (streamEnded || error?.name === 'AbortError') {
+    } catch (error: unknown) {
+      if (streamEnded || (error as Error)?.name === 'AbortError') {
         console.debug('AI 修正流已关闭:', error);
-      } else if (error?.message?.includes('input stream')) {
+      } else if ((error as Error)?.message?.includes('input stream')) {
         // 浏览器 SSE 流关闭时的假错误，忽略
       } else {
         console.error('AI 修正失败:', error);
@@ -1299,7 +1330,7 @@ function App() {
             setRecommendations(prev => {
               const next = new Map(prev || []);
               for (const item of event.items!) {
-                next.set(item.index, item);
+                next.set(item.index, item as unknown as AIRecommendation);
               }
               return next;
             });
@@ -1309,10 +1340,10 @@ function App() {
             break;
           }
         }
-      } catch (error: any) {
-        if (streamEnded || error?.name === 'AbortError') {
+      } catch (error: unknown) {
+        if (streamEnded || (error as Error)?.name === 'AbortError') {
           console.debug('重试流已关闭:', error);
-        } else if (error?.message?.includes('input stream')) {
+        } else if ((error as Error)?.message?.includes('input stream')) {
           // 浏览器 SSE 流关闭时的假错误，忽略
         } else {
           throw error;
@@ -1374,7 +1405,7 @@ function App() {
 
     // 按视频分组
     const perVideoSRTFiles: (File | null)[] = [];
-    const perVideoPreProcessed: any[][] = videoFiles.map(() => []);
+    const perVideoPreProcessed: Record<string, unknown>[][] = videoFiles.map(() => []);
     let ppIdx = 0;
     let globalPos = 0;
     for (let vi = 0; vi < videoFiles.length; vi++) {
@@ -1387,7 +1418,7 @@ function App() {
         perVideoPreProcessed[vi] = [];
       } else {
         let srtContent = '';
-        const videoPP: any[] = [];
+        const videoPP: Record<string, unknown>[] = [];
         selectedSubs.forEach((sub, newIdx) => {
           srtContent += `${newIdx + 1}\n${formatSRTTime(sub.start_sec)} --> ${formatSRTTime(sub.end_sec)}\n${sub.text}\n\n`;
           if (ppIdx < allPreProcessed.length) { videoPP.push(allPreProcessed[ppIdx]); ppIdx++; }
@@ -3120,9 +3151,21 @@ function App() {
                             <span className="text-xs text-gray-400 flex-shrink-0">
                               {batchCompleted}/{batchRemaining}
                             </span>
+                            <button
+                              onClick={handleCancelBatch}
+                              className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400 hover:text-red-500 transition-colors flex-shrink-0"
+                              title={t('app.batch.cancel')}
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
                           </div>
                         </CardContent>
                       </Card>
+                    )}
+                    {videoFiles.length > 1 && batchCancelled && (
+                      <p className="text-sm text-amber-600 dark:text-amber-400">
+                        {t('app.batch.cancelled')}
+                      </p>
                     )}
                     {videoFiles.length > 1 && batchDone && (
                       <p className="text-sm text-green-600 dark:text-green-400">

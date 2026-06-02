@@ -322,6 +322,7 @@
       "download": "下载",
       "syncAnki": "同步 Anki",
       "cancel": "取消",
+      "cancelled": "批处理已取消",
       "pendingStatus": "等待中"
     },
     "error": {

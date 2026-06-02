@@ -322,6 +322,7 @@
       "download": "Download",
       "syncAnki": "Sync Anki",
       "cancel": "Cancel",
+      "cancelled": "Batch cancelled",
       "pendingStatus": "Waiting"
     },
     "error": {

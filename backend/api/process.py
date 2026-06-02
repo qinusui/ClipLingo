@@ -998,6 +998,21 @@ def _completed_stems(output_dir: str) -> set:
     return stems
 
 
+@router.post("/cancel/{task_id}")
+async def cancel_batch(task_id: str):
+    """取消正在运行的批处理任务。
+
+    设置 _cancelled 标志；event_generator 在下个视频边界检测到后
+    保存已完成视频结果并优雅退出。仅对运行中的批处理有效。
+    """
+    with task_store_lock:
+        task = task_store.get(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="任务不存在或已过期")
+        task["_cancelled"] = True
+    return {"status": "cancelling", "message": "批处理取消中..."}
+
+
 @router.post("/batch-process")
 async def batch_process(request: BatchProcessRequest):
     """
@@ -1093,11 +1108,37 @@ async def batch_process(request: BatchProcessRequest):
         total_cards = 0
         successes = 0
         failures: list = []  # [{"video_index", "video_name", "message"}]
+        _handled = False  # 跟踪是否已调用 _persist_batch_results，防止 finally 重复写入
 
         yield _sse_encode({"type": "start", "total_videos": total_videos})
 
         try:
             for i, vp in enumerate(video_names):
+                # 检查取消标志 — 仅能在视频之间取消（当前视频会处理完）
+                with task_store_lock:
+                    if task_store.get(request.task_id, {}).get("_cancelled"):
+                        logger.info("批处理被取消 (task_id=%s)，已处理 %d/%d 个视频",
+                                    request.task_id, successes, total_videos)
+                        _persist_batch_results(output_dir, all_processed, partial=True)
+                        _handled = True
+                        yield _sse_encode({
+                            "type": "cancelled",
+                            "message": "批处理已取消",
+                            "videos_processed": successes,
+                            "total_cards": total_cards,
+                            "successes": successes,
+                            "failures": failures,
+                        })
+                        yield _sse_encode({
+                            "type": "complete",
+                            "videos_processed": successes,
+                            "total_cards": total_cards,
+                            "successes": successes,
+                            "failures": failures,
+                            "cancelled": True,
+                        })
+                        return
+
                 # 优先使用前端传递的精确字幕映射
                 subtitle_path = ""
                 sub_name = subtitle_map.get(vp.name)
@@ -1264,11 +1305,30 @@ async def batch_process(request: BatchProcessRequest):
                 total_cards += cards_count
                 successes += 1
 
+            # 正常完成：记录已学单词并合并结果到 manifest
+            _persist_batch_results(output_dir, all_processed, partial=bool(failures))
+            _handled = True
+
+            yield _sse_encode({
+                "type": "complete",
+                "videos_processed": successes,
+                "total_cards": total_cards,
+                "successes": successes,
+                "failures": failures,
+            })
+
+        except asyncio.CancelledError:
+            # 客户端断开 SSE 时触发（Python 3.9+ 是 BaseException，except Exception 无法捕获）
+            # 不 yield（连接已断开），交由 finally 持久化已完成结果
+            logger.warning("批处理 SSE 流被客户端断开 (task_id=%s)，已处理 %d 个视频",
+                           request.task_id, successes)
+
         except Exception as e:
             import traceback
             traceback.print_exc()
             # 持久化已完成视频的结果，支持重试时跳过它们（可恢复批处理）
             _persist_batch_results(output_dir, all_processed, partial=True)
+            _handled = True
             yield _sse_encode({"type": "error", "message": str(e)})
             # 即使出错也必须发送 complete 事件，否则前端 SSE 流会异常关闭
             yield _sse_encode({
@@ -1277,19 +1337,11 @@ async def batch_process(request: BatchProcessRequest):
                 "total_cards": 0,
                 "error": True,
             })
-            return
 
-        # 记录已学单词并合并结果到 manifest（供 generate_apkg 使用）
-        # 有失败时标记 partial，供前端与打包结果提示客户「牌组不完整」
-        _persist_batch_results(output_dir, all_processed, partial=bool(failures))
-
-        yield _sse_encode({
-            "type": "complete",
-            "videos_processed": successes,
-            "total_cards": total_cards,
-            "successes": successes,
-            "failures": failures,
-        })
+        finally:
+            # 兜底持久化：CancelledError / 任何未被上层捕获的退出路径
+            if not _handled:
+                _persist_batch_results(output_dir, all_processed, partial=True)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

@@ -1,6 +1,11 @@
 import axios from 'axios';
 import type { SubtitleListResponse, ProcessResult, ProcessedCard, SubtitleItem, AIRecommendResponse, AnnotationPurpose, ASREngine, ASREngineInfo, TranslateService, TranslateServiceInfo, TranslateBatchResponse } from '../types';
 
+interface SSEItem {
+  index: number;
+  [key: string]: unknown;
+}
+
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 
 const api = axios.create({
@@ -136,7 +141,7 @@ export const subtitleAPI = {
     sourceLanguage?: string,
     targetLanguage?: string,
     signal?: AbortSignal
-  ): AsyncGenerator<{ type: string; total_batches?: number; batch?: number; items?: any[]; message?: string }> {
+  ): AsyncGenerator<{ type: string; total_batches?: number; batch?: number; items?: SSEItem[]; message?: string }> {
     const response = await fetch(`${API_BASE_URL}/api/subtitles/ai-recommend-stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -188,7 +193,7 @@ export const subtitleAPI = {
       // 浏览器在流关闭时可能抛出 TypeError，已收到 done 时忽略
       if (!doneReceived) throw e;
     } finally {
-      try { await reader.cancel(); } catch {}
+      try { await reader.cancel(); } catch { /* reader 已关闭，cancel 可能抛出，安全忽略 */ }
     }
   },
 
@@ -204,7 +209,7 @@ export const subtitleAPI = {
     sourceLanguage?: string,
     targetLanguage?: string,
     signal?: AbortSignal
-  ): AsyncGenerator<{ type: string; total_batches?: number; batch?: number; items?: any[]; message?: string }> {
+  ): AsyncGenerator<{ type: string; total_batches?: number; batch?: number; items?: SSEItem[]; message?: string }> {
     const response = await fetch(`${API_BASE_URL}/api/subtitles/ai-screen-stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -256,7 +261,7 @@ export const subtitleAPI = {
       // 浏览器在流关闭时可能抛出 TypeError，已收到 done 时忽略
       if (!doneReceived) throw e;
     } finally {
-      try { await reader.cancel(); } catch {}
+      try { await reader.cancel(); } catch { /* reader 已关闭，cancel 可能抛出，安全忽略 */ }
     }
   },
 
@@ -270,7 +275,7 @@ export const subtitleAPI = {
     sourceLanguage?: string,
     targetLanguage?: string,
     signal?: AbortSignal
-  ): AsyncGenerator<{ type: string; total_batches?: number; batch?: number; items?: any[]; message?: string }> {
+  ): AsyncGenerator<{ type: string; total_batches?: number; batch?: number; items?: SSEItem[]; message?: string }> {
     const response = await fetch(`${API_BASE_URL}/api/subtitles/ai-correct-stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -320,7 +325,7 @@ export const subtitleAPI = {
       // 浏览器在流关闭时可能抛出 TypeError，已收到 done 时忽略
       if (!doneReceived) throw e;
     } finally {
-      try { await reader.cancel(); } catch {}
+      try { await reader.cancel(); } catch { /* reader 已关闭，cancel 可能抛出，安全忽略 */ }
     }
   },
 
@@ -338,7 +343,7 @@ export const subtitleAPI = {
     targetLanguage?: string,
     signal?: AbortSignal,
     taskId?: string
-  ): AsyncGenerator<{ type: string; total_batches?: number; batch?: number; items?: any[]; message?: string }> {
+  ): AsyncGenerator<{ type: string; total_batches?: number; batch?: number; items?: SSEItem[]; message?: string }> {
     const response = await fetch(`${API_BASE_URL}/api/subtitles/ai-annotate-stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -392,7 +397,7 @@ export const subtitleAPI = {
       // 浏览器在流关闭时可能抛出 TypeError，已收到 done 时忽略
       if (!doneReceived) throw e;
     } finally {
-      try { await reader.cancel(); } catch {}
+      try { await reader.cancel(); } catch { /* reader 已关闭，cancel 可能抛出，安全忽略 */ }
     }
   },
 
@@ -818,7 +823,7 @@ export const processAPI = {
         };
       }
     } finally {
-      try { await reader.cancel(); } catch {}
+      try { await reader.cancel(); } catch { /* reader 已关闭，cancel 可能抛出，安全忽略 */ }
     }
   },
 };
