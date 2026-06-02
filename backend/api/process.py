@@ -1104,16 +1104,19 @@ async def batch_process(request: BatchProcessRequest):
                 subtitle_map[vname] = request.subtitle_files[idx]
 
     async def event_generator():
+        batch_start = time.time()
         all_processed = []
         total_cards = 0
         successes = 0
         failures: list = []  # [{"video_index", "video_name", "message"}]
+        video_results: list = []  # [{name, status, cards}]
         _handled = False  # 跟踪是否已调用 _persist_batch_results，防止 finally 重复写入
 
         yield _sse_encode({"type": "start", "total_videos": total_videos})
 
         try:
             for i, vp in enumerate(video_names):
+                video_start = time.time()
                 # 检查取消标志 — 仅能在视频之间取消（当前视频会处理完）
                 with task_store_lock:
                     if task_store.get(request.task_id, {}).get("_cancelled"):
@@ -1128,6 +1131,8 @@ async def batch_process(request: BatchProcessRequest):
                             "total_cards": total_cards,
                             "successes": successes,
                             "failures": failures,
+                            "elapsed_seconds": round(time.time() - batch_start, 1),
+                            "video_results": video_results,
                         })
                         yield _sse_encode({
                             "type": "complete",
@@ -1136,6 +1141,8 @@ async def batch_process(request: BatchProcessRequest):
                             "successes": successes,
                             "failures": failures,
                             "cancelled": True,
+                            "elapsed_seconds": round(time.time() - batch_start, 1),
+                            "video_results": video_results,
                         })
                         return
 
@@ -1227,6 +1234,7 @@ async def batch_process(request: BatchProcessRequest):
                             yield _sse_encode({
                                 "type": "video_progress",
                                 "video_index": i,
+                                "video_name": vp.stem,
                                 "step": item["step"],
                                 "message": item["message"],
                             })
@@ -1235,6 +1243,7 @@ async def batch_process(request: BatchProcessRequest):
                     yield _sse_encode({
                         "type": "video_progress",
                         "video_index": i,
+                        "video_name": vp.stem,
                         "step": 0,
                         "message": "处理中...",
                     })
@@ -1248,6 +1257,7 @@ async def batch_process(request: BatchProcessRequest):
                         yield _sse_encode({
                             "type": "video_progress",
                             "video_index": i,
+                            "video_name": vp.stem,
                             "step": item["step"],
                             "message": item["message"],
                         })
@@ -1269,6 +1279,7 @@ async def batch_process(request: BatchProcessRequest):
                         "video_name": vp.stem,
                         "message": message,
                     })
+                    video_results.append({"name": vp.stem, "status": "failed", "cards": 0})
                     continue
 
                 if pp_result is None:
@@ -1285,6 +1296,7 @@ async def batch_process(request: BatchProcessRequest):
                         "video_name": vp.stem,
                         "message": message,
                     })
+                    video_results.append({"name": vp.stem, "status": "failed", "cards": 0})
                     continue
 
                 processed, video_stem = pp_result
@@ -1299,11 +1311,13 @@ async def batch_process(request: BatchProcessRequest):
                     "video_index": i,
                     "video_name": vp.stem,
                     "cards": cards_count,
+                    "elapsed_seconds": round(time.time() - video_start, 1),
                 })
 
                 all_processed.extend(processed)
                 total_cards += cards_count
                 successes += 1
+                video_results.append({"name": vp.stem, "status": "ok", "cards": cards_count})
 
             # 正常完成：记录已学单词并合并结果到 manifest
             _persist_batch_results(output_dir, all_processed, partial=bool(failures))
@@ -1315,6 +1329,8 @@ async def batch_process(request: BatchProcessRequest):
                 "total_cards": total_cards,
                 "successes": successes,
                 "failures": failures,
+                "elapsed_seconds": round(time.time() - batch_start, 1),
+                "video_results": video_results,
             })
 
         except asyncio.CancelledError:
@@ -1336,6 +1352,8 @@ async def batch_process(request: BatchProcessRequest):
                 "videos_processed": 0,
                 "total_cards": 0,
                 "error": True,
+                "elapsed_seconds": round(time.time() - batch_start, 1),
+                "video_results": video_results,
             })
 
         finally:

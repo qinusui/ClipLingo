@@ -323,7 +323,11 @@
       "syncAnki": "同步 Anki",
       "cancel": "取消",
       "cancelled": "批处理已取消",
-      "pendingStatus": "等待中"
+      "pendingStatus": "等待中",
+      "currentVideo": "当前: {{name}}",
+      "elapsed": "已用时 {{time}}",
+      "eta": "预计剩余 {{time}}",
+      "summaryTitle": "批处理完成  {{count}} 个视频  {{cards}} 张卡片"
     },
     "error": {
       "processingFailed": "处理失败:",

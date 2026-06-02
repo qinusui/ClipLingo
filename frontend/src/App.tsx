@@ -244,6 +244,12 @@ function App() {
   const [batchDone, setBatchDone] = useState(false);
   const [batchCancelled, setBatchCancelled] = useState(false);
   const [batchPartialFailed, setBatchPartialFailed] = useState(false); // 批处理中途失败：牌组将不完整
+  const [batchCurrentVideo, setBatchCurrentVideo] = useState('');     // 当前正在处理的视频名
+  const [batchCurrentStep, setBatchCurrentStep] = useState(-1);       // 当前步骤 0-3
+  const [batchElapsed, setBatchElapsed] = useState(0);                // 批处理已用秒数
+  const [batchVideoResults, setBatchVideoResults] = useState<Array<{ name: string; status: string; cards: number }>>([]);
+  const batchStartTimeRef = useRef(0);
+  const batchTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const batchAbortControllerRef = useRef<AbortController | null>(null);
   const screeningHandledRef = useRef(false); // 跟踪筛选是否真正执行过（区别于仅注释）
   const [pendingPack, setPendingPack] = useState(false); // 批处理完成后自动打包
@@ -555,6 +561,37 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workflowPhase, taskId, apiKey]);
 
+  // 批处理步骤标签
+  const STEP_LABELS: Record<number, string> = {
+    0: 'Whisper 转录',
+    1: '解析字幕',
+    2: 'AI 处理',
+    3: '媒体切割',
+  };
+
+  function formatTime(seconds: number): string {
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  }
+
+  // 启动批处理计时器
+  const startBatchTimer = useCallback(() => {
+    batchStartTimeRef.current = Date.now();
+    setBatchElapsed(0);
+    batchTimerRef.current = setInterval(() => {
+      setBatchElapsed(Math.floor((Date.now() - batchStartTimeRef.current) / 1000));
+    }, 1000);
+  }, []);
+
+  // 停止批处理计时器
+  const stopBatchTimer = useCallback(() => {
+    if (batchTimerRef.current) {
+      clearInterval(batchTimerRef.current);
+      batchTimerRef.current = null;
+    }
+  }, []);
+
   // 多视频手动批处理触发函数（在步骤 4 中调用）
   const batchTriggeredRef = useRef(false);
   const handleTriggerBatch = useCallback(async () => {
@@ -582,7 +619,11 @@ function App() {
     setBatchCompleted(0);
     setBatchPartialFailed(false); // 新一轮批处理：清除上次的部分失败提示
     setBatchCancelled(false);
+    setBatchCurrentVideo('');
+    setBatchCurrentStep(-1);
+    setBatchVideoResults([]);
     setIsBatchProcessing(true);
+    startBatchTimer();
 
     const controller = new AbortController();
     batchAbortControllerRef.current = controller;
@@ -611,47 +652,53 @@ function App() {
       }, taskId || '', controller.signal)) {
         if (event.type === 'video_progress') {
           setBatchStepMessage(event.message || '');
+          if (event.video_name) setBatchCurrentVideo(event.video_name);
+          if (typeof event.step === 'number') setBatchCurrentStep(event.step);
         } else if (event.type === 'video_done') {
           setBatchCompleted(prev => prev + 1);
         } else if (event.type === 'video_failed') {
-          // 单视频失败：批处理继续，仅标记部分失败，最终在 complete 汇总
           console.warn('[批处理] 视频失败，跳过继续:', event.video_name, event.message);
           setBatchPartialFailed(true);
+          setBatchCompleted(prev => prev + 1); // 失败的也计入进度
         } else if (event.type === 'complete') {
           if (event.error) {
-            // 流异常关闭的兜底事件，不要当作成功完成
             console.warn('[批处理] 流异常关闭，未完成批处理');
             toast.error(t('app.batch.error') + (event.message || '连接中断，请重试'));
             setBatchDone(false);
-            setBatchPartialFailed(true); // 已完成视频结果已落盘，提示客户牌组将不完整
+            setBatchPartialFailed(true);
             setPendingPack(false);
             batchTriggeredRef.current = false;
+            stopBatchTimer();
             return;
           }
           const failed = event.failures?.length ?? 0;
           if (failed > 0) {
-            // 部分视频失败：成功项已落盘，提示「X 成功 / Y 失败」并允许重试失败项
             console.warn(`[批处理] 完成（部分失败）：${event.successes ?? 0} 成功 / ${failed} 失败`);
             toast.error(t('app.batch.partialFailed', { success: event.successes ?? 0, failed }));
             setBatchPartialFailed(true);
-            batchTriggeredRef.current = false; // 允许对失败项重试
+            batchTriggeredRef.current = false;
           }
+          if (event.video_results) setBatchVideoResults(event.video_results);
           console.log(`批量处理完成：${event.total_cards} 张卡片`);
           setBatchDone(true);
+          stopBatchTimer();
         } else if (event.type === 'cancelled') {
           console.log('[批处理] 已取消');
           setBatchCancelled(true);
           setBatchDone(false);
           setPendingPack(false);
           batchTriggeredRef.current = false;
+          if (event.video_results) setBatchVideoResults(event.video_results);
+          stopBatchTimer();
           toast(t('app.batch.cancelled'));
         } else if (event.type === 'error') {
           console.error('批量处理错误:', event.error || event.message);
           toast.error(t('app.batch.error') + (event.error || event.message || ''));
           setBatchDone(false);
-          setBatchPartialFailed(true); // 已完成视频结果已落盘，提示客户牌组将不完整
+          setBatchPartialFailed(true);
           setPendingPack(false);
-          batchTriggeredRef.current = false; // 允许重试
+          batchTriggeredRef.current = false;
+          stopBatchTimer();
           return;
         }
       }
@@ -660,25 +707,27 @@ function App() {
       toast.error(t('app.batch.error') + getApiErrorMessage(error));
       setBatchDone(false);
       setPendingPack(false);
-      batchTriggeredRef.current = false; // 允许重试
+      batchTriggeredRef.current = false;
+      stopBatchTimer();
     } finally {
       batchAbortControllerRef.current = null;
       setIsBatchProcessing(false);
     }
   }, [isBatchProcessing, videoFiles, subtitleFiles, corrections, correctionHandled,
     annotationPurpose, apiKey, apiBase, modelName, aiConcurrency, sourceLanguage, targetLanguage,
-    customPrompt, annotationPrompt, filterMinDuration, taskId, t, mtService, deeplApiKey, workflowPhase, batchDone]);
+    customPrompt, annotationPrompt, filterMinDuration, taskId, t, mtService, deeplApiKey, workflowPhase, batchDone, startBatchTimer, stopBatchTimer]);
 
   // 取消批处理
   const handleCancelBatch = useCallback(async () => {
     if (!taskId) return;
     // 1. 断开前端 SSE 连接
     batchAbortControllerRef.current?.abort();
+    stopBatchTimer();
     // 2. 通知后端取消
     try {
       await fetch(`${API_BASE_URL}/api/process/cancel/${taskId}`, { method: 'POST' });
     } catch { /* 后端取消失败不影响前端的取消状态 */ }
-  }, [taskId]);
+  }, [taskId, stopBatchTimer]);
 
   // Esc 退出应用
   useEffect(() => {
@@ -1598,6 +1647,10 @@ function App() {
       batchTriggeredRef.current = false;
       setIsBatchProcessing(false);
       setBatchDone(false);
+      setBatchCancelled(false);
+      setBatchVideoResults([]);
+      setBatchCurrentVideo('');
+      setBatchCurrentStep(-1);
       setProcessingPhase('idle');
       setCardTheme('default');
       setCorrectionHandled(false);
@@ -1965,6 +2018,10 @@ function App() {
                       batchTriggeredRef.current = false;
                       setIsBatchProcessing(false);
                       setBatchDone(false);
+                      setBatchCancelled(false);
+                      setBatchVideoResults([]);
+                      setBatchCurrentVideo('');
+                      setBatchCurrentStep(-1);
                                   }}
                     label={t('app.step1.videoFile')}
                     icon="video"
@@ -3139,19 +3196,42 @@ function App() {
                       <Card className="border-primary-300 dark:border-primary-700">
                         <CardContent className="py-4">
                           <div className="flex items-center gap-3">
-                            <div className="animate-spin w-5 h-5 border-2 border-primary-500 border-t-transparent rounded-full" />
+                            <div className="animate-spin w-5 h-5 border-2 border-primary-500 border-t-transparent rounded-full flex-shrink-0" />
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
                                 {t('app.batch.title')}
                               </p>
-                              <p className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
-                                {batchStepMessage || t('app.batch.processing', { completed: batchCompleted, total: batchRemaining })}
-                              </p>
+                              {/* 当前视频 & 步骤 */}
+                              <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
+                                {batchCurrentVideo && (
+                                  <span className="text-xs text-primary-600 dark:text-primary-400 font-medium truncate max-w-[200px]">
+                                    {t('app.batch.currentVideo', { name: batchCurrentVideo })}
+                                  </span>
+                                )}
+                                {batchCurrentStep >= 0 && (
+                                  <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary-400" />
+                                    {STEP_LABELS[batchCurrentStep] || batchStepMessage}
+                                  </span>
+                                )}
+                              </div>
+                              {/* 进度条 */}
                               <div className="mt-2 bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">
                                 <div
                                   className="bg-primary-500 h-1.5 rounded-full transition-all duration-300"
                                   style={{ width: `${batchRemaining > 0 ? (batchCompleted / batchRemaining) * 100 : 0}%` }}
                                 />
+                              </div>
+                              {/* 时间信息 */}
+                              <div className="flex items-center gap-2 mt-1">
+                                <span className="text-xs text-gray-400">
+                                  {t('app.batch.elapsed', { time: formatTime(batchElapsed) })}
+                                </span>
+                                {batchCompleted > 0 && batchCompleted < batchRemaining && (
+                                  <span className="text-xs text-gray-400">
+                                    · {t('app.batch.eta', { time: formatTime(Math.max(0, Math.round(batchElapsed / batchCompleted * (batchRemaining - batchCompleted)))) })}
+                                  </span>
+                                )}
                               </div>
                             </div>
                             <span className="text-xs text-gray-400 flex-shrink-0">
@@ -3173,7 +3253,36 @@ function App() {
                         {t('app.batch.cancelled')}
                       </p>
                     )}
-                    {videoFiles.length > 1 && batchDone && (
+                    {/* 完成摘要 */}
+                    {videoFiles.length > 1 && batchDone && batchVideoResults.length > 0 && (
+                      <Card className="border-green-300 dark:border-green-700">
+                        <CardContent className="py-3">
+                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-2">
+                            {t('app.batch.summaryTitle', { count: batchVideoResults.length, cards: batchVideoResults.reduce((sum, r) => sum + r.cards, 0) })}
+                          </p>
+                          <div className="space-y-1 max-h-40 overflow-y-auto">
+                            {batchVideoResults.map((r, i) => (
+                              <div key={i} className="flex items-center gap-2 text-xs">
+                                {r.status === 'ok' ? (
+                                  <CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
+                                ) : (
+                                  <X className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />
+                                )}
+                                <span className="text-gray-700 dark:text-gray-300 truncate">{r.name}</span>
+                                {r.status === 'ok' && (
+                                  <span className="text-gray-400 ml-auto flex-shrink-0">{r.cards} 卡片</span>
+                                )}
+                                {r.status !== 'ok' && (
+                                  <span className="text-red-400 ml-auto flex-shrink-0">失败</span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+                    {/* 无摘要时的简单完成提示 */}
+                    {videoFiles.length > 1 && batchDone && batchVideoResults.length === 0 && (
                       <p className="text-sm text-green-600 dark:text-green-400">
                         {t('app.batch.title')} — {batchCompleted}/{batchRemaining} {t('app.batch.done', '完成')}
                       </p>

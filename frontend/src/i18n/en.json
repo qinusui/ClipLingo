@@ -323,7 +323,11 @@
       "syncAnki": "Sync Anki",
       "cancel": "Cancel",
       "cancelled": "Batch cancelled",
-      "pendingStatus": "Waiting"
+      "pendingStatus": "Waiting",
+      "currentVideo": "Current: {{name}}",
+      "elapsed": "Elapsed {{time}}",
+      "eta": "ETA {{time}}",
+      "summaryTitle": "Batch Complete  {{count}} videos  {{cards}} cards"
     },
     "error": {
       "processingFailed": "Processing failed:",
