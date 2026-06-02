@@ -29,7 +29,7 @@ if "--version" in sys.argv:
     sys.exit(0)
 
 from core.parse_srt import parse_srt, filter_short_subtitles, Subtitle
-from core.ai_process import process_subtitles_two_phase
+from core.ai_process import process_subtitles_two_phase, process_subtitles_annotate_only
 from core.media_cut import process_media_items
 from core.pack_apkg import create_apkg
 from errors import ClipLingoError, ErrorCode
@@ -179,6 +179,17 @@ def _process_video_to_media(
             if not processed:
                 raise ClipLingoError(ErrorCode.SUBTITLE_EMPTY, f"AI 处理后无保留字幕，请检查 API Key 是否有效或放宽筛选条件")
             progress(2, f"AI 处理完成，保留 {len(processed)} 条有价值内容",
+                     {"retained": len(processed)})
+        elif api_key and select_recommended_only and annotation_system_prompt:
+            progress(2, f"AI 注释（仅注释）{len(subtitles)} 条字幕中...")
+            processed = process_subtitles_annotate_only(
+                subtitles, api_key, annotation_system_prompt,
+                api_base, model_name, source_language, target_language
+            )
+
+            if not processed:
+                raise ClipLingoError(ErrorCode.SUBTITLE_EMPTY, f"AI 注释后无结果，请检查 API Key 是否有效")
+            progress(2, f"AI 注释完成，共 {len(processed)} 条",
                      {"retained": len(processed)})
         else:
             processed = []

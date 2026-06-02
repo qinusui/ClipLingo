@@ -245,6 +245,7 @@ function App() {
   const [batchCancelled, setBatchCancelled] = useState(false);
   const [batchPartialFailed, setBatchPartialFailed] = useState(false); // 批处理中途失败：牌组将不完整
   const batchAbortControllerRef = useRef<AbortController | null>(null);
+  const screeningHandledRef = useRef(false); // 跟踪筛选是否真正执行过（区别于仅注释）
   const [pendingPack, setPendingPack] = useState(false); // 批处理完成后自动打包
   const [customPrompt, setCustomPrompt] = useState<string>(
     savedConfig?.customPrompt || buildPresetPrompt(t('app.prompt.grammarScreenBody'), savedConfig?.sourceLanguage || 'en')
@@ -571,7 +572,7 @@ function App() {
     const remainingSubs = subtitleFiles.slice(1).map(f => f ? f.name : "");
 
     const runCorrection = corrections !== null && !correctionHandled;
-    const runScreening = recommendations !== null && !recommendations?.size ? false : true;
+    const runScreening = screeningHandledRef.current;
     const runAnnotation = annotationPurpose !== null;
 
     // 检测是否使用了机器翻译（workflowPhase 为 annotated 但 annotationPurpose 为 null）
@@ -664,7 +665,7 @@ function App() {
       batchAbortControllerRef.current = null;
       setIsBatchProcessing(false);
     }
-  }, [isBatchProcessing, videoFiles, subtitleFiles, corrections, correctionHandled, recommendations,
+  }, [isBatchProcessing, videoFiles, subtitleFiles, corrections, correctionHandled,
     annotationPurpose, apiKey, apiBase, modelName, aiConcurrency, sourceLanguage, targetLanguage,
     customPrompt, annotationPrompt, filterMinDuration, taskId, t, mtService, deeplApiKey, workflowPhase, batchDone]);
 
@@ -1050,6 +1051,7 @@ function App() {
         return prev;
       });
 
+      screeningHandledRef.current = true;
       setWorkflowPhase('screened');
 
     } catch (error) {
@@ -1063,6 +1065,7 @@ function App() {
       // 保留已有部分结果，回到 screened 状态（而非 idle）
       setRecommendations(prev => {
         if (prev && prev.size > 0) {
+          screeningHandledRef.current = true;
           setWorkflowPhase('screened');
         } else {
           setWorkflowPhase('idle');

@@ -289,6 +289,45 @@ def process_subtitles_two_phase(
     return processed
 
 
+def process_subtitles_annotate_only(
+    subtitles: list,
+    api_key: str,
+    annotation_system_prompt: str,
+    api_base: str = None,
+    model_name: str = None,
+    source_language: str = "en",
+    target_language: str = "zh",
+) -> list[dict]:
+    """仅 AI 注释（跳过筛选），对所有字幕执行注释"""
+    processor = AIProcessor(api_key, api_base, model_name, source_language, target_language)
+
+    subtitle_dicts = [
+        {"index": s.index, "start_sec": s.start_sec, "end_sec": s.end_sec, "text": s.text}
+        for s in subtitles
+    ]
+
+    print(f"开始 AI 注释（仅注释），共 {len(subtitle_dicts)} 条字幕...")
+    annotate_results = processor.process_batch(subtitle_dicts, system_prompt=annotation_system_prompt)
+
+    processed = []
+    for sub, result in zip(subtitle_dicts, annotate_results):
+        if isinstance(result, dict) and not result.get("skip"):
+            processed.append({
+                "index": sub["index"],
+                "start_sec": sub["start_sec"],
+                "end_sec": sub["end_sec"],
+                "text": result.get("corrected_text") or sub["text"],
+                "translation": result.get("translation", ""),
+                "notes": result.get("notes", ""),
+                "word": result.get("word", ""),
+                "definition": result.get("definition", ""),
+                "reason": "",
+            })
+
+    print(f"AI 注释完成（仅注释），共 {len(processed)} 条")
+    return processed
+
+
 if __name__ == '__main__':
     # 测试
     import os

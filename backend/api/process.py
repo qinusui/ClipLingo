@@ -1078,23 +1078,23 @@ async def batch_process(request: BatchProcessRequest):
         original_task = task_store.get(request.task_id, {})
     original_select_recommended_only = original_task.get("select_recommended_only", False)
 
-    # 构建公共提示词
+    # 构建公共提示词 — 筛选和注释独立控制
     screen_full_prompt = None
     annotation_full_prompt = None
-    if request.run_screening or request.run_annotation:
+    if request.run_screening:
         screen_full_prompt = _build_screening_prompt(
             custom_prompt=request.custom_screen_prompt,
             source_language=request.source_language,
             target_language=request.target_language,
         )
 
-        if request.run_annotation and request.annotation_purpose:
-            annotation_full_prompt = _build_annotation_prompt(
-                purpose=request.annotation_purpose,
-                source_language=request.source_language,
-                target_language=request.target_language,
-                custom_criteria=request.custom_annotation_prompt,
-            )
+    if request.run_annotation and request.annotation_purpose:
+        annotation_full_prompt = _build_annotation_prompt(
+            purpose=request.annotation_purpose,
+            source_language=request.source_language,
+            target_language=request.target_language,
+            custom_criteria=request.custom_annotation_prompt,
+        )
 
     # 构建视频名 → 字幕文件名的精确映射（来自前端 subtitle_files）
     subtitle_map: dict[str, str] = {}
