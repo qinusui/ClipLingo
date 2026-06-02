@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from './i18n';
-import { Film, Download, Info, Sparkles, ChevronDown, ChevronUp, MessageSquare, Sun, Moon, Monitor, BookOpen, GraduationCap, FolderOpen, X, ExternalLink, RefreshCw, RotateCcw, FileSpreadsheet, FileJson, Palette, CheckCircle } from 'lucide-react';
+import { Film, Download, Info, Sparkles, ChevronDown, ChevronUp, MessageSquare, Sun, Moon, Monitor, BookOpen, GraduationCap, FolderOpen, X, ExternalLink, RefreshCw, RotateCcw, FileSpreadsheet, FileJson, Palette, CheckCircle, PlaySquare } from 'lucide-react';
 import { Button } from './components/Button';
 import { Card, CardContent, CardHeader, CardTitle } from './components/Card';
 import { ProgressBar } from './components/ProgressBar';
@@ -1747,6 +1747,14 @@ function App() {
               <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">ClipLingo</h1>
             </div>
             <div className="flex items-center gap-4">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.open('/player', '_blank', 'noopener,noreferrer')}
+              >
+                <PlaySquare className="w-4 h-4 mr-2" />
+                播放器模式
+              </Button>
               <Button
                 variant="ghost"
                 size="sm"

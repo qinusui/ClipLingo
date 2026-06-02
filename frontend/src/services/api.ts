@@ -47,7 +47,8 @@ export const subtitleAPI = {
     formData.append('video', video);
     const params = new URLSearchParams();
     params.append('min_duration', minDuration.toString());
-    if (language) params.append('language', language);
+    const normalizedLanguage = language?.trim();
+    if (normalizedLanguage) params.append('language', normalizedLanguage);
     if (modelName) params.append('model_name', modelName);
     if (asrEngine) params.append('asr_engine', asrEngine);
 

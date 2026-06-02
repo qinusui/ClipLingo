@@ -44,8 +44,15 @@ def _get_bin_path(tool_name: str) -> str:
 _NO_WINDOW = {"creationflags": 0x08000000} if sys.platform == "win32" else {}
 
 
+def _normalize_language(language: str | None) -> str | None:
+    if language is None:
+        return None
+    normalized = language.strip()
+    return normalized or None
+
+
 def _asr_subprocess(video_path: str, srt_path: str, asr_engine: str, model_name: str,
-                    language: str, result_path: str, progress_pipe):
+                    language: str | None, result_path: str, progress_pipe):
     """Run ASR transcription in an isolated child process; report progress via Pipe."""
     _sys = sys
     _sys.path.append(_PROJECT_ROOT)
@@ -69,6 +76,7 @@ def _asr_subprocess(video_path: str, srt_path: str, asr_engine: str, model_name:
         except Exception:
             duration_sec = 0.0
 
+        language = _normalize_language(language)
         progress_pipe.send({"step": "loading", "message": f"初始化 {asr_engine} 引擎..."})
 
         if asr_engine == "faster_whisper":
@@ -161,7 +169,7 @@ def run_transcribe(
         proc = multiprocessing.Process(
             target=_asr_subprocess,
             args=(video_path_str, srt_path_str, asr_engine, model_name,
-                  language or "", result_json_path, child_conn),
+                  _normalize_language(language), result_json_path, child_conn),
             daemon=True,
         )
         proc.start()

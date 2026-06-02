@@ -284,6 +284,18 @@ async def root():
     }
 
 
+@app.get("/player")
+async def player_root():
+    frontend_index = frontend_dist / "index.html"
+    if frontend_index.exists():
+        return FileResponse(frontend_index)
+    return {
+        "message": "ClipLingo Player",
+        "version": "1.4.5",
+        "docs": "/docs"
+    }
+
+
 @app.get("/favicon.ico")
 async def favicon_ico():
     """返回 favicon.ico"""
