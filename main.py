@@ -180,7 +180,7 @@ def _process_video_to_media(
                 raise ClipLingoError(ErrorCode.SUBTITLE_EMPTY, f"AI 处理后无保留字幕，请检查 API Key 是否有效或放宽筛选条件")
             progress(2, f"AI 处理完成，保留 {len(processed)} 条有价值内容",
                      {"retained": len(processed)})
-        elif api_key and select_recommended_only and annotation_system_prompt:
+        elif api_key and annotation_system_prompt:
             progress(2, f"AI 注释（仅注释）{len(subtitles)} 条字幕中...")
             processed = process_subtitles_annotate_only(
                 subtitles, api_key, annotation_system_prompt,
