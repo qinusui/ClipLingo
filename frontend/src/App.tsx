@@ -1591,11 +1591,14 @@ function App() {
       setProcessingMessage('');
       setExtractedSource('');
       transcribedVideoName.current = null;
+      screeningHandledRef.current = false;
+      preheatTriggeredRef.current = false;
       setWorkflowPhase('idle');
       setAnnotationPurpose(null);
       batchTriggeredRef.current = false;
       setIsBatchProcessing(false);
       setBatchDone(false);
+      setProcessingPhase('idle');
       setCardTheme('default');
       setCorrectionHandled(false);
       setCorrections(null);

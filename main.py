@@ -138,9 +138,10 @@ def _process_video_to_media(
         raise ValueError(f"视频 {video_stem} 没有符合条件的字幕")
 
     # Step 2: AI 处理（如有预处理数据则跳过）
-    # 检查 pre_processed 是否包含实际 AI 富化数据（而非仅有索引的空壳）
+    # 检查 pre_processed 是否包含实际 AI 数据（筛选 reason 或注释 translation/notes/word）
+    # 仅含 index 的空壳不算有数据
     has_ai_data = pre_processed and any(
-        pp.get("translation") or pp.get("notes") or pp.get("word")
+        pp.get("translation") or pp.get("notes") or pp.get("word") or pp.get("reason")
         for pp in pre_processed
     )
     if has_ai_data:

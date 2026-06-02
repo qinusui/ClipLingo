@@ -40,8 +40,8 @@ class TestBatchProcessRequestSchema:
         assert req.run_correction is True
         assert req.run_screening is True
         assert req.custom_screen_prompt is None
-        assert req.run_annotation is True
-        assert req.annotation_purpose == "grammar"
+        assert req.run_annotation is False
+        assert req.annotation_purpose is None
         assert req.custom_annotation_prompt is None
         assert req.min_duration == 1.0
         assert req.mt_service is None

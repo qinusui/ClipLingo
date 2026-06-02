@@ -178,8 +178,8 @@ class BatchProcessRequest(BaseModel):
     run_correction: bool = True
     run_screening: bool = True
     custom_screen_prompt: Optional[str] = None
-    run_annotation: bool = True
-    annotation_purpose: Optional[str] = Field(default="grammar", description="'grammar' | 'vocab'")
+    run_annotation: bool = False
+    annotation_purpose: Optional[str] = None
     custom_annotation_prompt: Optional[str] = None
     min_duration: float = Field(default=1.0, description="最短字幕时长（秒）")
     # ── 机器翻译（无 AI 时的替代方案）──
