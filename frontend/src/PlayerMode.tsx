@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, ArrowLeft, Bot, Check, Clock, Download, FileText, Film, GripHorizontal, Maximize2, Mic, Minimize2, Monitor, Moon, Pause, Play, Plus, Sun, Trash2, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Bot, Check, Clock, Download, FileText, Film, GripHorizontal, Maximize2, Mic, Minimize2, Monitor, Moon, Pause, Play, Plus, Settings, Sun, Trash2, X } from 'lucide-react';
 import { Button } from './components/Button';
 import { ProgressBar } from './components/ProgressBar';
 import { Card, CardContent, CardHeader, CardTitle } from './components/Card';
-import { subtitleAPI, processAPI } from './services/api';
+import { AnkiSyncButton } from './components/AnkiSyncButton';
+import { subtitleAPI, processAPI, API_BASE_URL } from './services/api';
 import type { AnnotationPurpose, ASREngine, ASREngineInfo, ProcessedCard, SubtitleItem } from './types';
 import { toast } from './utils/toast';
 import { getApiErrorMessage } from './utils/errors';
@@ -57,6 +58,22 @@ type PlayerCopy = {
   asrEngine: string;
   bcutEngine: string;
   unavailableSuffix: string;
+  playerSettings: string;
+  expandSettings: string;
+  collapseSettings: string;
+  captureSettings: string;
+  pauseAfterCapture: string;
+  cardStyle: string;
+  sentenceCard: string;
+  vocabCard: string;
+  bothCards: string;
+  cardTheme: string;
+  defaultTheme: string;
+  minimalTheme: string;
+  dictionaryTheme: string;
+  netflixTheme: string;
+  showAnkiSync: string;
+  fullscreenOverlays: string;
   whisperModel: string;
   sourceLanguage: string;
   autoDetect: string;
@@ -75,8 +92,14 @@ type PlayerCopy = {
   reselectVideoHint: string;
   grammarAnnotation: string;
   vocabAnnotation: string;
+  originalText: string;
+  translationLabel: string;
+  notesLabel: string;
+  wordLabel: string;
+  definitionLabel: string;
   clear: string;
   remove: string;
+  seekClip: string;
   queueEmpty: string;
   generateDeck: string;
   processingStatus: string;
@@ -135,6 +158,22 @@ const PLAYER_COPY: Record<PlayerLanguage, PlayerCopy> = {
     asrEngine: 'ASR 引擎',
     bcutEngine: '必剪 ASR',
     unavailableSuffix: '不可用',
+    playerSettings: '播放器设置',
+    expandSettings: '展开',
+    collapseSettings: '收起',
+    captureSettings: '捕获设置',
+    pauseAfterCapture: '捕获后暂停视频',
+    cardStyle: '卡片样式',
+    sentenceCard: '句子卡',
+    vocabCard: '词汇卡',
+    bothCards: '句子 + 词汇',
+    cardTheme: '卡片主题',
+    defaultTheme: '默认',
+    minimalTheme: '极简',
+    dictionaryTheme: '词典',
+    netflixTheme: 'Netflix',
+    showAnkiSync: '显示 AnkiConnect 同步',
+    fullscreenOverlays: '全屏覆盖层',
     whisperModel: 'Whisper 模型',
     sourceLanguage: '源语言',
     autoDetect: '自动检测',
@@ -153,8 +192,14 @@ const PLAYER_COPY: Record<PlayerLanguage, PlayerCopy> = {
     reselectVideoHint: '生成前需重新选择视频',
     grammarAnnotation: '语法注释',
     vocabAnnotation: '词汇注释',
+    originalText: '原文',
+    translationLabel: '翻译',
+    notesLabel: '注释',
+    wordLabel: '词条',
+    definitionLabel: '释义',
     clear: '清空',
     remove: '移除',
+    seekClip: '跳到片段',
     queueEmpty: '播放时按 S 捕获当前字幕',
     generateDeck: '生成 Anki 牌组',
     processingStatus: '制卡状态',
@@ -211,6 +256,22 @@ const PLAYER_COPY: Record<PlayerLanguage, PlayerCopy> = {
     asrEngine: 'ASR engine',
     bcutEngine: 'Bcut ASR',
     unavailableSuffix: 'unavailable',
+    playerSettings: 'Player settings',
+    expandSettings: 'Expand',
+    collapseSettings: 'Collapse',
+    captureSettings: 'Capture settings',
+    pauseAfterCapture: 'Pause video after capture',
+    cardStyle: 'Card style',
+    sentenceCard: 'Sentence card',
+    vocabCard: 'Vocabulary card',
+    bothCards: 'Sentence + vocabulary',
+    cardTheme: 'Card theme',
+    defaultTheme: 'Default',
+    minimalTheme: 'Minimal',
+    dictionaryTheme: 'Dictionary',
+    netflixTheme: 'Netflix',
+    showAnkiSync: 'Show AnkiConnect sync',
+    fullscreenOverlays: 'Fullscreen overlays',
     whisperModel: 'Whisper model',
     sourceLanguage: 'Source language',
     autoDetect: 'Auto detect',
@@ -229,8 +290,14 @@ const PLAYER_COPY: Record<PlayerLanguage, PlayerCopy> = {
     reselectVideoHint: 'reselect the video before generating',
     grammarAnnotation: 'Grammar notes',
     vocabAnnotation: 'Vocabulary notes',
+    originalText: 'Original',
+    translationLabel: 'Translation',
+    notesLabel: 'Notes',
+    wordLabel: 'Word',
+    definitionLabel: 'Definition',
     clear: 'Clear',
     remove: 'Remove',
+    seekClip: 'Jump to clip',
     queueEmpty: 'Press S during playback to capture the current subtitle',
     generateDeck: 'Generate Anki deck',
     processingStatus: 'Build Status',
@@ -274,6 +341,7 @@ const PLAYER_COPY: Record<PlayerLanguage, PlayerCopy> = {
 const PLAYER_QUEUE_STORAGE_KEY = 'cliplingo_player_queue_v1';
 const PLAYER_ASR_STORAGE_KEY = 'cliplingo_player_asr_v1';
 const PLAYER_FULLSCREEN_OVERLAY_STORAGE_KEY = 'cliplingo_player_fullscreen_overlays_v1';
+const PLAYER_SETTINGS_STORAGE_KEY = 'cliplingo_player_settings_v1';
 const CAPTURE_GRACE_BEFORE_SEC = 0.35;
 const CAPTURE_GRACE_AFTER_SEC = 1.5;
 const LANGUAGE_CODES = ['en', 'zh', 'ja', 'ko', 'fr', 'de', 'es', 'it', 'pt', 'ru', 'ar', 'th', 'vi'] as const;
@@ -284,13 +352,26 @@ const WHISPER_MODELS = [
   { key: 'medium', label: 'medium', size: '~1.5 GB' },
   { key: 'large', label: 'large', size: '~2.9 GB' },
 ] as const;
+const CARD_THEME_KEYS = ['default', 'minimal', 'dictionary', 'netflix'] as const;
 
 type WhisperModel = typeof WHISPER_MODELS[number]['key'];
+type PlayerCardStyleSetting = 'sentence' | 'vocab' | 'both';
+type PlayerCardThemeSetting = typeof CARD_THEME_KEYS[number];
 
 type PlayerASRSettings = {
   asrEngine: ASREngine;
   whisperModel: WhisperModel;
   transcribeLanguage: string;
+};
+
+type PlayerSettings = {
+  pauseAfterCapture: boolean;
+  annotationPurpose: AnnotationPurpose;
+  cardStyle: PlayerCardStyleSetting;
+  cardTheme: PlayerCardThemeSetting;
+  showAnkiSync: boolean;
+  showFullscreenSubtitleList: boolean;
+  showFullscreenCaption: boolean;
 };
 
 type PlayerQueueSnapshot = {
@@ -332,6 +413,23 @@ function isWhisperModel(value: unknown): value is WhisperModel {
   return WHISPER_MODELS.some((model) => model.key === value);
 }
 
+function isAnnotationPurpose(value: unknown): value is AnnotationPurpose {
+  return value === 'grammar' || value === 'vocab';
+}
+
+function isPlayerCardStyle(value: unknown): value is PlayerCardStyleSetting {
+  return value === 'sentence' || value === 'vocab' || value === 'both';
+}
+
+function isPlayerCardTheme(value: unknown): value is PlayerCardThemeSetting {
+  return CARD_THEME_KEYS.some((theme) => theme === value);
+}
+
+function cardStylesFromSetting(setting: PlayerCardStyleSetting): string[] {
+  if (setting === 'both') return ['sentence', 'vocab'];
+  return [setting];
+}
+
 function loadPlayerASRSettings(defaultLanguage?: string): PlayerASRSettings {
   try {
     const raw = localStorage.getItem(PLAYER_ASR_STORAGE_KEY);
@@ -349,6 +447,35 @@ function loadPlayerASRSettings(defaultLanguage?: string): PlayerASRSettings {
       whisperModel: 'base',
       transcribeLanguage: defaultLanguage || '',
     };
+  }
+}
+
+function loadPlayerSettings(overlaySettings: PlayerFullscreenOverlaySettings): PlayerSettings {
+  const defaults: PlayerSettings = {
+    pauseAfterCapture: false,
+    annotationPurpose: 'grammar',
+    cardStyle: 'sentence',
+    cardTheme: 'default',
+    showAnkiSync: true,
+    showFullscreenSubtitleList: overlaySettings.showSubtitleList,
+    showFullscreenCaption: overlaySettings.showCurrentSubtitle,
+  };
+
+  try {
+    const raw = localStorage.getItem(PLAYER_SETTINGS_STORAGE_KEY);
+    if (!raw) return defaults;
+    const parsed = JSON.parse(raw) as Partial<PlayerSettings>;
+    return {
+      pauseAfterCapture: typeof parsed.pauseAfterCapture === 'boolean' ? parsed.pauseAfterCapture : defaults.pauseAfterCapture,
+      annotationPurpose: isAnnotationPurpose(parsed.annotationPurpose) ? parsed.annotationPurpose : defaults.annotationPurpose,
+      cardStyle: isPlayerCardStyle(parsed.cardStyle) ? parsed.cardStyle : defaults.cardStyle,
+      cardTheme: isPlayerCardTheme(parsed.cardTheme) ? parsed.cardTheme : defaults.cardTheme,
+      showAnkiSync: typeof parsed.showAnkiSync === 'boolean' ? parsed.showAnkiSync : defaults.showAnkiSync,
+      showFullscreenSubtitleList: typeof parsed.showFullscreenSubtitleList === 'boolean' ? parsed.showFullscreenSubtitleList : defaults.showFullscreenSubtitleList,
+      showFullscreenCaption: typeof parsed.showFullscreenCaption === 'boolean' ? parsed.showFullscreenCaption : defaults.showFullscreenCaption,
+    };
+  } catch {
+    return defaults;
   }
 }
 
@@ -557,6 +684,7 @@ export default function PlayerMode() {
   const [restoredSnapshot] = useState(loadPlayerQueueSnapshot);
   const [initialASRSettings] = useState(() => loadPlayerASRSettings(loadAIConfig().sourceLanguage));
   const [initialOverlaySettings] = useState(loadPlayerFullscreenOverlaySettings);
+  const [initialPlayerSettings] = useState(() => loadPlayerSettings(initialOverlaySettings));
   const [isFirefox] = useState(() => typeof navigator !== 'undefined' && /firefox/i.test(navigator.userAgent));
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoUrl, setVideoUrl] = useState('');
@@ -578,15 +706,20 @@ export default function PlayerMode() {
   const [taskId, setTaskId] = useState<string | null>(null);
   const [apkgUrl, setApkgUrl] = useState<string | null>(null);
   const [cards, setCards] = useState<ProcessedCard[]>([]);
-  const [annotationPurpose, setAnnotationPurpose] = useState<AnnotationPurpose>('grammar');
+  const [showSettings, setShowSettings] = useState(false);
+  const [pauseAfterCapture, setPauseAfterCapture] = useState(initialPlayerSettings.pauseAfterCapture);
+  const [annotationPurpose, setAnnotationPurpose] = useState<AnnotationPurpose>(initialPlayerSettings.annotationPurpose);
+  const [playerCardStyle, setPlayerCardStyle] = useState<PlayerCardStyleSetting>(initialPlayerSettings.cardStyle);
+  const [playerCardTheme, setPlayerCardTheme] = useState<PlayerCardThemeSetting>(initialPlayerSettings.cardTheme);
+  const [showAnkiSync, setShowAnkiSync] = useState(initialPlayerSettings.showAnkiSync);
   const [asrEngine, setAsrEngine] = useState<ASREngine>(initialASRSettings.asrEngine);
   const [whisperModel, setWhisperModel] = useState<WhisperModel>(initialASRSettings.whisperModel);
   const [transcribeLanguage, setTranscribeLanguage] = useState(initialASRSettings.transcribeLanguage);
   const [asrEngines, setAsrEngines] = useState<ASREngineInfo[]>([]);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [fullscreenNotice, setFullscreenNotice] = useState('');
-  const [showFullscreenSubtitleList, setShowFullscreenSubtitleList] = useState(initialOverlaySettings.showSubtitleList);
-  const [showFullscreenCaption, setShowFullscreenCaption] = useState(initialOverlaySettings.showCurrentSubtitle);
+  const [showFullscreenSubtitleList, setShowFullscreenSubtitleList] = useState(initialPlayerSettings.showFullscreenSubtitleList);
+  const [showFullscreenCaption, setShowFullscreenCaption] = useState(initialPlayerSettings.showFullscreenCaption);
   const [subtitleListPosition, setSubtitleListPosition] = useState(initialOverlaySettings.subtitleListPosition);
   const [currentSubtitlePosition, setCurrentSubtitlePosition] = useState(initialOverlaySettings.currentSubtitlePosition);
   const playerShellRef = useRef<HTMLDivElement>(null);
@@ -606,6 +739,7 @@ export default function PlayerMode() {
   const capturedIndices = useMemo(() => new Set(queue.map((item) => item.subtitleIndex)), [queue]);
   const selectedASREngine = useMemo(() => asrEngines.find((engine) => engine.id === asrEngine), [asrEngine, asrEngines]);
   const selectedEngineUnavailable = asrEngines.length > 0 && selectedASREngine?.available === false;
+  const selectedCardStyles = useMemo(() => cardStylesFromSetting(playerCardStyle), [playerCardStyle]);
   const themeTitle = theme === 'system' ? text.followSystem : theme === 'light' ? text.lightMode : text.darkMode;
 
   const toggleLanguage = () => {
@@ -641,6 +775,31 @@ export default function PlayerMode() {
       // localStorage can fail in private mode; settings simply fall back to defaults.
     }
   }, [asrEngine, whisperModel, transcribeLanguage]);
+
+  useEffect(() => {
+    try {
+      const settings: PlayerSettings = {
+        pauseAfterCapture,
+        annotationPurpose,
+        cardStyle: playerCardStyle,
+        cardTheme: playerCardTheme,
+        showAnkiSync,
+        showFullscreenSubtitleList,
+        showFullscreenCaption,
+      };
+      localStorage.setItem(PLAYER_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+    } catch {
+      // Player preferences are non-critical; controls still work with in-memory state.
+    }
+  }, [
+    pauseAfterCapture,
+    annotationPurpose,
+    playerCardStyle,
+    playerCardTheme,
+    showAnkiSync,
+    showFullscreenSubtitleList,
+    showFullscreenCaption,
+  ]);
 
   useEffect(() => {
     try {
@@ -938,6 +1097,9 @@ export default function PlayerMode() {
         },
       ];
     });
+    if (pauseAfterCapture) {
+      videoRef.current?.pause();
+    }
     const message = text.capturedToast(previewText(subtitle.text));
     if (isFullscreen) {
       showFullscreenNotice(message);
@@ -950,6 +1112,17 @@ export default function PlayerMode() {
 
   const removeFromQueue = (id: string) => {
     setQueue((items) => items.filter((item) => item.id !== id));
+  };
+
+  const updateQueueItem = (id: string, patch: Partial<Pick<CaptureDraft, 'text' | 'translation' | 'notes' | 'word' | 'definition'>>) => {
+    setQueue((items) => items.map((item) => item.id === id ? { ...item, ...patch } : item));
+    setCards([]);
+    setTaskId(null);
+    setApkgUrl(null);
+  };
+
+  const seekToQueueItem = (item: CaptureDraft) => {
+    seekToSubtitle(toSubtitleItem(item, Math.max(0, item.subtitleIndex - 1)));
   };
 
   const clearQueue = () => {
@@ -1059,7 +1232,7 @@ export default function PlayerMode() {
 
       await pollUntil(started.task_id, 'awaiting_styles');
 
-      await processAPI.generateApkg(started.task_id, ['sentence'], 'default', '{}');
+      await processAPI.generateApkg(started.task_id, selectedCardStyles, playerCardTheme, '{}');
       const completed = await pollUntil(started.task_id, 'completed');
       const result = completed.result;
       setApkgUrl(result?.apkg_url || null);
@@ -1084,6 +1257,289 @@ export default function PlayerMode() {
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
   };
+
+  const subtitleListCard = (
+    <Card className={cn(
+      isFullscreen && 'fixed z-30 hidden h-[min(52vh,460px)] w-[min(28rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-md border-white/10 bg-black/65 text-white shadow-2xl backdrop-blur dark:border-white/10 dark:bg-black/65 md:flex',
+      isFullscreen && !showFullscreenSubtitleList && 'md:hidden'
+    )}
+    style={isFullscreen ? { left: subtitleListPosition.x, top: subtitleListPosition.y } : undefined}
+    >
+      <CardHeader
+        className={cn(isFullscreen && 'shrink-0 cursor-move border-white/10 p-3 dark:border-white/10')}
+        onPointerDown={isFullscreen ? (event) => startOverlayDrag(event, 'subtitleList') : undefined}
+      >
+        <CardTitle className={cn('flex items-center gap-2 text-base', isFullscreen && 'text-white')}>
+          {isFullscreen ? <GripHorizontal className="h-4 w-4 text-gray-300" /> : <Clock className="h-4 w-4" />}
+          {text.subtitleList}
+          {(subtitleSource || subtitleFile) && (
+            <span className="text-xs font-normal text-gray-400">{subtitleSource || subtitleFile?.name}</span>
+          )}
+          {isFullscreen && (
+            <button
+              type="button"
+              className="ml-auto rounded p-1 text-gray-300 hover:bg-white/10 hover:text-white"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={() => setShowFullscreenSubtitleList(false)}
+              title={text.remove}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className={cn(isFullscreen && 'min-h-0 flex-1 p-0')}>
+        <div className={cn(
+          'max-h-[420px] overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700',
+          isFullscreen && 'h-full max-h-none rounded-none border-0'
+        )}>
+          {subtitles.map((subtitle) => {
+            const active = activeSubtitleIndex === subtitle.index;
+            const captured = capturedIndices.has(subtitle.index);
+            return (
+              <button
+                key={`${subtitle.index}-${subtitle.start_sec}`}
+                ref={(node) => {
+                  if (node) {
+                    subtitleButtonRefs.current.set(subtitle.index, node);
+                  } else {
+                    subtitleButtonRefs.current.delete(subtitle.index);
+                  }
+                }}
+                type="button"
+                onClick={() => seekToSubtitle(subtitle)}
+                onDoubleClick={() => captureSubtitle(subtitle)}
+                className={cn(
+                  'grid w-full grid-cols-[56px_minmax(0,1fr)_72px] gap-3 border-b border-gray-100 px-3 py-2 text-left text-sm transition-colors last:border-b-0 dark:border-gray-700',
+                  active ? 'bg-primary-50 text-primary-900 dark:bg-primary-900/30 dark:text-primary-100' : 'hover:bg-gray-50 dark:hover:bg-gray-700',
+                )}
+              >
+                <span className="text-xs text-gray-400">{formatTime(subtitle.start_sec)}</span>
+                <span className="min-w-0">{subtitle.text}</span>
+                <span className={cn('inline-flex items-center justify-end gap-1 text-xs', captured ? 'text-green-600 dark:text-green-400' : 'text-gray-400')}>
+                  {captured && <Check className="h-3 w-3" />}
+                  {captured ? text.status.captured : `${subtitle.duration.toFixed(1)}s`}
+                </span>
+              </button>
+            );
+          })}
+          {subtitles.length === 0 && (
+            <div className="p-8 text-center text-sm text-gray-500 dark:text-gray-400">
+              {text.subtitleEmpty}
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+
+  const queueCard = (
+    <Card className={cn(
+      isFullscreen && 'flex h-full min-h-0 flex-col overflow-hidden rounded-md border-white/10 bg-black/65 text-white shadow-2xl backdrop-blur dark:border-white/10 dark:bg-black/65'
+    )}>
+      <CardHeader className={cn(isFullscreen && 'shrink-0 border-white/10 p-3 dark:border-white/10')}>
+        <CardTitle className={cn('text-base', isFullscreen && 'text-white')}>{text.queueTitle} ({queue.length})</CardTitle>
+      </CardHeader>
+      <CardContent className={cn(
+        'space-y-3',
+        isFullscreen && 'flex min-h-0 flex-1 flex-col p-3'
+      )}>
+        {queueVideoName && (
+          <div className={cn(
+            'rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500 dark:bg-gray-800 dark:text-gray-400',
+            isFullscreen && 'bg-white/10 text-gray-200 dark:bg-white/10 dark:text-gray-200'
+          )}>
+            {text.queueSourcePrefix}: {queueVideoName}{!videoFile && ` · ${text.reselectVideoHint}`}
+          </div>
+        )}
+        <div className="flex gap-2">
+          <select
+            value={annotationPurpose}
+            onChange={(e) => setAnnotationPurpose(e.target.value as AnnotationPurpose)}
+            className="min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800"
+          >
+            <option value="grammar">{text.grammarAnnotation}</option>
+            <option value="vocab">{text.vocabAnnotation}</option>
+          </select>
+          <Button variant="outline" size="sm" onClick={() => void annotateQueue()} disabled={queue.length === 0 || isAnnotating || isProcessing}>
+            <Bot className="mr-1.5 h-4 w-4" />
+            AI
+          </Button>
+          <Button variant="outline" size="sm" onClick={clearQueue} disabled={queue.length === 0 || isProcessing}>
+            {text.clear}
+          </Button>
+        </div>
+
+        <div className={cn(
+          'max-h-[460px] space-y-2 overflow-y-auto',
+          isFullscreen && 'min-h-0 flex-1 max-h-none'
+        )}>
+          {queue.map((item, index) => {
+            const editingDisabled = isProcessing || item.status === 'annotating' || item.status === 'media_processing';
+            return (
+              <div
+                key={item.id}
+                className={cn(
+                  'rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-700',
+                  isFullscreen && 'border-white/10 bg-white/5 dark:border-white/10'
+                )}
+              >
+                <div className="mb-2 flex items-center gap-2">
+                  <span className="font-medium text-gray-500 dark:text-gray-400">#{index + 1}</span>
+                  <button
+                    type="button"
+                    onClick={() => seekToQueueItem(item)}
+                    className="rounded px-1.5 py-0.5 text-xs text-gray-400 hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-gray-700 dark:hover:text-primary-300"
+                    title={text.seekClip}
+                    disabled={!videoUrl}
+                  >
+                    {formatTime(item.start_sec)} - {formatTime(item.end_sec)}
+                  </button>
+                  <span className="ml-auto rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                    {statusLabel(item.status, text)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => removeFromQueue(item.id)}
+                    className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-red-600 dark:hover:bg-gray-700"
+                    disabled={isProcessing}
+                    title={text.remove}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <label className="block">
+                  <span className={cn('mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400', isFullscreen && 'text-gray-300')}>
+                    {text.originalText}
+                  </span>
+                  <textarea
+                    value={item.text}
+                    onChange={(event) => updateQueueItem(item.id, { text: event.target.value })}
+                    disabled={editingDisabled}
+                    rows={2}
+                    className={cn(
+                      'w-full resize-y rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 disabled:bg-gray-100 disabled:text-gray-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:disabled:bg-gray-700',
+                      isFullscreen && 'border-white/10 bg-black/30 text-white placeholder:text-gray-500 dark:border-white/10 dark:bg-black/30'
+                    )}
+                  />
+                </label>
+
+                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <label className="block">
+                    <span className={cn('mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400', isFullscreen && 'text-gray-300')}>
+                      {text.wordLabel}
+                    </span>
+                    <input
+                      value={item.word || ''}
+                      onChange={(event) => updateQueueItem(item.id, { word: event.target.value })}
+                      disabled={editingDisabled}
+                      className={cn(
+                        'w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 disabled:bg-gray-100 disabled:text-gray-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:disabled:bg-gray-700',
+                        isFullscreen && 'border-white/10 bg-black/30 text-white dark:border-white/10 dark:bg-black/30'
+                      )}
+                    />
+                  </label>
+                  <label className="block">
+                    <span className={cn('mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400', isFullscreen && 'text-gray-300')}>
+                      {text.definitionLabel}
+                    </span>
+                    <input
+                      value={item.definition || ''}
+                      onChange={(event) => updateQueueItem(item.id, { definition: event.target.value })}
+                      disabled={editingDisabled}
+                      className={cn(
+                        'w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 disabled:bg-gray-100 disabled:text-gray-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:disabled:bg-gray-700',
+                        isFullscreen && 'border-white/10 bg-black/30 text-white dark:border-white/10 dark:bg-black/30'
+                      )}
+                    />
+                  </label>
+                </div>
+
+                <label className="mt-2 block">
+                  <span className={cn('mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400', isFullscreen && 'text-gray-300')}>
+                    {text.translationLabel}
+                  </span>
+                  <textarea
+                    value={item.translation || ''}
+                    onChange={(event) => updateQueueItem(item.id, { translation: event.target.value })}
+                    disabled={editingDisabled}
+                    rows={2}
+                    className={cn(
+                      'w-full resize-y rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 disabled:bg-gray-100 disabled:text-gray-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:disabled:bg-gray-700',
+                      isFullscreen && 'border-white/10 bg-black/30 text-white dark:border-white/10 dark:bg-black/30'
+                    )}
+                  />
+                </label>
+
+                <label className="mt-2 block">
+                  <span className={cn('mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400', isFullscreen && 'text-gray-300')}>
+                    {text.notesLabel}
+                  </span>
+                  <textarea
+                    value={item.notes || ''}
+                    onChange={(event) => updateQueueItem(item.id, { notes: event.target.value })}
+                    disabled={editingDisabled}
+                    rows={2}
+                    className={cn(
+                      'w-full resize-y rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 disabled:bg-gray-100 disabled:text-gray-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:disabled:bg-gray-700',
+                      isFullscreen && 'border-white/10 bg-black/30 text-white dark:border-white/10 dark:bg-black/30'
+                    )}
+                  />
+                </label>
+              </div>
+            );
+          })}
+          {queue.length === 0 && (
+            <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+              {text.queueEmpty}
+            </div>
+          )}
+        </div>
+
+        <Button className="w-full" onClick={() => void processQueue()} disabled={queue.length === 0 || !videoFile || isProcessing}>
+          <Download className="mr-2 h-4 w-4" />
+          {text.generateDeck}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+
+  const processingStatusCard = !isFullscreen && (isProcessing || processingMessage || apkgUrl) ? (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">{text.processingStatus}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <ProgressBar progress={Math.min(100, processingProgress)} />
+        <div className="text-sm text-gray-500 dark:text-gray-400">{processingMessage || text.waitingProcess}</div>
+        {taskId && <div className="text-xs text-gray-400">{text.task}: {taskId}</div>}
+        {apkgUrl && (
+          <a
+            href={apkgUrl}
+            className="inline-flex w-full items-center justify-center rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700"
+            download
+          >
+            {text.downloadApkg}
+          </a>
+        )}
+        {showAnkiSync && cards.length > 0 && (
+          <div className="flex justify-center">
+            <AnkiSyncButton
+              cards={cards}
+              deckName={videoFile?.name?.replace(/\.[^.]+$/, '') || 'ClipLingo Player'}
+              apiBase={API_BASE_URL}
+              cardStyles={selectedCardStyles}
+              theme={playerCardTheme}
+            />
+          </div>
+        )}
+        {cards.length > 0 && (
+          <div className="text-sm text-green-600 dark:text-green-400">{text.cardsGenerated(cards.length)}</div>
+        )}
+      </CardContent>
+    </Card>
+  ) : null;
 
   return (
     <div
@@ -1244,6 +1700,103 @@ export default function PlayerMode() {
           </div>
           )}
 
+          {!isFullscreen && (
+            <Card>
+              <CardHeader className="p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Settings className="h-4 w-4" />
+                    {text.playerSettings}
+                  </CardTitle>
+                  <Button variant="ghost" size="sm" onClick={() => setShowSettings((value) => !value)}>
+                    {showSettings ? text.collapseSettings : text.expandSettings}
+                  </Button>
+                </div>
+              </CardHeader>
+              {showSettings && (
+                <CardContent className="space-y-4 p-3">
+                  <div className="grid gap-3 lg:grid-cols-3">
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">{text.captureSettings}</span>
+                      <select
+                        value={annotationPurpose}
+                        onChange={(e) => setAnnotationPurpose(e.target.value as AnnotationPurpose)}
+                        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800"
+                      >
+                        <option value="grammar">{text.grammarAnnotation}</option>
+                        <option value="vocab">{text.vocabAnnotation}</option>
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">{text.cardStyle}</span>
+                      <select
+                        value={playerCardStyle}
+                        onChange={(e) => setPlayerCardStyle(e.target.value as PlayerCardStyleSetting)}
+                        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800"
+                      >
+                        <option value="sentence">{text.sentenceCard}</option>
+                        <option value="vocab">{text.vocabCard}</option>
+                        <option value="both">{text.bothCards}</option>
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">{text.cardTheme}</span>
+                      <select
+                        value={playerCardTheme}
+                        onChange={(e) => setPlayerCardTheme(e.target.value as PlayerCardThemeSetting)}
+                        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800"
+                      >
+                        <option value="default">{text.defaultTheme}</option>
+                        <option value="minimal">{text.minimalTheme}</option>
+                        <option value="dictionary">{text.dictionaryTheme}</option>
+                        <option value="netflix">{text.netflixTheme}</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                    <label className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={pauseAfterCapture}
+                        onChange={(e) => setPauseAfterCapture(e.target.checked)}
+                        className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      />
+                      <span>{text.pauseAfterCapture}</span>
+                    </label>
+                    <label className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={showAnkiSync}
+                        onChange={(e) => setShowAnkiSync(e.target.checked)}
+                        className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      />
+                      <span>{text.showAnkiSync}</span>
+                    </label>
+                    <label className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={showFullscreenSubtitleList}
+                        onChange={(e) => setShowFullscreenSubtitleList(e.target.checked)}
+                        className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      />
+                      <span>{text.fullscreenOverlays}: {text.subtitleList}</span>
+                    </label>
+                    <label className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={showFullscreenCaption}
+                        onChange={(e) => setShowFullscreenCaption(e.target.checked)}
+                        className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      />
+                      <span>{text.fullscreenOverlays}: {text.currentSubtitleLabel}</span>
+                    </label>
+                  </div>
+                </CardContent>
+              )}
+            </Card>
+          )}
+
           {!isFullscreen && (isTranscribing || transcribeMessage) && (
             <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800">
               <ProgressBar progress={transcribeProgress} />
@@ -1339,192 +1892,17 @@ export default function PlayerMode() {
             </div>
           )}
 
-          <Card className={cn(
-            isFullscreen && 'fixed z-30 hidden h-[min(52vh,460px)] w-[min(28rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-md border-white/10 bg-black/65 text-white shadow-2xl backdrop-blur dark:border-white/10 dark:bg-black/65 md:flex',
-            isFullscreen && !showFullscreenSubtitleList && 'md:hidden'
-          )}
-          style={isFullscreen ? { left: subtitleListPosition.x, top: subtitleListPosition.y } : undefined}
-          >
-            <CardHeader
-              className={cn(isFullscreen && 'shrink-0 cursor-move border-white/10 p-3 dark:border-white/10')}
-              onPointerDown={isFullscreen ? (event) => startOverlayDrag(event, 'subtitleList') : undefined}
-            >
-              <CardTitle className={cn('flex items-center gap-2 text-base', isFullscreen && 'text-white')}>
-                {isFullscreen ? <GripHorizontal className="h-4 w-4 text-gray-300" /> : <Clock className="h-4 w-4" />}
-                {text.subtitleList}
-                {(subtitleSource || subtitleFile) && (
-                  <span className="text-xs font-normal text-gray-400">{subtitleSource || subtitleFile?.name}</span>
-                )}
-                {isFullscreen && (
-                  <button
-                    type="button"
-                    className="ml-auto rounded p-1 text-gray-300 hover:bg-white/10 hover:text-white"
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onClick={() => setShowFullscreenSubtitleList(false)}
-                    title={text.remove}
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                )}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className={cn(isFullscreen && 'min-h-0 flex-1 p-0')}>
-              <div className={cn(
-                'max-h-[420px] overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700',
-                isFullscreen && 'h-full max-h-none rounded-none border-0'
-              )}>
-                {subtitles.map((subtitle) => {
-                  const active = activeSubtitleIndex === subtitle.index;
-                  const captured = capturedIndices.has(subtitle.index);
-                  return (
-                    <button
-                      key={`${subtitle.index}-${subtitle.start_sec}`}
-                      ref={(node) => {
-                        if (node) {
-                          subtitleButtonRefs.current.set(subtitle.index, node);
-                        } else {
-                          subtitleButtonRefs.current.delete(subtitle.index);
-                        }
-                      }}
-                      type="button"
-                      onClick={() => seekToSubtitle(subtitle)}
-                      onDoubleClick={() => captureSubtitle(subtitle)}
-                      className={cn(
-                        'grid w-full grid-cols-[56px_minmax(0,1fr)_72px] gap-3 border-b border-gray-100 px-3 py-2 text-left text-sm transition-colors last:border-b-0 dark:border-gray-700',
-                        active ? 'bg-primary-50 text-primary-900 dark:bg-primary-900/30 dark:text-primary-100' : 'hover:bg-gray-50 dark:hover:bg-gray-700',
-                      )}
-                    >
-                      <span className="text-xs text-gray-400">{formatTime(subtitle.start_sec)}</span>
-                      <span className="min-w-0">{subtitle.text}</span>
-                  <span className={cn('inline-flex items-center justify-end gap-1 text-xs', captured ? 'text-green-600 dark:text-green-400' : 'text-gray-400')}>
-                        {captured && <Check className="h-3 w-3" />}
-                        {captured ? text.status.captured : `${subtitle.duration.toFixed(1)}s`}
-                      </span>
-                    </button>
-                  );
-                })}
-                {subtitles.length === 0 && (
-                  <div className="p-8 text-center text-sm text-gray-500 dark:text-gray-400">
-                    {text.subtitleEmpty}
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
+          {!isFullscreen && queueCard}
+          {isFullscreen && subtitleListCard}
         </section>
 
         <aside className={cn(
           'space-y-4',
           isFullscreen && 'fixed bottom-24 left-3 z-30 hidden h-[min(38vh,360px)] w-[min(28rem,calc(100vw-1.5rem))] min-h-0 space-y-0 xl:block'
         )}>
-          <Card className={cn(
-            isFullscreen && 'flex h-full min-h-0 flex-col overflow-hidden rounded-md border-white/10 bg-black/65 text-white shadow-2xl backdrop-blur dark:border-white/10 dark:bg-black/65'
-          )}>
-            <CardHeader className={cn(isFullscreen && 'shrink-0 border-white/10 p-3 dark:border-white/10')}>
-              <CardTitle className={cn('text-base', isFullscreen && 'text-white')}>{text.queueTitle} ({queue.length})</CardTitle>
-            </CardHeader>
-            <CardContent className={cn(
-              'space-y-3',
-              isFullscreen && 'flex min-h-0 flex-1 flex-col p-3'
-            )}>
-              {queueVideoName && (
-                <div className={cn(
-                  'rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500 dark:bg-gray-800 dark:text-gray-400',
-                  isFullscreen && 'bg-white/10 text-gray-200 dark:bg-white/10 dark:text-gray-200'
-                )}>
-                  {text.queueSourcePrefix}: {queueVideoName}{!videoFile && ` · ${text.reselectVideoHint}`}
-                </div>
-              )}
-              <div className="flex gap-2">
-                <select
-                  value={annotationPurpose}
-                  onChange={(e) => setAnnotationPurpose(e.target.value as AnnotationPurpose)}
-                  className="min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800"
-                >
-                  <option value="grammar">{text.grammarAnnotation}</option>
-                  <option value="vocab">{text.vocabAnnotation}</option>
-                </select>
-                <Button variant="outline" size="sm" onClick={() => void annotateQueue()} disabled={queue.length === 0 || isAnnotating || isProcessing}>
-                  <Bot className="mr-1.5 h-4 w-4" />
-                  AI
-                </Button>
-                <Button variant="outline" size="sm" onClick={clearQueue} disabled={queue.length === 0 || isProcessing}>
-                  {text.clear}
-                </Button>
-              </div>
-
-              <div className={cn(
-                'max-h-[460px] space-y-2 overflow-y-auto',
-                isFullscreen && 'min-h-0 flex-1 max-h-none'
-              )}>
-                {queue.map((item, index) => (
-                  <div
-                    key={item.id}
-                    className={cn(
-                      'rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-700',
-                      isFullscreen && 'border-white/10 bg-white/5 dark:border-white/10'
-                    )}
-                  >
-                    <div className="mb-2 flex items-center gap-2">
-                      <span className="font-medium text-gray-500 dark:text-gray-400">#{index + 1}</span>
-                      <span className="text-xs text-gray-400">{formatTime(item.start_sec)} - {formatTime(item.end_sec)}</span>
-                      <span className="ml-auto rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-700 dark:text-gray-300">
-                        {statusLabel(item.status, text)}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => removeFromQueue(item.id)}
-                        className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-red-600 dark:hover:bg-gray-700"
-                        disabled={isProcessing}
-                        title={text.remove}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                    <div className={cn('text-gray-900 dark:text-gray-100', isFullscreen && 'text-gray-100')}>{item.text}</div>
-                    {item.translation && (
-                      <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">{item.translation}</div>
-                    )}
-                  </div>
-                ))}
-                {queue.length === 0 && (
-                  <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
-                    {text.queueEmpty}
-                  </div>
-                )}
-              </div>
-
-              <Button className="w-full" onClick={() => void processQueue()} disabled={queue.length === 0 || !videoFile || isProcessing}>
-                <Download className="mr-2 h-4 w-4" />
-                {text.generateDeck}
-              </Button>
-            </CardContent>
-          </Card>
-
-          {!isFullscreen && (isProcessing || processingMessage || apkgUrl) && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">{text.processingStatus}</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <ProgressBar progress={Math.min(100, processingProgress)} />
-                <div className="text-sm text-gray-500 dark:text-gray-400">{processingMessage || text.waitingProcess}</div>
-                {taskId && <div className="text-xs text-gray-400">{text.task}: {taskId}</div>}
-                {apkgUrl && (
-                  <a
-                    href={apkgUrl}
-                    className="inline-flex w-full items-center justify-center rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700"
-                    download
-                  >
-                    {text.downloadApkg}
-                  </a>
-                )}
-                {cards.length > 0 && (
-                  <div className="text-sm text-green-600 dark:text-green-400">{text.cardsGenerated(cards.length)}</div>
-                )}
-              </CardContent>
-            </Card>
-          )}
+          {!isFullscreen && subtitleListCard}
+          {isFullscreen && queueCard}
+          {processingStatusCard}
         </aside>
       </main>
     </div>
