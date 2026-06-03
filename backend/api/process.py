@@ -23,6 +23,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 from models.schemas import ProcessRequest, ProcessResult, ProcessedCard, ProcessProgress
+from services.task_runtime import TaskRuntime, TASK_TTL_SECONDS
 
 # 导入现有模块
 import sys
@@ -48,37 +49,22 @@ else:
     TEMP_DIR = Path(__file__).parent.parent.parent / "temp"
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
-# 任务进度存储 (task_id -> progress dict)
-task_store: dict = {}
-task_store_lock = threading.Lock()
-
 # 任务持久化文件（重启恢复 + TTL 清理）：frozen 模式写 %APPDATA%
 if getattr(sys, 'frozen', False):
     TASKS_FILE = Path(os.environ.get('APPDATA', os.path.expanduser('~'))) / 'ClipLingo' / 'tasks.json'
 else:
     TASKS_FILE = TEMP_DIR / "tasks.json"
 
-# 过期任务保留时长（秒）：超过则启动加载时丢弃
-TASK_TTL_SECONDS = 24 * 3600
+_task_runtime = TaskRuntime(TASKS_FILE)
 
-# 仅持久化重启恢复 / resume 所需的耐久字段，
-# 排除大块 result/cards 与高频心跳字段（step/message/details）
-_DURABLE_TASK_FIELDS = (
-    "status",
-    "output_dir",
-    "merge",
-    "total_videos",
-    "select_recommended_only",
-    "video_names_order",
-    "error",
-    "error_code",
-    "created_at",
-)
+# Backwards-compatible aliases for tests and legacy helpers.
+task_store = _task_runtime.store
+task_store_lock = _task_runtime.lock
 
 
 def _durable_task_view(task: dict) -> dict:
     """提取单个 task 的耐久子集（用于落盘）。"""
-    return {k: task[k] for k in _DURABLE_TASK_FIELDS if k in task}
+    return _task_runtime.durable_view(task)
 
 
 def _flush_tasks() -> None:
@@ -86,38 +72,14 @@ def _flush_tasks() -> None:
 
     注意：调用方必须已持有 task_store_lock（本函数不再加锁，避免重入死锁）。
     """
-    try:
-        snapshot = {tid: _durable_task_view(t) for tid, t in task_store.items()}
-        TASKS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        tmp = TASKS_FILE.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp.replace(TASKS_FILE)
-    except Exception as e:
-        logger.warning("持久化 tasks.json 失败: %s", e)
+    _task_runtime.tasks_file = TASKS_FILE
+    _task_runtime.flush_locked()
 
 
 def _load_tasks() -> None:
     """启动时从 tasks.json 恢复 task_store，并按 TTL 丢弃过期任务。"""
-    if not TASKS_FILE.exists():
-        return
-    try:
-        data = json.loads(TASKS_FILE.read_text(encoding="utf-8"))
-    except Exception as e:
-        logger.warning("加载 tasks.json 失败，已忽略: %s", e)
-        return
-    if not isinstance(data, dict):
-        return
-    now = time.time()
-    with task_store_lock:
-        for tid, t in data.items():
-            if not isinstance(t, dict):
-                continue
-            created = t.get("created_at", now)
-            if now - created > TASK_TTL_SECONDS:
-                continue
-            task_store[tid] = t
-        # 写回已清理过期项的快照
-        _flush_tasks()
+    _task_runtime.tasks_file = TASKS_FILE
+    _task_runtime.load()
 
 
 # 模块加载时从磁盘恢复任务并清理过期项（重启后 resume 可用）
@@ -269,43 +231,30 @@ async def upload_and_process(
         except json.JSONDecodeError:
             pass
 
-    # 初始化任务进度
-    with task_store_lock:
-        task_store[task_id] = {
-            "status": "preparing",
-            "step": 0,
-            "total_steps": 5,
-            "message": f"准备处理 {len(videos)} 个视频...",
-            "details": None,
-            "result": None,
-            "error": None,
-            "error_code": None,
-            "output_dir": output_dir,
-            "merge": merge,
-            "total_videos": len(videos),
-            "select_recommended_only": select_recommended_only,
-            # 上传序的视频名列表：批处理据此定位 video_{idx}_selected.srt，
-            # 避免用 videos_dir 字典序索引导致字幕错配
-            "video_names_order": list(video_names),
-            "created_at": time.time(),
-        }
-        _flush_tasks()
+    # 上传序的视频名列表：批处理据此定位 video_{idx}_selected.srt，
+    # 避免用 videos_dir 字典序索引导致字幕错配。
+    _task_runtime.create_processing_task(
+        task_id,
+        output_dir=output_dir,
+        merge=merge,
+        total_videos=len(videos),
+        select_recommended_only=select_recommended_only,
+        video_names_order=video_names,
+    )
 
     def progress_callback(step, total_steps, message, details=None):
-        with task_store_lock:
-            task_store[task_id].update({
-                "status": "processing",
-                "step": step,
-                "total_steps": total_steps,
-                "message": message,
-                "details": details
-            })
+        _task_runtime.report_progress(
+            task_id,
+            status="processing",
+            step=step,
+            total_steps=total_steps,
+            message=message,
+            details=details,
+        )
 
     def run_processing():
         try:
-            with task_store_lock:
-                task_store[task_id]["status"] = "processing"
-                task_store[task_id]["message"] = "开始处理..."
+            _task_runtime.start_processing(task_id)
 
             # 构建完整的 AI 提示词（前端传入的是 criteria 部分，后端补充返回格式）
             screen_full_prompt = _build_screening_prompt(
@@ -376,24 +325,23 @@ async def upload_and_process(
                     cards = _build_cards(result.get("processed", []))
                     _record_words(result.get("processed", []), video_names[0] if len(video_names) == 1 else "")
 
-                    with task_store_lock:
-                        task_store[task_id].update({
-                            "status": "awaiting_styles",
-                            "step": 3,
-                            "total_steps": 5,
-                            "message": f"媒体处理完成，共 {result['cards_count']} 张卡片，请选择样式",
-                            "result": {
-                                "success": True,
-                                "message": f"媒体处理完成，共 {result['cards_count']} 张卡片",
-                                "task_id": task_id,
-                                "phase": "media_done",
-                                "merge": True,
-                                "cards_count": result["cards_count"],
-                                "video_name": ", ".join(video_names),
-                                "cards": [c.model_dump() for c in cards],
-                            }
-                        })
-                        _flush_tasks()
+                    message = f"媒体处理完成，共 {result['cards_count']} 张卡片，请选择样式"
+                    _task_runtime.await_styles(
+                        task_id,
+                        step=3,
+                        total_steps=5,
+                        message=message,
+                        result={
+                            "success": True,
+                            "message": f"媒体处理完成，共 {result['cards_count']} 张卡片",
+                            "task_id": task_id,
+                            "phase": "media_done",
+                            "merge": True,
+                            "cards_count": result["cards_count"],
+                            "video_name": ", ".join(video_names),
+                            "cards": [c.model_dump() for c in cards],
+                        },
+                    )
                 else:
                     all_results = result.get("results", [])
                     flat_cards = []
@@ -402,46 +350,44 @@ async def upload_and_process(
                             flat_cards.append(p)
                     cards = _build_cards(flat_cards)
 
-                    with task_store_lock:
-                        task_store[task_id].update({
-                            "status": "awaiting_styles",
-                            "step": 3,
-                            "total_steps": 5,
-                            "message": f"媒体处理完成，{len(all_results)} 个视频共 {result['total_cards']} 张卡片，请选择样式",
-                            "result": {
-                                "success": True,
-                                "message": f"媒体处理完成，{len(all_results)} 个视频共 {result['total_cards']} 张卡片",
-                                "task_id": task_id,
-                                "phase": "media_done",
-                                "merge": False,
-                                "total_cards": result["total_cards"],
-                                "cards": [c.model_dump() for c in cards],
-                            }
-                        })
-                        _flush_tasks()
+                    message = f"媒体处理完成，{len(all_results)} 个视频共 {result['total_cards']} 张卡片，请选择样式"
+                    _task_runtime.await_styles(
+                        task_id,
+                        step=3,
+                        total_steps=5,
+                        message=message,
+                        result={
+                            "success": True,
+                            "message": f"媒体处理完成，{len(all_results)} 个视频共 {result['total_cards']} 张卡片",
+                            "task_id": task_id,
+                            "phase": "media_done",
+                            "merge": False,
+                            "total_cards": result["total_cards"],
+                            "cards": [c.model_dump() for c in cards],
+                        },
+                    )
 
             elif merge:
                 apkg_filename = Path(result["apkg_path"]).name
                 cards = _build_cards(result.get("processed", []))
                 _record_words(result.get("processed", []), video_names[0] if len(video_names) == 1 else "")
 
-                with task_store_lock:
-                    task_store[task_id].update({
-                        "status": "completed",
-                        "step": 5,
-                        "message": f"处理完成，生成了 {result['cards_count']} 张卡片",
-                        "result": {
-                            "success": True,
-                            "message": f"处理完成，生成了 {result['cards_count']} 张卡片",
-                            "task_id": task_id,
-                            "cards_count": result["cards_count"],
-                            "apkg_path": apkg_filename,
-                            "apkg_url": f"/output/{task_id}/{apkg_filename}",
-                            "video_name": ", ".join(video_names),
-                            "cards": [c.model_dump() for c in cards]
-                        }
-                    })
-                    _flush_tasks()
+                message = f"处理完成，生成了 {result['cards_count']} 张卡片"
+                _task_runtime.complete(
+                    task_id,
+                    step=5,
+                    message=message,
+                    result={
+                        "success": True,
+                        "message": message,
+                        "task_id": task_id,
+                        "cards_count": result["cards_count"],
+                        "apkg_path": apkg_filename,
+                        "apkg_url": f"/output/{task_id}/{apkg_filename}",
+                        "video_name": ", ".join(video_names),
+                        "cards": [c.model_dump() for c in cards]
+                    },
+                )
             else:
                 # 独立模式：返回多个牌组结果
                 all_results = result.get("results", [])
@@ -461,35 +407,32 @@ async def upload_and_process(
 
                 cards = _build_cards(flat_cards)
 
-                with task_store_lock:
-                    task_store[task_id].update({
-                        "status": "completed",
-                        "step": 5,
-                        "message": f"处理完成，{len(all_results)} 个视频共 {result['total_cards']} 张卡片",
-                        "result": {
-                            "success": True,
-                            "message": f"处理完成，{len(all_results)} 个视频共 {result['total_cards']} 张卡片",
-                            "task_id": task_id,
-                            "merge": False,
-                            "total_cards": result["total_cards"],
-                            "videos": apkg_list,
-                            "cards": [c.model_dump() for c in cards]
-                        }
-                    })
-                    _flush_tasks()
+                message = f"处理完成，{len(all_results)} 个视频共 {result['total_cards']} 张卡片"
+                _task_runtime.complete(
+                    task_id,
+                    step=5,
+                    message=message,
+                    result={
+                        "success": True,
+                        "message": message,
+                        "task_id": task_id,
+                        "merge": False,
+                        "total_cards": result["total_cards"],
+                        "videos": apkg_list,
+                        "cards": [c.model_dump() for c in cards]
+                    },
+                )
 
         except Exception as e:
             import traceback
             traceback.print_exc()
             error_code, error_msg = translate_error(e)
-            with task_store_lock:
-                task_store[task_id].update({
-                    "status": "error",
-                    "message": f"处理失败: {error_msg}",
-                    "error": error_msg,
-                    "error_code": error_code.value
-                })
-                _flush_tasks()
+            _task_runtime.fail(
+                task_id,
+                message=f"处理失败: {error_msg}",
+                error=error_msg,
+                error_code=error_code.value,
+            )
         finally:
             # stop_after_media=True 时保留 task_dir（含 videos/），供批处理复用
             if not stop_after_media:
@@ -513,29 +456,9 @@ async def get_progress(task_id: str):
     Returns:
         ProcessProgress: 当前处理进度
     """
-    with task_store_lock:
-        task = task_store.get(task_id)
-
-    if not task:
+    response = _task_runtime.progress_view(task_id)
+    if response is None:
         raise HTTPException(status_code=404, detail="任务不存在")
-
-    response = {
-        "task_id": task_id,
-        "status": task["status"],
-        "step": task["step"],
-        "total_steps": task["total_steps"],
-        "message": task["message"],
-        "details": task["details"],
-        "error": task.get("error"),
-        "error_code": task.get("error_code")
-    }
-
-    # 如果已完成或等待样式，附带结果
-    if (task["status"] == "completed" or task["status"] == "awaiting_styles" or task["status"] == "packing") and task.get("result"):
-        response["result"] = task["result"]
-    elif task["status"] == "error":
-        response["error"] = task.get("error")
-        response["error_code"] = task.get("error_code")
 
     return response
 
@@ -554,15 +477,12 @@ async def generate_apkg_endpoint(
     """
     import json as _json
 
-    with task_store_lock:
-        task = task_store.get(task_id)
-
-    if not task:
+    if not _task_runtime.exists(task_id):
         raise HTTPException(status_code=404, detail="任务不存在")
-    if task.get("status") != "awaiting_styles":
-        raise HTTPException(status_code=400, detail="任务状态不正确，需要先完成媒体处理")
 
-    output_dir = task["output_dir"]
+    output_dir = _task_runtime.packing_output_dir(task_id)
+    if output_dir is None:
+        raise HTTPException(status_code=400, detail="任务状态不正确，需要先完成媒体处理")
 
     # 解析样式参数
     card_styles_list = None
@@ -580,14 +500,14 @@ async def generate_apkg_endpoint(
             pass
 
     def progress_callback(step, total_steps, message, details=None):
-        with task_store_lock:
-            task_store[task_id].update({
-                "status": "packing",
-                "step": step,
-                "total_steps": total_steps,
-                "message": message,
-                "details": details,
-            })
+        _task_runtime.report_progress(
+            task_id,
+            status="packing",
+            step=step,
+            total_steps=total_steps,
+            message=message,
+            details=details,
+        )
 
     def run_packing():
         try:
@@ -614,24 +534,23 @@ async def generate_apkg_endpoint(
             if is_merge:
                 apkg_filename = Path(result["apkg_path"]).name
                 cards = _build_cards(result.get("processed", []))
-                with task_store_lock:
-                    task_store[task_id].update({
-                        "status": "completed",
-                        "step": 1,
-                        "total_steps": 2,
-                        "message": f"处理完成，生成了 {result['cards_count']} 张卡片" + partial_suffix,
-                        "result": {
-                            "success": True,
-                            "message": f"处理完成，生成了 {result['cards_count']} 张卡片" + partial_suffix,
-                            "task_id": task_id,
-                            "cards_count": result["cards_count"],
-                            "apkg_path": apkg_filename,
-                            "apkg_url": f"/output/{task_id}/{apkg_filename}",
-                            "partial": is_partial,
-                            "cards": [c.model_dump() for c in cards],
-                        }
-                    })
-                    _flush_tasks()
+                message = f"处理完成，生成了 {result['cards_count']} 张卡片" + partial_suffix
+                _task_runtime.complete(
+                    task_id,
+                    step=1,
+                    total_steps=2,
+                    message=message,
+                    result={
+                        "success": True,
+                        "message": message,
+                        "task_id": task_id,
+                        "cards_count": result["cards_count"],
+                        "apkg_path": apkg_filename,
+                        "apkg_url": f"/output/{task_id}/{apkg_filename}",
+                        "partial": is_partial,
+                        "cards": [c.model_dump() for c in cards],
+                    },
+                )
             else:
                 all_results = result.get("results", [])
                 flat_cards = []
@@ -648,37 +567,34 @@ async def generate_apkg_endpoint(
                         flat_cards.append(p)
 
                 cards = _build_cards(flat_cards)
-                with task_store_lock:
-                    task_store[task_id].update({
-                        "status": "completed",
-                        "step": 1,
-                        "total_steps": 2,
-                        "message": f"处理完成，{len(all_results)} 个视频共 {result['total_cards']} 张卡片" + partial_suffix,
-                        "result": {
-                            "success": True,
-                            "message": f"处理完成，{len(all_results)} 个视频共 {result['total_cards']} 张卡片" + partial_suffix,
-                            "task_id": task_id,
-                            "merge": False,
-                            "total_cards": result["total_cards"],
-                            "videos": apkg_list,
-                            "partial": is_partial,
-                            "cards": [c.model_dump() for c in cards],
-                        }
-                    })
-                    _flush_tasks()
+                message = f"处理完成，{len(all_results)} 个视频共 {result['total_cards']} 张卡片" + partial_suffix
+                _task_runtime.complete(
+                    task_id,
+                    step=1,
+                    total_steps=2,
+                    message=message,
+                    result={
+                        "success": True,
+                        "message": message,
+                        "task_id": task_id,
+                        "merge": False,
+                        "total_cards": result["total_cards"],
+                        "videos": apkg_list,
+                        "partial": is_partial,
+                        "cards": [c.model_dump() for c in cards],
+                    },
+                )
 
         except Exception as e:
             import traceback
             traceback.print_exc()
             error_code, error_msg = translate_error(e)
-            with task_store_lock:
-                task_store[task_id].update({
-                    "status": "error",
-                    "message": f"打包失败: {error_msg}",
-                    "error": error_msg,
-                    "error_code": error_code.value,
-                })
-                _flush_tasks()
+            _task_runtime.fail(
+                task_id,
+                message=f"打包失败: {error_msg}",
+                error=error_msg,
+                error_code=error_code.value,
+            )
         finally:
             # Phase 2 完成，清理 Phase 1 保留的 task_dir（含 videos/）
             task_dir = TEMP_DIR / task_id
@@ -698,13 +614,11 @@ async def cleanup_output(task_id: str):
     Args:
         task_id: 任务 ID
     """
-    with task_store_lock:
-        task = task_store.get(task_id)
-
-    if not task:
+    output_dir = _task_runtime.output_dir(task_id)
+    if output_dir is None:
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    task_output_dir = Path(task.get("output_dir", ""))
+    task_output_dir = Path(output_dir)
     cleaned = []
 
     if task_output_dir.exists():
@@ -712,9 +626,7 @@ async def cleanup_output(task_id: str):
         cleaned.append(str(task_output_dir))
 
     # 清理 task_store 中的记录
-    with task_store_lock:
-        task_store.pop(task_id, None)
-        _flush_tasks()
+    _task_runtime.remove(task_id)
 
     return {"cleaned": cleaned}
 
@@ -722,14 +634,12 @@ async def cleanup_output(task_id: str):
 @router.get("/export-zip/{task_id}")
 async def export_zip_with_media(task_id: str):
     """导出带媒体文件的 ZIP 包（单个牌组或多牌组）"""
-    with task_store_lock:
-        task = task_store.get(task_id)
-
-    if not task or task.get("status") != "completed" or not task.get("result"):
+    result = _task_runtime.completed_result(task_id)
+    output_dir_value = _task_runtime.output_dir(task_id)
+    if result is None or output_dir_value is None:
         raise HTTPException(status_code=404, detail="任务不存在或未完成")
 
-    output_dir = Path(task["output_dir"])
-    result = task["result"]
+    output_dir = Path(output_dir_value)
     cards = result.get("cards", [])
     video_name = result.get("video_name", "export")
     is_merge = result.get("merge", True) and "videos" not in result
@@ -1005,11 +915,8 @@ async def cancel_batch(task_id: str):
     设置 _cancelled 标志；event_generator 在下个视频边界检测到后
     保存已完成视频结果并优雅退出。仅对运行中的批处理有效。
     """
-    with task_store_lock:
-        task = task_store.get(task_id)
-        if not task:
-            raise HTTPException(status_code=404, detail="任务不存在或已过期")
-        task["_cancelled"] = True
+    if not _task_runtime.set_cancelled(task_id):
+        raise HTTPException(status_code=404, detail="任务不存在或已过期")
     return {"status": "cancelling", "message": "批处理取消中..."}
 
 
@@ -1045,14 +952,10 @@ async def batch_process(request: BatchProcessRequest):
     # 构建 视频文件名 → 上传序索引 的映射（用于查找 video_{idx}_selected.srt）。
     # 优先用 Phase 1 持久化的上传序；前端 video_{vi}_selected.srt 的 vi 即上传序，
     # 若改用 videos_dir 字典序会在「上传序 != 文件名序」时把字幕配错。
-    with task_store_lock:
-        _stored_task = task_store.get(request.task_id, {})
-    _upload_order = _stored_task.get("video_names_order")
-    if _upload_order:
-        video_name_to_idx: dict[str, int] = {name: i for i, name in enumerate(_upload_order)}
-    else:
-        # 兼容旧任务（无持久化上传序）：回退到文件名排序索引
-        video_name_to_idx = {p.name: i for i, p in enumerate(all_video_paths)}
+    video_name_to_idx = _task_runtime.upload_index_by_video_name(
+        request.task_id,
+        [p.name for p in all_video_paths],
+    )
     if request.video_names:
         # 按前端指定的文件名过滤
         video_names = [
@@ -1074,9 +977,7 @@ async def batch_process(request: BatchProcessRequest):
     output_dir = str(original_task_dir.parent.parent / "output" / request.task_id)
 
     # 复用首视频的 select_recommended_only 设置
-    with task_store_lock:
-        original_task = task_store.get(request.task_id, {})
-    original_select_recommended_only = original_task.get("select_recommended_only", False)
+    original_select_recommended_only = _task_runtime.select_recommended_only(request.task_id)
 
     # 构建公共提示词 — 筛选和注释独立控制
     screen_full_prompt = None
@@ -1118,33 +1019,32 @@ async def batch_process(request: BatchProcessRequest):
             for i, vp in enumerate(video_names):
                 video_start = time.time()
                 # 检查取消标志 — 仅能在视频之间取消（当前视频会处理完）
-                with task_store_lock:
-                    if task_store.get(request.task_id, {}).get("_cancelled"):
-                        logger.info("批处理被取消 (task_id=%s)，已处理 %d/%d 个视频",
-                                    request.task_id, successes, total_videos)
-                        _persist_batch_results(output_dir, all_processed, partial=True)
-                        _handled = True
-                        yield _sse_encode({
-                            "type": "cancelled",
-                            "message": "批处理已取消",
-                            "videos_processed": successes,
-                            "total_cards": total_cards,
-                            "successes": successes,
-                            "failures": failures,
-                            "elapsed_seconds": round(time.time() - batch_start, 1),
-                            "video_results": video_results,
-                        })
-                        yield _sse_encode({
-                            "type": "complete",
-                            "videos_processed": successes,
-                            "total_cards": total_cards,
-                            "successes": successes,
-                            "failures": failures,
-                            "cancelled": True,
-                            "elapsed_seconds": round(time.time() - batch_start, 1),
-                            "video_results": video_results,
-                        })
-                        return
+                if _task_runtime.is_cancelled(request.task_id):
+                    logger.info("批处理被取消 (task_id=%s)，已处理 %d/%d 个视频",
+                                request.task_id, successes, total_videos)
+                    _persist_batch_results(output_dir, all_processed, partial=True)
+                    _handled = True
+                    yield _sse_encode({
+                        "type": "cancelled",
+                        "message": "批处理已取消",
+                        "videos_processed": successes,
+                        "total_cards": total_cards,
+                        "successes": successes,
+                        "failures": failures,
+                        "elapsed_seconds": round(time.time() - batch_start, 1),
+                        "video_results": video_results,
+                    })
+                    yield _sse_encode({
+                        "type": "complete",
+                        "videos_processed": successes,
+                        "total_cards": total_cards,
+                        "successes": successes,
+                        "failures": failures,
+                        "cancelled": True,
+                        "elapsed_seconds": round(time.time() - batch_start, 1),
+                        "video_results": video_results,
+                    })
+                    return
 
                 # 优先使用前端传递的精确字幕映射
                 subtitle_path = ""
@@ -1376,13 +1276,10 @@ async def resume_batch(task_id: str, request: BatchProcessRequest):
 
     AI 配置（提示词/语言/字幕映射）仍由请求体提供（与 batch_process 同 schema）。
     """
-    with task_store_lock:
-        task = task_store.get(task_id)
-    if not task:
+    if not _task_runtime.exists(task_id):
         raise HTTPException(status_code=404, detail="任务不存在或已过期")
 
-    order = task.get("video_names_order") or []
-    if not order:
+    if not _task_runtime.upload_order(task_id):
         raise HTTPException(status_code=400, detail="任务缺少上传序信息，无法恢复")
 
     # manifest 位于批处理 output 目录（与 batch_process 计算方式一致）
@@ -1390,7 +1287,7 @@ async def resume_batch(task_id: str, request: BatchProcessRequest):
     output_dir = str(original_task_dir.parent.parent / "output" / task_id)
     completed = _completed_stems(output_dir)
 
-    remaining = [name for name in order if Path(name).stem not in completed]
+    remaining = _task_runtime.remaining_video_names(task_id, completed)
     if not remaining:
         return {"task_id": task_id, "status": "nothing_to_resume", "remaining": []}
 
@@ -1398,4 +1295,3 @@ async def resume_batch(task_id: str, request: BatchProcessRequest):
     request.task_id = task_id
     request.video_names = remaining
     return await batch_process(request)
-
