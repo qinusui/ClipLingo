@@ -19,6 +19,7 @@ import zipfile
 import tempfile
 from datetime import datetime
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,13 @@ from models.schemas import BatchProcessRequest, BatchProcessResponse
 
 from errors import translate_error, get_message, ErrorCode, ClipLingoError
 from utils.zip_export import generate_csv_with_media_paths
+from core.media_cut import (
+    MediaItem,
+    apply_padding,
+    capture_screenshot,
+    cut_audio,
+    get_video_duration,
+)
 
 router = APIRouter()
 
@@ -114,6 +122,378 @@ def _build_cards(processed_data):
             screenshot_path=_to_url(item.get("screenshot_path"))
         ))
     return cards
+
+
+def _base_output_dir(output_dir: str | None = None) -> Path:
+    if output_dir is not None:
+        return Path(output_dir)
+    if getattr(sys, 'frozen', False):
+        return Path(os.environ.get('APPDATA', os.path.expanduser('~'))) / 'ClipLingo' / 'output'
+    return Path(__file__).parent.parent.parent / "output"
+
+
+def _safe_stem(name: str | None, fallback: str = "video") -> str:
+    stem = Path(name or fallback).stem or fallback
+    safe = re.sub(r"[^A-Za-z0-9_.\-\u4e00-\u9fff]+", "_", stem).strip("._")
+    return safe or fallback
+
+
+def _captured_media_url(task_id: str, media_type: str, file_path: str) -> str | None:
+    if not file_path:
+        return None
+    return f"/output/{task_id}/{media_type}/{Path(file_path).name}"
+
+
+def _is_inside(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _prepare_player_capture_task(video_name: str, output_dir: str | None = None) -> tuple[str, Path, Path]:
+    task_id = str(uuid.uuid4())
+    base_output = _base_output_dir(output_dir)
+    task_output = base_output / task_id
+    task_dir = TEMP_DIR / task_id
+    task_output.mkdir(parents=True, exist_ok=True)
+    task_dir.mkdir(exist_ok=True)
+
+    _task_runtime.create(task_id, {
+        "status": "capturing",
+        "step": 0,
+        "total_steps": 1,
+        "message": "捕获媒体中...",
+        "details": None,
+        "result": None,
+        "error": None,
+        "error_code": None,
+        "output_dir": str(task_output),
+        "merge": True,
+        "total_videos": 1,
+        "select_recommended_only": False,
+        "video_names_order": [video_name],
+        "created_at": time.time(),
+    })
+    return task_id, task_output, task_dir
+
+
+def _player_video_session_path(session_id: str) -> Path:
+    session_dir = TEMP_DIR / "player_videos" / session_id
+    if not _is_inside(session_dir, TEMP_DIR / "player_videos"):
+        raise HTTPException(status_code=400, detail="视频会话 ID 无效")
+    if not session_dir.exists():
+        raise HTTPException(status_code=404, detail="视频会话不存在，请重新选择视频")
+    videos = [p for p in session_dir.iterdir() if p.is_file()]
+    if not videos:
+        raise HTTPException(status_code=404, detail="视频会话不存在，请重新选择视频")
+    return videos[0]
+
+
+def _freeze_single_player_capture(
+    video_path: str,
+    item: dict,
+    output_dir: Path,
+    padding_start_ms: int,
+    padding_end_ms: int,
+    progress_callback=None,
+) -> MediaItem:
+    audio_dir = output_dir / "audio"
+    screenshot_dir = output_dir / "screenshots"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    screenshot_dir.mkdir(parents=True, exist_ok=True)
+
+    video_duration = get_video_duration(video_path)
+    padded = apply_padding([item.copy()], video_duration, padding_start_ms, padding_end_ms)[0]
+    if padded["snapshot_time"] >= video_duration:
+        raise ClipLingoError(ErrorCode.FFMPEG_FAILED, "字幕时间超出视频时长")
+
+    idx = int(padded["index"])
+    screenshot_path = screenshot_dir / f"card_{idx:04d}.jpg"
+    audio_path = audio_dir / f"card_{idx:04d}.mp3"
+
+    if progress_callback:
+        progress_callback("screenshots", 0, 1, "截图中...")
+    screenshot_ok = capture_screenshot(video_path, padded["snapshot_time"], str(screenshot_path))
+    if progress_callback:
+        progress_callback("screenshots", 1, 1, "截图 1/1")
+
+    if progress_callback:
+        progress_callback("audio", 0, 1, "音频切片中...")
+    audio_ok = cut_audio(video_path, padded["cut_start"], padded["cut_end"], str(audio_path))
+    if progress_callback:
+        progress_callback("audio", 1, 1, "音频切片 1/1")
+    if not screenshot_ok:
+        raise ClipLingoError(ErrorCode.FFMPEG_FAILED, "截图截取失败")
+    if not audio_ok:
+        raise ClipLingoError(ErrorCode.FFMPEG_FAILED, "音频切割失败")
+
+    return MediaItem(
+        index=idx,
+        start_sec=padded["start_sec"],
+        end_sec=padded["end_sec"],
+        audio_path=str(audio_path),
+        screenshot_path=str(screenshot_path) if screenshot_ok else "",
+    )
+
+
+def _write_player_manifest(
+    task_id: str,
+    output_dir: Path,
+    video_names: list[str],
+    captures: list[dict],
+) -> list[dict]:
+    processed = []
+    for index, item in enumerate(captures, 1):
+        processed.append({
+            "index": index,
+            "start_sec": float(item.get("start_sec", 0)),
+            "end_sec": float(item.get("end_sec", 0)),
+            "text": item.get("text", ""),
+            "translation": item.get("translation", ""),
+            "notes": item.get("notes", ""),
+            "word": item.get("word", ""),
+            "definition": item.get("definition", ""),
+            "audio_path": item.get("audio_path", ""),
+            "screenshot_path": item.get("screenshot_path", ""),
+            "video_stem": _safe_stem(item.get("video_name"), "player"),
+        })
+
+    manifest = {
+        "merge": True,
+        "video_names": video_names or ["ClipLingo Player"],
+        "processed": processed,
+    }
+    (output_dir / "processed_cards.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+    _task_runtime.await_styles(
+        task_id,
+        step=1,
+        total_steps=2,
+        message=f"媒体处理完成，共 {len(processed)} 张卡片，请选择样式",
+        result={
+            "success": True,
+            "message": f"媒体处理完成，共 {len(processed)} 张卡片",
+            "task_id": task_id,
+            "phase": "media_done",
+            "merge": True,
+            "cards_count": len(processed),
+            "video_name": ", ".join(video_names or ["ClipLingo Player"]),
+            "cards": [c.model_dump() for c in _build_cards(processed)],
+        },
+    )
+    return processed
+
+
+@router.post("/player-video-session")
+async def player_video_session(video: UploadFile = File(...)):
+    """Upload the current player video once and reuse it for per-sentence captures."""
+    session_id = str(uuid.uuid4())
+    video_name = Path(video.filename or "video").name
+    session_dir = TEMP_DIR / "player_videos" / session_id
+    session_dir.mkdir(parents=True, exist_ok=True)
+    video_path = session_dir / video_name
+    with open(video_path, "wb") as f:
+        shutil.copyfileobj(video.file, f)
+    return {
+        "session_id": session_id,
+        "video_name": video_name,
+    }
+
+
+@router.post("/player-capture")
+async def player_capture(
+    video: UploadFile | None = File(None),
+    video_session_id: str | None = Form(None),
+    start_sec: float = Form(...),
+    end_sec: float = Form(...),
+    text: str = Form(...),
+    subtitle_index: int = Form(1),
+    padding_start_ms: int = Form(200),
+    padding_end_ms: int = Form(200),
+    output_dir: str = Form(None),
+):
+    """Freeze one player-mode capture into durable audio and screenshot files."""
+    if start_sec < 0 or end_sec <= start_sec:
+        raise HTTPException(status_code=400, detail="字幕时间范围无效")
+    if video is None and not video_session_id:
+        raise HTTPException(status_code=400, detail="需要视频文件或视频会话")
+
+    video_name = Path(video.filename or "video").name if video else _player_video_session_path(video_session_id).name
+    task_id, task_output, task_dir = _prepare_player_capture_task(video_name, output_dir)
+
+    try:
+        if video is not None:
+            video_path = task_dir / video_name
+            with open(video_path, "wb") as f:
+                shutil.copyfileobj(video.file, f)
+        else:
+            video_path = _player_video_session_path(video_session_id)
+
+        capture_index = max(1, int(subtitle_index))
+        items = [{
+            "index": capture_index,
+            "start_sec": float(start_sec),
+            "end_sec": float(end_sec),
+            "text": text,
+        }]
+        def capture_progress(phase: str, current: int, total: int, message: str):
+            _task_runtime.report_progress(
+                task_id,
+                status="capturing",
+                step=current,
+                total_steps=total,
+                message=message,
+                details={
+                    "phase": phase,
+                    "current": current,
+                    "total": total,
+                    "unit": "items",
+                },
+            )
+
+        item = _freeze_single_player_capture(
+            str(video_path),
+            items[0],
+            task_output,
+            padding_start_ms,
+            padding_end_ms,
+            progress_callback=capture_progress,
+        )
+        card = {
+            "index": capture_index,
+            "start_sec": float(start_sec),
+            "end_sec": float(end_sec),
+            "text": text,
+            "translation": "",
+            "notes": "",
+            "word": "",
+            "definition": "",
+            "audio_path": item.audio_path,
+            "screenshot_path": item.screenshot_path,
+            "video_name": video_name,
+            "video_stem": _safe_stem(video_name),
+        }
+        _write_player_manifest(task_id, task_output, [_safe_stem(video_name)], [card])
+
+        return {
+            "task_id": task_id,
+            "video_name": video_name,
+            "audio_path": item.audio_path,
+            "screenshot_path": item.screenshot_path,
+            "audio_url": _captured_media_url(task_id, "audio", item.audio_path),
+            "screenshot_url": _captured_media_url(task_id, "screenshots", item.screenshot_path),
+        }
+    except Exception as e:
+        error_code, error_msg = translate_error(e)
+        _task_runtime.fail(
+            task_id,
+            message=f"捕获媒体失败: {error_msg}",
+            error=error_msg,
+            error_code=error_code.value,
+        )
+        raise HTTPException(status_code=500, detail=error_msg)
+    finally:
+        shutil.rmtree(task_dir, ignore_errors=True)
+
+
+@router.post("/player-captures/prepare")
+async def prepare_player_captures(
+    captures: str = Form(...),
+    output_dir: str = Form(None),
+):
+    """Create a Phase-2-ready manifest from already frozen player captures."""
+    try:
+        parsed = json.loads(captures)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="captures JSON 无效")
+
+    if not isinstance(parsed, list) or not parsed:
+        raise HTTPException(status_code=400, detail="至少需要一个捕获项")
+
+    normalized = []
+    missing_media = []
+    allowed_output_root = _base_output_dir(output_dir).resolve()
+    for i, item in enumerate(parsed, 1):
+        if not isinstance(item, dict):
+            raise HTTPException(status_code=400, detail="捕获项格式无效")
+        audio_path = str(item.get("audio_path") or "")
+        screenshot_path = str(item.get("screenshot_path") or "")
+        audio_file = Path(audio_path)
+        screenshot_file = Path(screenshot_path)
+        if (
+            not audio_path
+            or not audio_file.exists()
+            or not _is_inside(audio_file, allowed_output_root)
+            or not screenshot_path
+            or not screenshot_file.exists()
+            or not _is_inside(screenshot_file, allowed_output_root)
+        ):
+            missing_media.append(i)
+        normalized.append({
+            **item,
+            "audio_path": audio_path,
+            "screenshot_path": screenshot_path,
+        })
+
+    if missing_media:
+        raise HTTPException(status_code=400, detail=f"捕获项缺少媒体文件: {missing_media}")
+
+    task_id = str(uuid.uuid4())
+    task_output = _base_output_dir(output_dir) / task_id
+    task_output.mkdir(parents=True, exist_ok=True)
+    audio_dir = task_output / "audio"
+    screenshot_dir = task_output / "screenshots"
+    audio_dir.mkdir(exist_ok=True)
+    screenshot_dir.mkdir(exist_ok=True)
+
+    copied = []
+    for index, item in enumerate(normalized, 1):
+        source_audio = Path(item["audio_path"])
+        source_screenshot = Path(item["screenshot_path"])
+        audio_path = audio_dir / f"card_{index:04d}.mp3"
+        screenshot_path = screenshot_dir / f"card_{index:04d}.jpg"
+        shutil.copy2(source_audio, audio_path)
+        shutil.copy2(source_screenshot, screenshot_path)
+        copied.append({
+            **item,
+            "audio_path": str(audio_path),
+            "screenshot_path": str(screenshot_path),
+        })
+
+    video_names = []
+    for item in copied:
+        name = _safe_stem(item.get("video_name"), "player")
+        if name not in video_names:
+            video_names.append(name)
+
+    _task_runtime.create(task_id, {
+        "status": "preparing",
+        "step": 0,
+        "total_steps": 2,
+        "message": "准备打包捕获队列...",
+        "details": None,
+        "result": None,
+        "error": None,
+        "error_code": None,
+        "output_dir": str(task_output),
+        "merge": True,
+        "total_videos": len(video_names) or 1,
+        "select_recommended_only": False,
+        "video_names_order": video_names or ["ClipLingo Player"],
+        "created_at": time.time(),
+    })
+
+    processed = _write_player_manifest(task_id, task_output, video_names, copied)
+    return {
+        "task_id": task_id,
+        "status": "awaiting_styles",
+        "cards_count": len(processed),
+        "cards": [c.model_dump() for c in _build_cards(processed)],
+    }
 
 
 @router.post("/upload-and-process")

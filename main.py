@@ -236,13 +236,23 @@ def _process_video_to_media(
 
     # Step 3: 媒体处理
     progress(3, f"切割音频和截图中 ({len(processed)} 个片段)...")
+
+    def media_progress(phase: str, current: int, total: int, message: str):
+        progress(3, message, {
+            "phase": phase,
+            "current": current,
+            "total": total,
+            "unit": "items",
+        })
+
     media_items = process_media_items(
         str(video_path),
         processed,
         str(output_dir),
         num_workers=num_workers,
         padding_start_ms=padding_start_ms,
-        padding_end_ms=padding_end_ms
+        padding_end_ms=padding_end_ms,
+        progress_callback=media_progress,
     )
 
     # 合并数据（按索引匹配）

@@ -8,7 +8,9 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import uuid
+import hashlib
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -589,6 +591,97 @@ async def ai_annotate_stream(request: AIAnnotateRequest):
 
 _transcribe_store: Dict[str, Any] = {}
 _transcribe_lock = threading.Lock()
+_SUBTITLE_CACHE_TTL_SECONDS = 7 * 24 * 3600
+
+
+def _get_subtitle_cache_dir() -> Path:
+    cache_dir = _get_base_dir() / "cache" / "subtitles"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir
+
+
+def _subtitle_cache_key(filename: str, file_size: int) -> str:
+    raw = f"{Path(filename).name}:{file_size}".encode("utf-8", errors="replace")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _subtitle_cache_path(filename: str, file_size: int) -> Path:
+    return _get_subtitle_cache_dir() / f"{_subtitle_cache_key(filename, file_size)}.json"
+
+
+def _cleanup_expired_subtitle_cache(now: float | None = None) -> None:
+    now = now if now is not None else time.time()
+    try:
+        for path in _get_subtitle_cache_dir().glob("*.json"):
+            if now - path.stat().st_mtime > _SUBTITLE_CACHE_TTL_SECONDS:
+                path.unlink(missing_ok=True)
+    except Exception as e:
+        logger.warning("清理字幕缓存失败: %s", e)
+
+
+def _read_subtitle_cache(filename: str, file_size: int) -> dict | None:
+    _cleanup_expired_subtitle_cache()
+    path = _subtitle_cache_path(filename, file_size)
+    if not path.exists():
+        return None
+    try:
+        if time.time() - path.stat().st_mtime > _SUBTITLE_CACHE_TTL_SECONDS:
+            path.unlink(missing_ok=True)
+            return None
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        path.unlink(missing_ok=True)
+        return None
+    if data.get("filename") != Path(filename).name or data.get("file_size") != file_size:
+        return None
+    result = data.get("result")
+    return result if isinstance(result, dict) else None
+
+
+def _write_subtitle_cache(filename: str, file_size: int, result: dict) -> None:
+    try:
+        path = _subtitle_cache_path(filename, file_size)
+        payload = {
+            "filename": Path(filename).name,
+            "file_size": file_size,
+            "cached_at": time.time(),
+            "result": result,
+        }
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        logger.warning("写入字幕缓存失败: %s", e)
+
+
+def _run_transcribe_and_cache(
+    task_id: str,
+    video_path: str,
+    srt_path: str,
+    asr_engine: str,
+    model_name: str,
+    language: str | None,
+    min_duration: float,
+    filename: str,
+    file_size: int,
+) -> None:
+    from .transcribe import run_transcribe
+
+    run_transcribe(
+        task_id,
+        video_path,
+        srt_path,
+        asr_engine,
+        model_name,
+        language,
+        min_duration,
+        _transcribe_store,
+        _transcribe_lock,
+    )
+
+    with _transcribe_lock:
+        task = _transcribe_store.get(task_id, {})
+        result = task.get("result") if task.get("status") == "completed" else None
+    if result:
+        _write_subtitle_cache(filename, file_size, result)
 
 
 @router.post("/transcribe")
@@ -598,6 +691,7 @@ async def transcribe_video_endpoint(
     language: Optional[str] = None,
     model_name: str = "base",
     asr_engine: str = "faster_whisper",
+    force_transcribe: bool = False,
 ):
     if asr_engine == "faster_whisper" and not is_whisper_installed():
         raise HTTPException(status_code=400, detail="Whisper 未安装，请先调用 POST /api/subtitles/whisper/install 安装")
@@ -608,26 +702,40 @@ async def transcribe_video_endpoint(
         raise HTTPException(status_code=400, detail="未提供视频文件")
 
     temp_dir = _get_temp_dir()
-    video_path = temp_dir / f"transcribe_{video.filename}"
-    srt_path = temp_dir / f"transcribe_{video.filename}.srt"
+    safe_filename = Path(video.filename).name
+    video_path = temp_dir / f"transcribe_{safe_filename}"
+    srt_path = temp_dir / f"transcribe_{safe_filename}.srt"
 
     with open(video_path, "wb") as f:
         shutil.copyfileobj(video.file, f)
+    file_size = video_path.stat().st_size
 
     task_id = str(uuid.uuid4())
+
+    if not force_transcribe:
+        cached = _read_subtitle_cache(safe_filename, file_size)
+        if cached:
+            with _transcribe_lock:
+                _transcribe_store[task_id] = {
+                    "status": "completed",
+                    "step": 4,
+                    "total_steps": 4,
+                    "message": f"已使用缓存字幕，共 {cached.get('filtered', 0)} 条",
+                    "result": cached,
+                    "cached": True,
+                }
+            video_path.unlink(missing_ok=True)
+            return {"task_id": task_id, "status": "completed", "cached": True}
 
     with _transcribe_lock:
         _transcribe_store[task_id] = {
             "status": "preparing", "step": 0, "total_steps": 4, "message": "准备转录...",
         }
 
-    # Import here to avoid startup-time heavy imports
-    from .transcribe import run_transcribe
-
     thread = threading.Thread(
-        target=run_transcribe,
+        target=_run_transcribe_and_cache,
         args=(task_id, str(video_path), str(srt_path), asr_engine, model_name,
-              language, min_duration, _transcribe_store, _transcribe_lock),
+              language, min_duration, safe_filename, file_size),
         daemon=True,
     )
     thread.start()

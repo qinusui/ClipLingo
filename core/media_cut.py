@@ -238,7 +238,8 @@ def process_media_items(
     output_dir: str,
     num_workers: int = 8,
     padding_start_ms: int = 200,
-    padding_end_ms: int = 200
+    padding_end_ms: int = 200,
+    progress_callback=None,
 ) -> list[MediaItem]:
     """
     批量处理媒体条目
@@ -281,6 +282,8 @@ def process_media_items(
 
     # Step 2: 并行逐条截图（-ss 在 -i 前，输入跳转快）
     print(f"截图 {len(items)} 帧，{num_workers} 并发...")
+    if progress_callback:
+        progress_callback("screenshots", 0, len(items), "截图中...")
     ss_map = {}
 
     def _ss_single(item):
@@ -292,13 +295,17 @@ def process_media_items(
         return (idx, path) if ok else (idx, "")
 
     with ThreadPoolExecutor(max_workers=num_workers) as ss_executor:
-        for idx, path in ss_executor.map(_ss_single, items):
+        for done, (idx, path) in enumerate(ss_executor.map(_ss_single, items), 1):
             if path:
                 ss_map[idx] = path
+            if progress_callback:
+                progress_callback("screenshots", done, len(items), f"截图 {done}/{len(items)}")
     print(f"截图完成: {len(ss_map)}/{len(items)}")
 
     # Step 3: 并行切音频
     print(f"开始音频切片，{len(items)} 条，{num_workers} 并发...")
+    if progress_callback:
+        progress_callback("audio", 0, len(items), "音频切片中...")
     results = []
 
     def process_single(item: dict) -> MediaItem | None:
@@ -346,6 +353,8 @@ def process_media_items(
 
             if i % 10 == 0 or i == len(items):
                 print(f"  进度: {i}/{len(items)}")
+            if progress_callback:
+                progress_callback("audio", i, len(items), f"音频切片 {i}/{len(items)}")
 
     results.sort(key=lambda x: x.index)
     print(f"媒体处理完成，{len(results)} 条成功")

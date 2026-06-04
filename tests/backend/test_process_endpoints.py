@@ -458,6 +458,162 @@ class TestGenerateApkgEndpoint:
         assert call_kwargs["card_styles"] == ["not-valid-json"]
 
 
+# ─── Player mode capture endpoints ─────────────────────────────
+
+
+class TestPlayerCaptureEndpoints:
+    """播放器模式单句媒体冻结"""
+
+    def test_player_capture_freezes_media(self, tmp_path):
+        output_root = tmp_path / "output"
+
+        def fake_freeze_single_player_capture(video_path, item, output_dir, padding_start_ms, padding_end_ms, progress_callback=None):
+            from core.media_cut import MediaItem
+            output = Path(output_dir)
+            audio_dir = output / "audio"
+            screenshot_dir = output / "screenshots"
+            audio_dir.mkdir(parents=True, exist_ok=True)
+            screenshot_dir.mkdir(parents=True, exist_ok=True)
+            audio = audio_dir / f"card_{item['index']:04d}.mp3"
+            screenshot = screenshot_dir / f"card_{item['index']:04d}.jpg"
+            audio.write_bytes(b"audio")
+            screenshot.write_bytes(b"image")
+            return MediaItem(
+                index=item["index"],
+                start_sec=item["start_sec"],
+                end_sec=item["end_sec"],
+                audio_path=str(audio),
+                screenshot_path=str(screenshot),
+            )
+
+        with patch("api.process._freeze_single_player_capture", side_effect=fake_freeze_single_player_capture):
+            resp = client.post(
+                "/api/process/player-capture",
+                data={
+                    "start_sec": "1.0",
+                    "end_sec": "2.0",
+                    "text": "Hello",
+                    "subtitle_index": "7",
+                    "output_dir": str(output_root),
+                },
+                files={"video": ("movie.mp4", b"fake video", "video/mp4")},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["audio_url"].startswith(f"/output/{data['task_id']}/audio/")
+        assert data["screenshot_url"].startswith(f"/output/{data['task_id']}/screenshots/")
+        assert Path(data["audio_path"]).exists()
+        assert Path(data["screenshot_path"]).exists()
+        assert process_module.task_store[data["task_id"]]["status"] == "awaiting_styles"
+
+    def test_player_capture_can_use_video_session(self, tmp_path):
+        output_root = tmp_path / "output"
+
+        session_resp = client.post(
+            "/api/process/player-video-session",
+            files={"video": ("movie.mp4", b"fake video", "video/mp4")},
+        )
+        assert session_resp.status_code == 200
+        session_id = session_resp.json()["session_id"]
+
+        def fake_freeze_single_player_capture(video_path, item, output_dir, padding_start_ms, padding_end_ms, progress_callback=None):
+            from core.media_cut import MediaItem
+            assert Path(video_path).name == "movie.mp4"
+            output = Path(output_dir)
+            audio_dir = output / "audio"
+            screenshot_dir = output / "screenshots"
+            audio_dir.mkdir(parents=True, exist_ok=True)
+            screenshot_dir.mkdir(parents=True, exist_ok=True)
+            audio = audio_dir / "card_0001.mp3"
+            screenshot = screenshot_dir / "card_0001.jpg"
+            audio.write_bytes(b"audio")
+            screenshot.write_bytes(b"image")
+            return MediaItem(1, item["start_sec"], item["end_sec"], str(audio), str(screenshot))
+
+        with patch("api.process._freeze_single_player_capture", side_effect=fake_freeze_single_player_capture):
+            resp = client.post(
+                "/api/process/player-capture",
+                data={
+                    "video_session_id": session_id,
+                    "start_sec": "1.0",
+                    "end_sec": "2.0",
+                    "text": "Hello",
+                    "subtitle_index": "1",
+                    "output_dir": str(output_root),
+                },
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["video_name"] == "movie.mp4"
+
+    def test_prepare_player_captures_rejects_non_output_media(self, tmp_path):
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        audio = outside / "a.mp3"
+        screenshot = outside / "s.jpg"
+        audio.write_bytes(b"audio")
+        screenshot.write_bytes(b"image")
+
+        resp = client.post(
+            "/api/process/player-captures/prepare",
+            data={
+                "output_dir": str(tmp_path / "output"),
+                "captures": json.dumps([
+                    {
+                        "start_sec": 0,
+                        "end_sec": 1,
+                        "text": "Hello",
+                        "audio_path": str(audio),
+                        "screenshot_path": str(screenshot),
+                    }
+                ]),
+            },
+        )
+
+        assert resp.status_code == 400
+        assert "缺少媒体文件" in resp.json()["detail"]
+
+    def test_prepare_player_captures_creates_packable_task(self, tmp_path):
+        output_root = tmp_path / "output"
+        capture_dir = output_root / "capture-task"
+        audio_dir = capture_dir / "audio"
+        screenshot_dir = capture_dir / "screenshots"
+        audio_dir.mkdir(parents=True)
+        screenshot_dir.mkdir(parents=True)
+        audio = audio_dir / "card_0001.mp3"
+        screenshot = screenshot_dir / "card_0001.jpg"
+        audio.write_bytes(b"audio")
+        screenshot.write_bytes(b"image")
+
+        resp = client.post(
+            "/api/process/player-captures/prepare",
+            data={
+                "output_dir": str(output_root),
+                "captures": json.dumps([
+                    {
+                        "start_sec": 0,
+                        "end_sec": 1,
+                        "text": "Hello",
+                        "translation": "你好",
+                        "audio_path": str(audio),
+                        "screenshot_path": str(screenshot),
+                        "video_name": "movie.mp4",
+                    }
+                ]),
+            },
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        task = process_module.task_store[data["task_id"]]
+        assert task["status"] == "awaiting_styles"
+        output_dir = Path(task["output_dir"])
+        assert (output_dir / "processed_cards.json").exists()
+        assert (output_dir / "audio" / "card_0001.mp3").exists()
+        assert data["cards_count"] == 1
+
+
 # ─── get_progress 端点 ─────────────────────────────────────────
 
 

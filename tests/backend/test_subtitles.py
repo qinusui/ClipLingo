@@ -14,6 +14,8 @@ sys.path.insert(0, str(TEST_ROOT / "backend"))
 import pytest
 from unittest.mock import patch, Mock
 import io
+import json
+import time
 
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
@@ -279,3 +281,68 @@ class TestAIRecommendValidation:
             "subtitles": [{"index": 1, "start_sec": 0, "end_sec": 2, "text": "Hi"}],
         })
         assert resp.status_code == 400
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  POST /transcribe cache
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+class TestTranscribeCache:
+    """转录字幕缓存"""
+
+    def test_transcribe_uses_cache_by_filename_and_size(self, client, tmp_path, monkeypatch):
+        cache_dir = tmp_path / "cache" / "subtitles"
+        monkeypatch.setattr(subtitles_module, "_get_subtitle_cache_dir", lambda: cache_dir)
+        monkeypatch.setattr(subtitles_module, "is_whisper_installed", lambda: True)
+        video_bytes = b"same video bytes"
+        cache_path = subtitles_module._subtitle_cache_path("movie.mp4", len(video_bytes))
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cached_result = {
+            "subtitles": [{"index": 1, "start_sec": 0, "end_sec": 1, "text": "Hello", "duration": 1}],
+            "total": 1,
+            "filtered": 1,
+        }
+        cache_path.write_text(json.dumps({
+            "filename": "movie.mp4",
+            "file_size": len(video_bytes),
+            "cached_at": time.time(),
+            "result": cached_result,
+        }), encoding="utf-8")
+
+        with patch("api.subtitles.threading.Thread") as mock_thread:
+            resp = client.post(
+                "/api/subtitles/transcribe",
+                files={"video": ("movie.mp4", io.BytesIO(video_bytes), "video/mp4")},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["cached"] is True
+        mock_thread.assert_not_called()
+        progress = client.get(f"/api/subtitles/transcribe/progress/{resp.json()['task_id']}")
+        assert progress.status_code == 200
+        assert progress.json()["result"] == cached_result
+
+    def test_transcribe_force_ignores_cache(self, client, tmp_path, monkeypatch):
+        cache_dir = tmp_path / "cache" / "subtitles"
+        monkeypatch.setattr(subtitles_module, "_get_subtitle_cache_dir", lambda: cache_dir)
+        monkeypatch.setattr(subtitles_module, "is_whisper_installed", lambda: True)
+        video_bytes = b"same video bytes"
+        cache_path = subtitles_module._subtitle_cache_path("movie.mp4", len(video_bytes))
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(json.dumps({
+            "filename": "movie.mp4",
+            "file_size": len(video_bytes),
+            "cached_at": time.time(),
+            "result": {"subtitles": [], "total": 0, "filtered": 0},
+        }), encoding="utf-8")
+
+        with patch("api.subtitles.threading.Thread") as mock_thread:
+            resp = client.post(
+                "/api/subtitles/transcribe?force_transcribe=true",
+                files={"video": ("movie.mp4", io.BytesIO(video_bytes), "video/mp4")},
+            )
+
+        assert resp.status_code == 200
+        assert "cached" not in resp.json()
+        mock_thread.assert_called_once()
