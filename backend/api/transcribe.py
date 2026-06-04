@@ -51,6 +51,16 @@ def _normalize_language(language: str | None) -> str | None:
     return normalized or None
 
 
+def _read_progress_message(conn, timeout: float) -> dict | None:
+    """Read one progress message; closed Windows pipes are treated as no data."""
+    try:
+        if not conn.poll(timeout):
+            return None
+        return conn.recv()
+    except (EOFError, OSError):
+        return None
+
+
 def _asr_subprocess(video_path: str, srt_path: str, asr_engine: str, model_name: str,
                     language: str | None, result_path: str, progress_pipe):
     """Run ASR transcription in an isolated child process; report progress via Pipe."""
@@ -200,37 +210,34 @@ def run_transcribe(
                 timed_out = True
                 break
 
-            if parent_conn.poll(1):
-                try:
-                    msg = parent_conn.recv()
-                    step = msg.get("step")
-                    if step == "loading":
-                        _update_status(store, lock, task_id, "processing", 1, msg.get("message", "加载模型中..."))
-                    elif step == "transcribing":
-                        message = msg.get("message", "")
-                        if "命中缓存" in message:
-                            used_cache = True
-                        if "progress" in msg:
-                            with lock:
-                                s = store.get(task_id, {})
-                                s["whisper_progress"] = {
-                                    "progress": msg["progress"],
-                                    "transcribed_sec": msg["transcribed_sec"],
-                                    "duration_sec": msg["duration_sec"],
-                                    "text": msg.get("text", ""),
-                                }
-                                if used_cache:
-                                    s["cached"] = True
-                                store[task_id] = s
-                        else:
-                            _update_status(store, lock, task_id, "processing", 2, "转录中，请耐心等待...")
-                    elif step == "error":
-                        _subprocess_error = msg.get("error", "转录子进程异常退出")
-                        break
-                    elif step == "done":
-                        used_cache = bool(msg.get("cached")) or used_cache
-                        break
-                except (EOFError, OSError):
+            msg = _read_progress_message(parent_conn, timeout=1)
+            if msg is not None:
+                step = msg.get("step")
+                if step == "loading":
+                    _update_status(store, lock, task_id, "processing", 1, msg.get("message", "加载模型中..."))
+                elif step == "transcribing":
+                    message = msg.get("message", "")
+                    if "命中缓存" in message:
+                        used_cache = True
+                    if "progress" in msg:
+                        with lock:
+                            s = store.get(task_id, {})
+                            s["whisper_progress"] = {
+                                "progress": msg["progress"],
+                                "transcribed_sec": msg["transcribed_sec"],
+                                "duration_sec": msg["duration_sec"],
+                                "text": msg.get("text", ""),
+                            }
+                            if used_cache:
+                                s["cached"] = True
+                            store[task_id] = s
+                    else:
+                        _update_status(store, lock, task_id, "processing", 2, "转录中，请耐心等待...")
+                elif step == "error":
+                    _subprocess_error = msg.get("error", "转录子进程异常退出")
+                    break
+                elif step == "done":
+                    used_cache = bool(msg.get("cached")) or used_cache
                     break
             else:
                 elapsed = int(_time.time() - transcribe_start)
@@ -249,10 +256,9 @@ def run_transcribe(
 
         proc.join(timeout=30)
 
-        while parent_conn.poll():
-            try:
-                msg = parent_conn.recv()
-            except (EOFError, OSError):
+        while True:
+            msg = _read_progress_message(parent_conn, timeout=0)
+            if msg is None:
                 break
             if msg.get("step") == "transcribing" and "命中缓存" in msg.get("message", ""):
                 used_cache = True

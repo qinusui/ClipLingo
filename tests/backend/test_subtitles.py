@@ -387,6 +387,59 @@ class TestTranscribeCache:
         assert store["task-cache"]["message"] == "已使用缓存字幕，共 3 条"
         assert store["task-cache"]["result"]["filtered"] == 3
 
+    def test_run_transcribe_ignores_closed_pipe_after_success(self, tmp_path, monkeypatch):
+        from api import transcribe as transcribe_module
+
+        video_path = tmp_path / "movie.mp4"
+        srt_path = tmp_path / "movie.srt"
+        video_path.write_bytes(b"video")
+        srt_path.write_text(VALID_SRT_CONTENT, encoding="utf-8")
+
+        class ClosedPipeConnection:
+            def poll(self, _timeout=0):
+                raise OSError("[WinError 109] 管道已结束。")
+
+            def recv(self):
+                raise AssertionError("recv should not be called when poll fails")
+
+        class FakeProcess:
+            exitcode = 0
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def start(self):
+                pass
+
+            def is_alive(self):
+                return False
+
+            def join(self, timeout=None):
+                pass
+
+        def fake_pipe(duplex=False):
+            return ClosedPipeConnection(), Mock(close=lambda: None)
+
+        monkeypatch.setattr(transcribe_module.multiprocessing, "Pipe", fake_pipe)
+        monkeypatch.setattr(transcribe_module.multiprocessing, "Process", FakeProcess)
+
+        store = {}
+        lock = threading.Lock()
+        transcribe_module.run_transcribe(
+            "task-closed-pipe",
+            str(video_path),
+            str(srt_path),
+            "faster_whisper",
+            "base",
+            None,
+            1.0,
+            store,
+            lock,
+        )
+
+        assert store["task-closed-pipe"]["status"] == "completed"
+        assert store["task-closed-pipe"]["result"]["filtered"] == 3
+
     def test_transcribe_force_ignores_cache(self, client, tmp_path, monkeypatch):
         cache_dir = tmp_path / "cache" / "subtitles"
         monkeypatch.setattr(subtitles_module, "_get_subtitle_cache_dir", lambda: cache_dir)
