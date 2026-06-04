@@ -944,7 +944,7 @@ export default function PlayerMode() {
       }
       if (event.key.toLowerCase() === 'f') {
         event.preventDefault();
-        void toggleFullscreen();
+        toggleFullscreen();
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -1114,22 +1114,19 @@ export default function PlayerMode() {
     }
   };
 
-  const toggleFullscreen = async () => {
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => toast.error(text.fullscreenUnavailable));
+      return;
+    }
+
     const shell = playerShellRef.current;
-    if (!shell || !document.fullscreenEnabled) {
+    if (!shell || !document.fullscreenEnabled || !shell.isConnected) {
       toast.error(text.fullscreenUnavailable);
       return;
     }
 
-    try {
-      if (document.fullscreenElement) {
-        await document.exitFullscreen();
-      } else {
-        await shell.requestFullscreen();
-      }
-    } catch {
-      toast.error(text.fullscreenUnavailable);
-    }
+    void shell.requestFullscreen().catch(() => toast.error(text.fullscreenUnavailable));
   };
 
   const showFullscreenNotice = (message: string) => {
@@ -1739,7 +1736,7 @@ export default function PlayerMode() {
             <Button variant="ghost" size="sm" onClick={toggleTheme} title={themeTitle}>
               {theme === 'system' ? <Monitor className="h-4 w-4" /> : theme === 'light' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => void toggleFullscreen()} title={isFullscreen ? text.exitFullscreen : text.fullscreen}>
+            <Button variant="ghost" size="sm" onClick={toggleFullscreen} title={isFullscreen ? text.exitFullscreen : text.fullscreen}>
               {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
               {!isFullscreen && <span className="ml-2 hidden sm:inline">{text.fullscreen}</span>}
             </Button>
