@@ -16,7 +16,7 @@ import { TemplateMarketplace } from './components/TemplateMarketplace';
 import { StyleGenerator } from './components/StyleGenerator';
 import { AnkiSyncButton } from './components/AnkiSyncButton';
 import { PreheatIndicator } from './components/PreheatIndicator';
-import { SubtitleItem, ProcessedCard, AIRecommendation, CardStyle, CardTheme, ThemeOverrides, WorkflowPhase, AnnotationPurpose, ASREngine, TranslateService } from './types';
+import { SubtitleItem, ProcessedCard, AIRecommendation, CardStyle, CardTheme, ThemeOverrides, WorkflowPhase, AnnotationPurpose, ASREngine, TranslateService, ProgressState } from './types';
 import { subtitleAPI, processAPI, translateAPI, API_BASE_URL } from './services/api';
 import { themeAPI, type ThemeListItem } from './services/themeAPI';
 import { pingAnki, fetchWordsFromAnki } from './services/ankiConnect';
@@ -216,13 +216,12 @@ function App() {
   const scrollToStep2 = () => {
     setTimeout(() => step2Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
   };
-  const [transcribeStep, setTranscribeStep] = useState(0);
-  const [, setTranscribeTotalSteps] = useState(4);
   const [transcribeMessage, setTranscribeMessage] = useState('');
-  const [transcribeAnimProgress, setTranscribeAnimProgress] = useState(0);
   const transcribeAnimRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [transcribeProgressState, setTranscribeProgressState] = useState<ProgressState>({ mode: 'indeterminate', message: '' });
   const [whisperText, setWhisperText] = useState('');
   const whisperHasRealProgress = useRef(false);
+  const [step4ProgressState, setStep4ProgressState] = useState<ProgressState>({ mode: 'indeterminate', message: '' });
   const [recommendBatch, setRecommendBatch] = useState(0);
   const [recommendTotalBatches, setRecommendTotalBatches] = useState(0);
   // 两阶段 AI 工作流
@@ -438,44 +437,25 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceLanguage, targetLanguage]);
 
-  // 转录进度动画
+  // 转录进度：没有真实时间轴时显示不确定状态，不伪造百分比。
   useEffect(() => {
-    const stepBase = [0, 10, 30, 100];
-
     if (!isTranscribing) {
-      setTranscribeAnimProgress(0);
+      setTranscribeProgressState({ mode: 'indeterminate', message: '' });
       whisperHasRealProgress.current = false;
       setWhisperText('');
       if (transcribeAnimRef.current) clearInterval(transcribeAnimRef.current);
       return;
     }
 
-    const base = stepBase[transcribeStep] || 0;
-    setTranscribeAnimProgress(base);
-
-    if (transcribeStep === 2) {
-      // 有真实进度时不启动模拟动画
-      if (whisperHasRealProgress.current) return;
-      transcribeAnimRef.current = setInterval(() => {
-        setTranscribeAnimProgress(prev => {
-          if (whisperHasRealProgress.current) {
-            // 收到真实进度后停止模拟
-            if (transcribeAnimRef.current) clearInterval(transcribeAnimRef.current);
-            return prev;
-          }
-          if (prev < 30) return 30;
-          if (prev >= 94) return 94;
-          return Math.min(94, prev + 0.3);
-        });
-      }, 1000);
-    } else {
-      if (transcribeAnimRef.current) clearInterval(transcribeAnimRef.current);
+    if (!whisperHasRealProgress.current) {
+      setTranscribeProgressState({ mode: 'indeterminate', message: transcribeMessage });
     }
+    if (transcribeAnimRef.current) clearInterval(transcribeAnimRef.current);
 
     return () => {
       if (transcribeAnimRef.current) clearInterval(transcribeAnimRef.current);
     };
-  }, [isTranscribing, transcribeStep]);
+  }, [isTranscribing, transcribeMessage]);
 
   // ── 主题覆盖：加载 + 实时预览 ──
   useEffect(() => {
@@ -871,9 +851,8 @@ function App() {
 
     transcribingRef.current = true;
     setIsTranscribing(true);
-    setTranscribeStep(0);
-    setTranscribeTotalSteps(4);
     setTranscribeMessage(t('app.error.transcribePreparing'));
+    setTranscribeProgressState({ mode: 'indeterminate', message: t('app.error.transcribePreparing') });
 
     try {
       const { task_id } = await subtitleAPI.startTranscribe(videoFiles[0], minDuration, sourceLanguage, whisperModel, asrEngine);
@@ -882,23 +861,34 @@ function App() {
         try {
           const progress = await subtitleAPI.getTranscribeProgress(task_id);
 
-          setTranscribeStep(progress.step);
-          setTranscribeTotalSteps(progress.total_steps);
-
           if (progress.whisper_progress) {
             const wp = progress.whisper_progress;
             const pct = Math.round(wp.progress * 100);
             whisperHasRealProgress.current = true;
-            setTranscribeAnimProgress(pct);
             setWhisperText(wp.text || '');
             const fmtTime = (sec: number) => {
               const m = Math.floor(sec / 60);
               const s = Math.floor(sec % 60);
               return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
             };
-            setTranscribeMessage(t('app.error.transcribing', { transcribed: fmtTime(wp.transcribed_sec), duration: fmtTime(wp.duration_sec), pct: `${pct}` }));
+            const message = t('app.error.transcribing', { transcribed: fmtTime(wp.transcribed_sec), duration: fmtTime(wp.duration_sec), pct: `${pct}` });
+            setTranscribeMessage(message);
+            setTranscribeProgressState({
+              mode: 'determinate',
+              message,
+              progress: pct,
+              current: wp.transcribed_sec,
+              total: wp.duration_sec,
+              unit: 'seconds',
+              detail: wp.text || '',
+            });
           } else {
             setTranscribeMessage(progress.message);
+            setTranscribeProgressState({
+              mode: progress.cached ? 'determinate' : 'indeterminate',
+              message: progress.message,
+              progress: progress.cached ? 100 : undefined,
+            });
           }
 
           if (progress.status === 'completed' && progress.result) {
@@ -914,6 +904,11 @@ function App() {
             counts[0] = transcribed.length;
             setSubtitleCounts(counts);
             transcribedVideoName.current = videoFiles[0].name;
+            setTranscribeProgressState({
+              mode: 'determinate',
+              message: progress.message || t('app.step1.subtitlesReady', { count: transcribed.length }),
+              progress: 100,
+            });
             scrollToStep2();
           }
 
@@ -1442,6 +1437,7 @@ function App() {
     setProcessingSteps(MEDIA_PROCESSING_STEPS.map(s => ({ ...s, status: 'pending' as const })));
     setCurrentStep(0);
     setProcessingMessage('');
+    setStep4ProgressState({ mode: 'indeterminate', message: '' });
 
     // 构建预处理数据（同 handleProcess）
     const allPreProcessed = subtitles
@@ -1501,6 +1497,21 @@ function App() {
         try {
           const progress = await processAPI.getProgress(task_id);
           setProcessingMessage(progress.message || '');
+          const details = progress.details;
+          const detailCurrent = typeof details?.current === 'number' ? details.current : undefined;
+          const detailTotal = typeof details?.total === 'number' ? details.total : undefined;
+          if (typeof detailCurrent === 'number' && typeof detailTotal === 'number' && detailTotal > 0) {
+            setStep4ProgressState({
+              mode: 'determinate',
+              message: progress.message || '',
+              progress: Math.round((detailCurrent / detailTotal) * 100),
+              current: detailCurrent,
+              total: detailTotal,
+              unit: details?.unit === 'items' ? 'items' : undefined,
+            });
+          } else {
+            setStep4ProgressState({ mode: 'indeterminate', message: progress.message || '' });
+          }
           // 映射后端 step 到前端 MEDIA_PROCESSING_STEPS (2 steps)
           const stepIndex = progress.step <= 1 ? 0 : Math.min(1, progress.step - 2);
           setCurrentStep(stepIndex);
@@ -1519,6 +1530,7 @@ function App() {
             setPreviewIndex(0);
             setProcessingPhase('awaiting_styles');
             setProcessingMessage(progress.message || '');
+            setStep4ProgressState({ mode: 'determinate', message: progress.message || '', progress: 100 });
             setProcessingSteps(s => s.map(step => ({ ...step, status: 'completed' as const })));
           }
           if (progress.status === 'error') {
@@ -1544,6 +1556,7 @@ function App() {
     setProcessingSteps(PACK_PROCESSING_STEPS.map(s => ({ ...s, status: 'pending' as const })));
     setCurrentStep(0);
     setProcessingMessage(t('app.processing.packingApkg'));
+    setStep4ProgressState({ mode: 'indeterminate', message: t('app.processing.packingApkg') });
 
     try {
       await processAPI.generateApkg(
@@ -1557,11 +1570,13 @@ function App() {
         try {
           const progress = await processAPI.getProgress(taskId);
           setProcessingMessage(progress.message || '');
+          setStep4ProgressState({ mode: 'indeterminate', message: progress.message || '' });
           setCurrentStep(progress.step);
 
           if (progress.status === 'completed' && progress.result) {
             clearInterval(pollInterval);
             setProcessingPhase('completed');
+            setStep4ProgressState({ mode: 'determinate', message: progress.message || '', progress: 100 });
             setProcessingSteps(s => s.map(step => ({ ...step, status: 'completed' as const })));
             const r = progress.result;
             setApkgPath(r.apkg_path);
@@ -2179,13 +2194,14 @@ function App() {
                   {/* 转录进度 */}
                   {isTranscribing && (
                     <div className="space-y-1">
-                      <div className="w-full bg-gray-200 rounded-full h-2 dark:bg-gray-600">
-                        <div
-                          className="bg-blue-500 h-2 rounded-full transition-all duration-300"
-                          style={{ width: `${transcribeAnimProgress}%` }}
-                        />
-                      </div>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">{transcribeMessage}</p>
+                      <ProgressBar
+                        progress={transcribeProgressState.progress ?? 0}
+                        indeterminate={transcribeProgressState.mode !== 'determinate'}
+                        showLabel={false}
+                      />
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {transcribeProgressState.message || transcribeMessage}
+                      </p>
                       {whisperText && (
                         <p className="text-xs text-gray-400 dark:text-gray-500 truncate">
                           {t('app.step1.transcribing', { text: whisperText })}
@@ -2922,7 +2938,10 @@ function App() {
                       </Button>
                     </div>
                     {annotateTotalBatches > 0 && (
-                      <ProgressBar progress={(annotateBatch / annotateTotalBatches) * 100} />
+                      <ProgressBar
+                        progress={annotateTotalBatches > 0 ? (annotateBatch / annotateTotalBatches) * 100 : 0}
+                        indeterminate={annotateTotalBatches === 0}
+                      />
                     )}
                     <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">
                       {t('app.step3.annotatingHint')}
@@ -3132,7 +3151,18 @@ function App() {
                       currentStepIndex={currentStep}
                       message={processingMessage}
                     />
-                    <ProgressBar progress={(currentStep + 1) / MEDIA_PROCESSING_STEPS.length * 100} />
+                    <ProgressBar
+                      progress={step4ProgressState.progress ?? 0}
+                      indeterminate={step4ProgressState.mode !== 'determinate'}
+                    />
+                    {step4ProgressState.mode === 'determinate'
+                      && typeof step4ProgressState.current === 'number'
+                      && typeof step4ProgressState.total === 'number'
+                      && (
+                        <div className="text-xs text-gray-400 dark:text-gray-500">
+                          {step4ProgressState.current}/{step4ProgressState.total}
+                        </div>
+                      )}
                   </div>
                 )}
 
@@ -3224,12 +3254,12 @@ function App() {
                                 )}
                               </div>
                               {/* 进度条 */}
-                              <div className="mt-2 bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">
-                                <div
-                                  className="bg-primary-500 h-1.5 rounded-full transition-all duration-300"
-                                  style={{ width: `${batchRemaining > 0 ? (batchCompleted / batchRemaining) * 100 : 0}%` }}
-                                />
-                              </div>
+                              <ProgressBar
+                                className="mt-2"
+                                progress={batchRemaining > 0 ? (batchCompleted / batchRemaining) * 100 : 0}
+                                indeterminate={batchRemaining === 0}
+                                showLabel={false}
+                              />
                               {/* 时间信息 */}
                               <div className="flex items-center gap-2 mt-1">
                                 <span className="text-xs text-gray-400">
@@ -3335,7 +3365,10 @@ function App() {
                       currentStepIndex={currentStep}
                       message={processingMessage}
                     />
-                    <ProgressBar progress={(currentStep + 1) / PACK_PROCESSING_STEPS.length * 100} />
+                    <ProgressBar
+                      progress={step4ProgressState.progress ?? 0}
+                      indeterminate={step4ProgressState.mode !== 'determinate'}
+                    />
                   </div>
                 )}
 
