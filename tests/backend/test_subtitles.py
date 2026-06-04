@@ -15,6 +15,7 @@ import pytest
 from unittest.mock import patch, Mock
 import io
 import json
+import threading
 import time
 
 from fastapi.testclient import TestClient
@@ -322,6 +323,69 @@ class TestTranscribeCache:
         progress = client.get(f"/api/subtitles/transcribe/progress/{resp.json()['task_id']}")
         assert progress.status_code == 200
         assert progress.json()["result"] == cached_result
+
+    def test_run_transcribe_preserves_bcut_cache_message(self, tmp_path, monkeypatch):
+        from api import transcribe as transcribe_module
+
+        video_path = tmp_path / "movie.mp4"
+        srt_path = tmp_path / "movie.srt"
+        video_path.write_bytes(b"video")
+        srt_path.write_text(VALID_SRT_CONTENT, encoding="utf-8")
+
+        class FakeConnection:
+            def __init__(self):
+                self.messages = [
+                    {"step": "transcribing", "progress": 1.0, "transcribed_sec": 3.0, "duration_sec": 3.0, "message": "命中缓存，转录完成"},
+                    {"step": "done", "segment_count": 3, "cached": True},
+                ]
+
+            def poll(self, _timeout=0):
+                return bool(self.messages)
+
+            def recv(self):
+                return self.messages.pop(0)
+
+            def close(self):
+                pass
+
+        class FakeProcess:
+            exitcode = 0
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def start(self):
+                pass
+
+            def is_alive(self):
+                return False
+
+            def join(self, timeout=None):
+                pass
+
+        def fake_pipe(duplex=False):
+            return FakeConnection(), Mock(close=lambda: None)
+
+        monkeypatch.setattr(transcribe_module.multiprocessing, "Pipe", fake_pipe)
+        monkeypatch.setattr(transcribe_module.multiprocessing, "Process", FakeProcess)
+
+        store = {}
+        lock = threading.Lock()
+        transcribe_module.run_transcribe(
+            "task-cache",
+            str(video_path),
+            str(srt_path),
+            "bcut",
+            "base",
+            None,
+            1.0,
+            store,
+            lock,
+        )
+
+        assert store["task-cache"]["cached"] is True
+        assert store["task-cache"]["message"] == "已使用缓存字幕，共 3 条"
+        assert store["task-cache"]["result"]["filtered"] == 3
 
     def test_transcribe_force_ignores_cache(self, client, tmp_path, monkeypatch):
         cache_dir = tmp_path / "cache" / "subtitles"

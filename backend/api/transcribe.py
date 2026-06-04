@@ -110,8 +110,12 @@ def _asr_subprocess(video_path: str, srt_path: str, asr_engine: str, model_name:
                     })
         else:
             engine = create_engine(asr_engine)
+            used_cache = False
 
             def _progress(frac: float, msg: str):
+                nonlocal used_cache
+                if "命中缓存" in msg:
+                    used_cache = True
                 transcribed = frac * duration_sec if duration_sec > 0 else 0.0
                 progress_pipe.send({
                     "step": "transcribing",
@@ -124,7 +128,7 @@ def _asr_subprocess(video_path: str, srt_path: str, asr_engine: str, model_name:
             segments = engine.transcribe(video_path, language, progress_callback=_progress)
 
         save_as_srt(segments, srt_path)
-        progress_pipe.send({"step": "done", "segment_count": len(segments)})
+        progress_pipe.send({"step": "done", "segment_count": len(segments), "cached": locals().get("used_cache", False)})
 
         with open(result_path, "w", encoding="utf-8") as f:
             json.dump({"segment_count": len(segments)}, f)
@@ -181,6 +185,7 @@ def run_transcribe(
         transcribe_start = _time.time()
         timed_out = False
         cancelled = False
+        used_cache = False
 
         while proc.is_alive():
             # Check cancellation
@@ -202,6 +207,9 @@ def run_transcribe(
                     if step == "loading":
                         _update_status(store, lock, task_id, "processing", 1, msg.get("message", "加载模型中..."))
                     elif step == "transcribing":
+                        message = msg.get("message", "")
+                        if "命中缓存" in message:
+                            used_cache = True
                         if "progress" in msg:
                             with lock:
                                 s = store.get(task_id, {})
@@ -211,6 +219,8 @@ def run_transcribe(
                                     "duration_sec": msg["duration_sec"],
                                     "text": msg.get("text", ""),
                                 }
+                                if used_cache:
+                                    s["cached"] = True
                                 store[task_id] = s
                         else:
                             _update_status(store, lock, task_id, "processing", 2, "转录中，请耐心等待...")
@@ -218,6 +228,7 @@ def run_transcribe(
                         _subprocess_error = msg.get("error", "转录子进程异常退出")
                         break
                     elif step == "done":
+                        used_cache = bool(msg.get("cached")) or used_cache
                         break
                 except (EOFError, OSError):
                     break
@@ -237,6 +248,16 @@ def run_transcribe(
             raise RuntimeError(reason)
 
         proc.join(timeout=30)
+
+        while parent_conn.poll():
+            try:
+                msg = parent_conn.recv()
+            except (EOFError, OSError):
+                break
+            if msg.get("step") == "transcribing" and "命中缓存" in msg.get("message", ""):
+                used_cache = True
+            elif msg.get("step") == "done":
+                used_cache = bool(msg.get("cached")) or used_cache
 
         if _subprocess_error:
             raise RuntimeError(_subprocess_error)
@@ -259,12 +280,17 @@ def run_transcribe(
                 "status": "completed",
                 "step": 4,
                 "total_steps": 4,
-                "message": f"转录完成，共 {len(subtitle_items)} 条字幕",
+                "message": (
+                    f"已使用缓存字幕，共 {len(subtitle_items)} 条"
+                    if used_cache
+                    else f"转录完成，共 {len(subtitle_items)} 条字幕"
+                ),
                 "result": {
                     "subtitles": subtitle_items,
                     "total": original_count,
                     "filtered": len(subtitle_items),
                 },
+                "cached": used_cache,
             }
 
     except Exception as e:

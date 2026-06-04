@@ -1082,12 +1082,15 @@ export default function PlayerMode() {
           setSubtitleFile(null);
           setSubtitleSource(text.asrSource(progress.result.subtitles.length));
           setSubtitles(progress.result.subtitles);
+          const completedMessage = progress.cached
+            ? progress.message || text.transcribed(progress.result.subtitles.length)
+            : text.transcribed(progress.result.subtitles.length);
           setTranscribeProgress({
             mode: 'determinate',
-            message: progress.cached ? progress.message : text.transcribed(progress.result.subtitles.length),
+            message: completedMessage,
             progress: 100,
           });
-          toast(text.transcribed(progress.result.subtitles.length));
+          toast(completedMessage);
           return;
         }
 
