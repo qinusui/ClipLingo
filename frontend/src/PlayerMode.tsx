@@ -6,7 +6,7 @@ import { ProgressBar } from './components/ProgressBar';
 import { Card, CardContent, CardHeader, CardTitle } from './components/Card';
 import { AnkiSyncButton } from './components/AnkiSyncButton';
 import { subtitleAPI, processAPI, API_BASE_URL } from './services/api';
-import type { AnnotationPurpose, ASREngine, ASREngineInfo, ProcessedCard, SubtitleItem } from './types';
+import type { AnnotationPurpose, ASREngine, ASREngineInfo, ProcessedCard, ProgressState, SubtitleItem } from './types';
 import { toast } from './utils/toast';
 import { getApiErrorMessage } from './utils/errors';
 import { cn } from './utils/cn';
@@ -16,6 +16,7 @@ type QueueStatus = 'captured' | 'annotating' | 'annotated' | 'media_processing' 
 
 type CaptureDraft = {
   id: string;
+  captureTaskId?: string;
   subtitleIndex: number;
   start_sec: number;
   end_sec: number;
@@ -24,6 +25,11 @@ type CaptureDraft = {
   notes?: string;
   word?: string;
   definition?: string;
+  audio_path?: string;
+  screenshot_path?: string;
+  audio_url?: string;
+  screenshot_url?: string;
+  video_name?: string;
   status: QueueStatus;
 };
 
@@ -55,6 +61,7 @@ type PlayerCopy = {
   subtitleFile: string;
   extractEmbedded: string;
   asrTranscribe: string;
+  retranscribe: string;
   asrEngine: string;
   bcutEngine: string;
   unavailableSuffix: string;
@@ -90,6 +97,9 @@ type PlayerCopy = {
   queueTitle: string;
   queueSourcePrefix: string;
   reselectVideoHint: string;
+  mixedSources: string;
+  freezeFailed: (message: string) => string;
+  needMediaReady: string;
   grammarAnnotation: string;
   vocabAnnotation: string;
   originalText: string;
@@ -155,6 +165,7 @@ const PLAYER_COPY: Record<PlayerLanguage, PlayerCopy> = {
     subtitleFile: 'SRT 字幕文件',
     extractEmbedded: '提取内嵌字幕',
     asrTranscribe: 'ASR 转录',
+    retranscribe: '重新生成',
     asrEngine: 'ASR 引擎',
     bcutEngine: '必剪 ASR',
     unavailableSuffix: '不可用',
@@ -190,6 +201,9 @@ const PLAYER_COPY: Record<PlayerLanguage, PlayerCopy> = {
     queueTitle: '捕获队列',
     queueSourcePrefix: '来源视频',
     reselectVideoHint: '生成前需重新选择视频',
+    mixedSources: '多个视频',
+    freezeFailed: (message) => `媒体捕获失败: ${message}`,
+    needMediaReady: '请等待媒体捕获完成，或移除失败的句子',
     grammarAnnotation: '语法注释',
     vocabAnnotation: '词汇注释',
     originalText: '原文',
@@ -253,6 +267,7 @@ const PLAYER_COPY: Record<PlayerLanguage, PlayerCopy> = {
     subtitleFile: 'SRT subtitle file',
     extractEmbedded: 'Extract embedded subs',
     asrTranscribe: 'ASR transcribe',
+    retranscribe: 'Regenerate',
     asrEngine: 'ASR engine',
     bcutEngine: 'Bcut ASR',
     unavailableSuffix: 'unavailable',
@@ -288,6 +303,9 @@ const PLAYER_COPY: Record<PlayerLanguage, PlayerCopy> = {
     queueTitle: 'Capture Queue',
     queueSourcePrefix: 'Source video',
     reselectVideoHint: 'reselect the video before generating',
+    mixedSources: 'Multiple videos',
+    freezeFailed: (message) => `Media capture failed: ${message}`,
+    needMediaReady: 'Wait for media capture to finish, or remove failed sentences',
     grammarAnnotation: 'Grammar notes',
     vocabAnnotation: 'Vocabulary notes',
     originalText: 'Original',
@@ -485,6 +503,13 @@ function formatTime(seconds: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
+function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
 function getCapturableSubtitle(subtitles: SubtitleItem[], time: number): SubtitleItem | null {
   const current = subtitles.find((s) => time >= s.start_sec && time <= s.end_sec);
   if (current) return current;
@@ -512,20 +537,6 @@ function getPlayerLanguage(language: string): PlayerLanguage {
   return language.startsWith('en') ? 'en' : 'zh';
 }
 
-function formatSRTTime(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = Math.floor(seconds % 60);
-  const ms = Math.floor((seconds % 1) * 1000);
-  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')},${ms.toString().padStart(3, '0')}`;
-}
-
-function buildCapturedSRT(items: CaptureDraft[]): string {
-  return items
-    .map((item, index) => `${index + 1}\n${formatSRTTime(item.start_sec)} --> ${formatSRTTime(item.end_sec)}\n${item.text}\n`)
-    .join('\n');
-}
-
 function toSubtitleItem(item: CaptureDraft, index: number): SubtitleItem {
   return {
     index: index + 1,
@@ -551,6 +562,7 @@ function isQueueStatus(value: unknown): value is QueueStatus {
 
 function restoreQueueStatus(item: CaptureDraft): QueueStatus {
   if (item.status === 'annotating' || item.status === 'media_processing' || item.status === 'ready') {
+    if (!item.audio_path || !item.screenshot_path) return 'error';
     return item.translation || item.notes || item.word || item.definition ? 'annotated' : 'captured';
   }
   return item.status;
@@ -584,6 +596,12 @@ function restoreCaptureDraft(value: unknown, fallbackIndex: number): CaptureDraf
     notes: typeof item.notes === 'string' ? item.notes : undefined,
     word: typeof item.word === 'string' ? item.word : undefined,
     definition: typeof item.definition === 'string' ? item.definition : undefined,
+    captureTaskId: typeof item.captureTaskId === 'string' ? item.captureTaskId : undefined,
+    audio_path: typeof item.audio_path === 'string' ? item.audio_path : undefined,
+    screenshot_path: typeof item.screenshot_path === 'string' ? item.screenshot_path : undefined,
+    audio_url: typeof item.audio_url === 'string' ? item.audio_url : undefined,
+    screenshot_url: typeof item.screenshot_url === 'string' ? item.screenshot_url : undefined,
+    video_name: typeof item.video_name === 'string' ? item.video_name : undefined,
     status,
   };
 }
@@ -687,6 +705,7 @@ export default function PlayerMode() {
   const [initialPlayerSettings] = useState(() => loadPlayerSettings(initialOverlaySettings));
   const [isFirefox] = useState(() => typeof navigator !== 'undefined' && /firefox/i.test(navigator.userAgent));
   const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [videoSessionId, setVideoSessionId] = useState('');
   const [videoUrl, setVideoUrl] = useState('');
   const [subtitleFile, setSubtitleFile] = useState<File | null>(null);
   const [subtitleSource, setSubtitleSource] = useState(restoredSnapshot?.subtitleSource || '');
@@ -699,10 +718,16 @@ export default function PlayerMode() {
   const [isExtractingEmbedded, setIsExtractingEmbedded] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcribeMessage, setTranscribeMessage] = useState('');
-  const [transcribeProgress, setTranscribeProgress] = useState(0);
+  const [transcribeProgress, setTranscribeProgress] = useState<ProgressState>({
+    mode: 'indeterminate',
+    message: '',
+  });
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingMessage, setProcessingMessage] = useState('');
-  const [processingProgress, setProcessingProgress] = useState(0);
+  const [processingProgress, setProcessingProgress] = useState<ProgressState>({
+    mode: 'indeterminate',
+    message: '',
+  });
   const [taskId, setTaskId] = useState<string | null>(null);
   const [apkgUrl, setApkgUrl] = useState<string | null>(null);
   const [cards, setCards] = useState<ProcessedCard[]>([]);
@@ -736,7 +761,19 @@ export default function PlayerMode() {
   }, [currentTime, subtitles]);
 
   const activeSubtitleIndex = displayedSubtitle?.index || capturableSubtitle?.index || null;
-  const capturedIndices = useMemo(() => new Set(queue.map((item) => item.subtitleIndex)), [queue]);
+  const capturedKeys = useMemo(() => new Set(queue.map((item) => `${item.video_name || queueVideoName}:${item.subtitleIndex}`)), [queue, queueVideoName]);
+  const queueSourceNames = useMemo(() => {
+    const names: string[] = [];
+    queue.forEach((item) => {
+      const name = item.video_name || queueVideoName;
+      if (name && !names.includes(name)) names.push(name);
+    });
+    return names;
+  }, [queue, queueVideoName]);
+  const queueSourceLabel = queueSourceNames.length > 1
+    ? text.mixedSources
+    : queueSourceNames[0] || queueVideoName;
+  const queueHasPendingMedia = queue.some((item) => item.status === 'media_processing' || !item.audio_path || !item.screenshot_path);
   const selectedASREngine = useMemo(() => asrEngines.find((engine) => engine.id === asrEngine), [asrEngine, asrEngines]);
   const selectedEngineUnavailable = asrEngines.length > 0 && selectedASREngine?.available === false;
   const selectedCardStyles = useMemo(() => cardStylesFromSetting(playerCardStyle), [playerCardStyle]);
@@ -889,6 +926,7 @@ export default function PlayerMode() {
   const handleVideoChange = (file: File | null) => {
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     setVideoFile(file);
+    setVideoSessionId('');
     setVideoUrl(file ? URL.createObjectURL(file) : '');
     setCards([]);
     setTaskId(null);
@@ -908,6 +946,16 @@ export default function PlayerMode() {
     if (queueVideoName !== file.name) {
       toast.warning(text.queueSourceMismatch(queueVideoName));
     }
+
+    void processAPI.createPlayerVideoSession(file)
+      .then((session) => {
+        if (session.video_name === file.name) {
+          setVideoSessionId(session.session_id);
+        }
+      })
+      .catch((error) => {
+        toast.error(text.freezeFailed(getApiErrorMessage(error)));
+      });
   };
 
   const handleSubtitleChange = async (file: File | null) => {
@@ -950,7 +998,7 @@ export default function PlayerMode() {
     }
   };
 
-  const transcribeVideo = async () => {
+  const transcribeVideo = async (forceTranscribe: boolean = false) => {
     if (!videoFile) {
       toast.error(text.selectVideo);
       return;
@@ -962,7 +1010,7 @@ export default function PlayerMode() {
 
     setIsTranscribing(true);
     setTranscribeMessage(text.transcribePreparing);
-    setTranscribeProgress(0);
+    setTranscribeProgress({ mode: 'indeterminate', message: text.transcribePreparing });
 
     try {
       const started = await subtitleAPI.startTranscribe(
@@ -970,23 +1018,47 @@ export default function PlayerMode() {
         0,
         transcribeLanguage.trim() || undefined,
         asrEngine === 'faster_whisper' ? whisperModel : undefined,
-        asrEngine
+        asrEngine,
+        forceTranscribe
       );
 
       while (true) {
         const progress = await subtitleAPI.getTranscribeProgress(started.task_id);
         setTranscribeMessage(progress.message || text.transcribing);
         if (progress.whisper_progress) {
-          setTranscribeProgress(Math.round(progress.whisper_progress.progress * 100));
-        } else if (progress.total_steps > 0) {
-          setTranscribeProgress(Math.min(95, Math.round(((progress.step + 1) / progress.total_steps) * 100)));
+          const wp = progress.whisper_progress;
+          const pct = Math.round(wp.progress * 100);
+          setTranscribeProgress({
+            mode: 'determinate',
+            message: progress.message || text.transcribing,
+            progress: pct,
+            current: wp.transcribed_sec,
+            total: wp.duration_sec,
+            unit: 'seconds',
+            detail: wp.text,
+          });
+        } else if (progress.cached) {
+          setTranscribeProgress({
+            mode: 'determinate',
+            message: progress.message || text.transcribed(progress.result?.subtitles.length || 0),
+            progress: 100,
+          });
+        } else {
+          setTranscribeProgress({
+            mode: 'indeterminate',
+            message: progress.message || text.transcribing,
+          });
         }
 
         if (progress.status === 'completed' && progress.result) {
           setSubtitleFile(null);
           setSubtitleSource(text.asrSource(progress.result.subtitles.length));
           setSubtitles(progress.result.subtitles);
-          setTranscribeProgress(100);
+          setTranscribeProgress({
+            mode: 'determinate',
+            message: progress.cached ? progress.message : text.transcribed(progress.result.subtitles.length),
+            progress: 100,
+          });
           toast(text.transcribed(progress.result.subtitles.length));
           return;
         }
@@ -1077,23 +1149,29 @@ export default function PlayerMode() {
       toast.warning(text.noSubtitleNearby);
       return;
     }
-    if (queue.some((item) => item.subtitleIndex === subtitle.index)) {
+    if (!videoFile) {
+      toast.error(text.selectVideo);
+      return;
+    }
+    if (queue.some((item) => (item.video_name || queueVideoName) === videoFile.name && item.subtitleIndex === subtitle.index)) {
       toast.warning(text.duplicateCapture);
       return;
     }
-    if (queue.length === 0 && videoFile?.name) {
+    if (queue.length === 0 && videoFile.name) {
       setQueueVideoName(videoFile.name);
     }
+    const captureId = `${videoFile.name}-${subtitle.index}-${subtitle.start_sec}`;
     setQueue((items) => {
       return [
         ...items,
         {
-          id: `${subtitle.index}-${subtitle.start_sec}`,
+          id: captureId,
           subtitleIndex: subtitle.index,
           start_sec: subtitle.start_sec,
           end_sec: subtitle.end_sec,
           text: subtitle.text,
-          status: 'captured',
+          video_name: videoFile.name,
+          status: 'media_processing',
         },
       ];
     });
@@ -1106,6 +1184,28 @@ export default function PlayerMode() {
     } else {
       toast(message);
     }
+
+    void processAPI.freezePlayerCapture(videoSessionId ? null : videoFile, {
+      subtitleIndex: subtitle.index,
+      start_sec: subtitle.start_sec,
+      end_sec: subtitle.end_sec,
+      text: subtitle.text,
+      videoSessionId: videoSessionId || undefined,
+    }).then((result) => {
+      setQueue((items) => items.map((item) => item.id === captureId ? {
+        ...item,
+        captureTaskId: result.task_id,
+        audio_path: result.audio_path,
+        screenshot_path: result.screenshot_path,
+        audio_url: result.audio_url,
+        screenshot_url: result.screenshot_url,
+        video_name: result.video_name || videoFile.name,
+        status: 'captured',
+      } : item));
+    }).catch((error) => {
+      setQueue((items) => items.map((item) => item.id === captureId ? { ...item, status: 'error' } : item));
+      toast.error(text.freezeFailed(getApiErrorMessage(error)));
+    });
   };
 
   const captureCurrentSubtitle = () => captureSubtitle(capturableSubtitle);
@@ -1140,7 +1240,10 @@ export default function PlayerMode() {
       return;
     }
 
-    const targets = queue.filter((item) => item.status === 'captured' || item.status === 'error');
+    const targets = queue.filter((item) => (
+      item.status === 'captured'
+      || (item.status === 'error' && Boolean(item.audio_path && item.screenshot_path))
+    ));
     if (targets.length === 0) return;
 
     setIsAnnotating(true);
@@ -1191,43 +1294,36 @@ export default function PlayerMode() {
   };
 
   const processQueue = async () => {
-    if (!videoFile) {
-      toast.error(text.selectVideo);
-      return;
-    }
     if (queue.length === 0) {
       toast.error(text.needCapture);
       return;
     }
+    if (queueHasPendingMedia) {
+      toast.error(text.needMediaReady);
+      return;
+    }
 
-    const ordered = [...queue].sort((a, b) => a.start_sec - b.start_sec);
-    const srtFile = new File([buildCapturedSRT(ordered)], 'player_captures.srt', { type: 'text/plain' });
-    const preProcessed = ordered.map((item) => ({
+    const ordered = [...queue];
+    const frozenCaptures = ordered.map((item) => ({
+      start_sec: item.start_sec,
+      end_sec: item.end_sec,
       text: item.text,
       translation: item.translation || '',
       notes: item.notes || '',
       word: item.word || '',
       definition: item.definition || '',
+      audio_path: item.audio_path || '',
+      screenshot_path: item.screenshot_path || '',
+      video_name: item.video_name || queueVideoName || 'ClipLingo Player',
     }));
 
     setIsProcessing(true);
-    setProcessingProgress(0);
+    setProcessingProgress({ mode: 'indeterminate', message: text.processingStart });
     setProcessingMessage(text.processingStart);
     setQueue((items) => items.map((item) => ({ ...item, status: 'media_processing' })));
 
     try {
-      const started = await processAPI.uploadAndProcessMedia(
-        [videoFile],
-        [srtFile],
-        true,
-        0,
-        undefined,
-        preProcessed,
-        undefined,
-        undefined,
-        200,
-        200
-      );
+      const started = await processAPI.preparePlayerCaptures(frozenCaptures);
       setTaskId(started.task_id);
 
       await pollUntil(started.task_id, 'awaiting_styles');
@@ -1251,7 +1347,24 @@ export default function PlayerMode() {
     while (true) {
       const progress = await processAPI.getProgress(id);
       setProcessingMessage(progress.message || '');
-      setProcessingProgress(progress.total_steps ? ((progress.step + 1) / progress.total_steps) * 100 : 0);
+      const details = progress.details;
+      const current = typeof details?.current === 'number' ? details.current : undefined;
+      const total = typeof details?.total === 'number' ? details.total : undefined;
+      if (typeof current === 'number' && typeof total === 'number' && total > 0) {
+        setProcessingProgress({
+          mode: 'determinate',
+          message: progress.message || '',
+          progress: Math.round((current / total) * 100),
+          current,
+          total,
+          unit: details?.unit === 'items' ? 'items' : undefined,
+        });
+      } else {
+        setProcessingProgress({
+          mode: 'indeterminate',
+          message: progress.message || '',
+        });
+      }
       if (progress.status === targetStatus) return progress;
       if (progress.status === 'error') throw new Error(progress.error || text.processError);
       await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -1295,7 +1408,7 @@ export default function PlayerMode() {
         )}>
           {subtitles.map((subtitle) => {
             const active = activeSubtitleIndex === subtitle.index;
-            const captured = capturedIndices.has(subtitle.index);
+            const captured = capturedKeys.has(`${videoFile?.name || queueVideoName}:${subtitle.index}`);
             return (
               <button
                 key={`${subtitle.index}-${subtitle.start_sec}`}
@@ -1344,12 +1457,12 @@ export default function PlayerMode() {
         'space-y-3',
         isFullscreen && 'flex min-h-0 flex-1 flex-col p-3'
       )}>
-        {queueVideoName && (
+        {queueSourceLabel && (
           <div className={cn(
             'rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500 dark:bg-gray-800 dark:text-gray-400',
             isFullscreen && 'bg-white/10 text-gray-200 dark:bg-white/10 dark:text-gray-200'
           )}>
-            {text.queueSourcePrefix}: {queueVideoName}{!videoFile && ` · ${text.reselectVideoHint}`}
+            {text.queueSourcePrefix}: {queueSourceLabel}
           </div>
         )}
         <div className="flex gap-2">
@@ -1386,15 +1499,22 @@ export default function PlayerMode() {
               >
                 <div className="mb-2 flex items-center gap-2">
                   <span className="font-medium text-gray-500 dark:text-gray-400">#{index + 1}</span>
-                  <button
-                    type="button"
-                    onClick={() => seekToQueueItem(item)}
-                    className="rounded px-1.5 py-0.5 text-xs text-gray-400 hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-gray-700 dark:hover:text-primary-300"
-                    title={text.seekClip}
-                    disabled={!videoUrl}
-                  >
-                    {formatTime(item.start_sec)} - {formatTime(item.end_sec)}
-                  </button>
+                  <div className="min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => seekToQueueItem(item)}
+                      className="rounded px-1.5 py-0.5 text-xs text-gray-400 hover:bg-gray-100 hover:text-primary-600 disabled:hover:bg-transparent disabled:hover:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-primary-300"
+                      title={text.seekClip}
+                      disabled={!videoUrl || Boolean(item.video_name && item.video_name !== videoFile?.name)}
+                    >
+                      {formatTime(item.start_sec)} - {formatTime(item.end_sec)}
+                    </button>
+                    {item.video_name && (
+                      <div className="truncate px-1.5 text-[11px] text-gray-400 dark:text-gray-500">
+                        {item.video_name}
+                      </div>
+                    )}
+                  </div>
                   <span className="ml-auto rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-700 dark:text-gray-300">
                     {statusLabel(item.status, text)}
                   </span>
@@ -1497,7 +1617,7 @@ export default function PlayerMode() {
           )}
         </div>
 
-        <Button className="w-full" onClick={() => void processQueue()} disabled={queue.length === 0 || !videoFile || isProcessing}>
+        <Button className="w-full" onClick={() => void processQueue()} disabled={queue.length === 0 || queueHasPendingMedia || isProcessing}>
           <Download className="mr-2 h-4 w-4" />
           {text.generateDeck}
         </Button>
@@ -1511,8 +1631,21 @@ export default function PlayerMode() {
         <CardTitle className="text-base">{text.processingStatus}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        <ProgressBar progress={Math.min(100, processingProgress)} />
-        <div className="text-sm text-gray-500 dark:text-gray-400">{processingMessage || text.waitingProcess}</div>
+        <ProgressBar
+          progress={processingProgress.progress ?? 0}
+          indeterminate={processingProgress.mode !== 'determinate'}
+        />
+        <div className="text-sm text-gray-500 dark:text-gray-400">
+          {processingProgress.message || processingMessage || text.waitingProcess}
+        </div>
+        {processingProgress.mode === 'determinate'
+          && typeof processingProgress.current === 'number'
+          && typeof processingProgress.total === 'number'
+          && (
+            <div className="text-xs text-gray-400 dark:text-gray-500">
+              {processingProgress.current}/{processingProgress.total}
+            </div>
+          )}
         {taskId && <div className="text-xs text-gray-400">{text.task}: {taskId}</div>}
         {apkgUrl && (
           <a
@@ -1630,16 +1763,24 @@ export default function PlayerMode() {
                 {text.extractEmbedded}
               </Button>
             </div>
-            <div className="flex items-end">
+            <div className="flex items-end gap-2">
               <Button
                 variant="outline"
-                className="w-full whitespace-nowrap"
-                onClick={() => void transcribeVideo()}
+                className="min-w-0 flex-1 whitespace-nowrap"
+                onClick={() => void transcribeVideo(false)}
                 disabled={!videoFile || selectedEngineUnavailable || isTranscribing || isExtractingEmbedded || isProcessing}
                 isLoading={isTranscribing}
               >
                 <Mic className="mr-2 h-4 w-4" />
                 {text.asrTranscribe}
+              </Button>
+              <Button
+                variant="ghost"
+                className="whitespace-nowrap"
+                onClick={() => void transcribeVideo(true)}
+                disabled={!videoFile || selectedEngineUnavailable || isTranscribing || isExtractingEmbedded || isProcessing}
+              >
+                {text.retranscribe}
               </Button>
             </div>
             <div className="grid gap-3 border-t border-gray-100 pt-3 dark:border-gray-700 lg:col-span-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
@@ -1799,8 +1940,27 @@ export default function PlayerMode() {
 
           {!isFullscreen && (isTranscribing || transcribeMessage) && (
             <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800">
-              <ProgressBar progress={transcribeProgress} />
-              <div className="mt-2 text-sm text-gray-500 dark:text-gray-400">{transcribeMessage}</div>
+              <ProgressBar
+                progress={transcribeProgress.progress ?? 0}
+                indeterminate={transcribeProgress.mode !== 'determinate'}
+              />
+              <div className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                {transcribeProgress.message || transcribeMessage}
+              </div>
+              {transcribeProgress.mode === 'determinate'
+                && transcribeProgress.unit === 'seconds'
+                && typeof transcribeProgress.current === 'number'
+                && typeof transcribeProgress.total === 'number'
+                && (
+                  <div className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                    {formatDuration(transcribeProgress.current)} / {formatDuration(transcribeProgress.total)}
+                  </div>
+                )}
+              {transcribeProgress.detail && (
+                <div className="mt-1 truncate text-xs text-gray-400 dark:text-gray-500">
+                  {transcribeProgress.detail}
+                </div>
+              )}
             </div>
           )}
 
@@ -1882,7 +2042,7 @@ export default function PlayerMode() {
                 {isPlaying ? <Pause className="mr-2 h-4 w-4" /> : <Play className="mr-2 h-4 w-4" />}
                 {isPlaying ? text.pause : text.play}
               </Button>
-              <Button variant="outline" onClick={captureCurrentSubtitle} disabled={!capturableSubtitle}>
+              <Button variant="outline" onClick={captureCurrentSubtitle} disabled={!videoFile || !capturableSubtitle}>
                 <Plus className="mr-2 h-4 w-4" />
                 {text.captureCurrent}
               </Button>

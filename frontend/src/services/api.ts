@@ -41,8 +41,9 @@ export const subtitleAPI = {
     minDuration: number = 1.0,
     language?: string,
     modelName?: string,
-    asrEngine?: ASREngine
-  ): Promise<{ task_id: string; status: string }> => {
+    asrEngine?: ASREngine,
+    forceTranscribe: boolean = false
+  ): Promise<{ task_id: string; status: string; cached?: boolean }> => {
     const formData = new FormData();
     formData.append('video', video);
     const params = new URLSearchParams();
@@ -51,8 +52,9 @@ export const subtitleAPI = {
     if (normalizedLanguage) params.append('language', normalizedLanguage);
     if (modelName) params.append('model_name', modelName);
     if (asrEngine) params.append('asr_engine', asrEngine);
+    if (forceTranscribe) params.append('force_transcribe', 'true');
 
-    const response = await api.post<{ task_id: string; status: string }>(
+    const response = await api.post<{ task_id: string; status: string; cached?: boolean }>(
       `/api/subtitles/transcribe?${params.toString()}`,
       formData,
       { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 600000 }
@@ -74,6 +76,7 @@ export const subtitleAPI = {
       step: number;
       total_steps: number;
       message: string;
+      cached?: boolean;
       error?: string;
       error_code?: string;
       result?: SubtitleListResponse;
@@ -652,6 +655,82 @@ export const processAPI = {
     return response.data;
   },
 
+  freezePlayerCapture: async (
+    video: File | null,
+    capture: {
+      subtitleIndex: number;
+      start_sec: number;
+      end_sec: number;
+      text: string;
+      videoSessionId?: string;
+    },
+    paddingStartMs: number = 200,
+    paddingEndMs: number = 200,
+  ): Promise<{
+    task_id: string;
+    video_name: string;
+    audio_path: string;
+    screenshot_path: string;
+    audio_url?: string;
+    screenshot_url?: string;
+  }> => {
+    const formData = new FormData();
+    if (video) formData.append('video', video);
+    if (capture.videoSessionId) formData.append('video_session_id', capture.videoSessionId);
+    formData.append('subtitle_index', capture.subtitleIndex.toString());
+    formData.append('start_sec', capture.start_sec.toString());
+    formData.append('end_sec', capture.end_sec.toString());
+    formData.append('text', capture.text);
+    formData.append('padding_start_ms', paddingStartMs.toString());
+    formData.append('padding_end_ms', paddingEndMs.toString());
+
+    const response = await api.post(
+      '/api/process/player-capture',
+      formData,
+      { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 600000 }
+    );
+    return response.data;
+  },
+
+  createPlayerVideoSession: async (
+    video: File,
+  ): Promise<{ session_id: string; video_name: string }> => {
+    const formData = new FormData();
+    formData.append('video', video);
+
+    const response = await api.post(
+      '/api/process/player-video-session',
+      formData,
+      { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 600000 }
+    );
+    return response.data;
+  },
+
+  preparePlayerCaptures: async (
+    captures: Array<{
+      start_sec: number;
+      end_sec: number;
+      text: string;
+      translation?: string;
+      notes?: string;
+      word?: string;
+      definition?: string;
+      audio_path: string;
+      screenshot_path: string;
+      video_name?: string;
+    }>,
+  ): Promise<{ task_id: string; status: string; cards_count: number; cards: ProcessedCard[] }> => {
+    const formData = new FormData();
+    formData.append('captures', JSON.stringify(captures));
+
+    const response = await api.post(
+      '/api/process/player-captures/prepare',
+      formData,
+      { headers: { 'Content-Type': 'multipart/form-data' } }
+    );
+    return response.data;
+  },
+
   // 开始处理
   start: async (
     videoPath: string,
@@ -680,7 +759,7 @@ export const processAPI = {
       step: number;
       total_steps: number;
       message: string;
-      details: Record<string, number> | null;
+      details: Record<string, unknown> | null;
       error: string | null;
       error_code: string | null;
       result: ProcessResult | null;

@@ -118,6 +118,18 @@ export interface ProcessProgress {
   current_step: number;
 }
 
+export type ProgressMode = 'determinate' | 'staged' | 'indeterminate';
+
+export interface ProgressState {
+  mode: ProgressMode;
+  message: string;
+  progress?: number;
+  current?: number;
+  total?: number;
+  unit?: 'seconds' | 'items' | 'batches' | 'videos' | 'steps' | 'files';
+  detail?: string;
+}
+
 // ASR 引擎和翻译服务
 export type ASREngine = 'faster_whisper' | 'bcut';
 export type TranslateService = 'bing' | 'google' | 'deepl' | 'openai';
