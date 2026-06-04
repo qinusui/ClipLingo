@@ -85,7 +85,9 @@ type PlayerCopy = {
   sourceLanguage: string;
   autoDetect: string;
   asrUnavailableInline: string;
-  firefoxHint: string;
+  audioCodecHint: string;
+  compatiblePlaybackReady: string;
+  preparingCompatiblePlayback: string;
   chooseVideo: string;
   play: string;
   pause: string;
@@ -189,7 +191,9 @@ const PLAYER_COPY: Record<PlayerLanguage, PlayerCopy> = {
     sourceLanguage: '源语言',
     autoDetect: '自动检测',
     asrUnavailableInline: '当前 ASR 引擎不可用，请切换引擎或检查后端依赖。',
-    firefoxHint: 'Firefox 无声通常是视频音轨编码不兼容导致的，例如 AC3、EAC3、DTS。若其他浏览器有声音，可先用 Chrome/Edge 播放，或将音轨转为 AAC 后再打开。',
+    audioCodecHint: 'Chrome 无声通常是音轨编码不兼容导致的，例如 AC3、EAC3、DTS。ClipLingo 会自动准备 MP4/AAC 兼容播放源；捕获截图和音频仍使用原视频。',
+    compatiblePlaybackReady: '已切换到 MP4/AAC 兼容播放源',
+    preparingCompatiblePlayback: '正在准备 Chrome 兼容播放源...',
     chooseVideo: '选择视频后开始播放',
     play: '播放',
     pause: '暂停',
@@ -291,7 +295,9 @@ const PLAYER_COPY: Record<PlayerLanguage, PlayerCopy> = {
     sourceLanguage: 'Source language',
     autoDetect: 'Auto detect',
     asrUnavailableInline: 'The selected ASR engine is unavailable. Switch engines or check backend dependencies.',
-    firefoxHint: 'No audio in Firefox is usually caused by unsupported audio codecs such as AC3, EAC3, or DTS. If other browsers have audio, use Chrome/Edge or convert the audio track to AAC.',
+    audioCodecHint: 'No audio in Chrome is usually caused by unsupported audio codecs such as AC3, EAC3, or DTS. ClipLingo automatically prepares an MP4/AAC-compatible playback source; screenshots and clips still come from the original video.',
+    compatiblePlaybackReady: 'Switched to MP4/AAC-compatible playback',
+    preparingCompatiblePlayback: 'Preparing Chrome-compatible playback...',
     chooseVideo: 'Select a video to start playback',
     play: 'Play',
     pause: 'Pause',
@@ -551,6 +557,10 @@ function statusLabel(status: QueueStatus, text: PlayerCopy): string {
   return text.status[status];
 }
 
+function revokeObjectUrl(url: string) {
+  if (url.startsWith('blob:')) URL.revokeObjectURL(url);
+}
+
 function isQueueStatus(value: unknown): value is QueueStatus {
   return value === 'captured'
     || value === 'annotating'
@@ -703,10 +713,10 @@ export default function PlayerMode() {
   const [initialASRSettings] = useState(() => loadPlayerASRSettings(loadAIConfig().sourceLanguage));
   const [initialOverlaySettings] = useState(loadPlayerFullscreenOverlaySettings);
   const [initialPlayerSettings] = useState(() => loadPlayerSettings(initialOverlaySettings));
-  const [isFirefox] = useState(() => typeof navigator !== 'undefined' && /firefox/i.test(navigator.userAgent));
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoSessionId, setVideoSessionId] = useState('');
   const [videoUrl, setVideoUrl] = useState('');
+  const [playbackSource, setPlaybackSource] = useState<'local' | 'preparing' | 'compatible'>('local');
   const [subtitleFile, setSubtitleFile] = useState<File | null>(null);
   const [subtitleSource, setSubtitleSource] = useState(restoredSnapshot?.subtitleSource || '');
   const [subtitles, setSubtitles] = useState<SubtitleItem[]>([]);
@@ -751,6 +761,7 @@ export default function PlayerMode() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const subtitleButtonRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
   const fullscreenNoticeTimerRef = useRef<number | null>(null);
+  const videoSessionRequestRef = useRef(0);
 
   const capturableSubtitle = useMemo(() => {
     return getCapturableSubtitle(subtitles, currentTime);
@@ -800,7 +811,7 @@ export default function PlayerMode() {
 
   useEffect(() => {
     return () => {
-      if (videoUrl) URL.revokeObjectURL(videoUrl);
+      if (videoUrl) revokeObjectUrl(videoUrl);
     };
   }, [videoUrl]);
 
@@ -952,36 +963,53 @@ export default function PlayerMode() {
   });
 
   const handleVideoChange = (file: File | null) => {
-    if (videoUrl) URL.revokeObjectURL(videoUrl);
+    const requestId = videoSessionRequestRef.current + 1;
+    videoSessionRequestRef.current = requestId;
+    if (videoUrl) revokeObjectUrl(videoUrl);
     setVideoFile(file);
     setVideoSessionId('');
+    setPlaybackSource(file ? 'preparing' : 'local');
     setVideoUrl(file ? URL.createObjectURL(file) : '');
     setCards([]);
     setTaskId(null);
     setApkgUrl(null);
     if (!file) return;
 
-    if (queue.length === 0) {
+    if (queue.length === 0 || !queueVideoName) {
       setQueueVideoName(file.name);
-      return;
-    }
-
-    if (!queueVideoName) {
-      setQueueVideoName(file.name);
-      return;
-    }
-
-    if (queueVideoName !== file.name) {
+    } else if (queueVideoName !== file.name) {
       toast.warning(text.queueSourceMismatch(queueVideoName));
     }
 
     void processAPI.createPlayerVideoSession(file)
       .then((session) => {
+        if (videoSessionRequestRef.current !== requestId) return;
         if (session.video_name === file.name) {
           setVideoSessionId(session.session_id);
+          if (session.playback_url) {
+            const video = videoRef.current;
+            const current = video?.currentTime || 0;
+            const wasPlaying = Boolean(video && !video.paused);
+            setVideoUrl((currentUrl) => {
+              revokeObjectUrl(currentUrl);
+              return `${API_BASE_URL}${session.playback_url}`;
+            });
+            setPlaybackSource('compatible');
+            window.setTimeout(() => {
+              const nextVideo = videoRef.current;
+              if (!nextVideo) return;
+              nextVideo.currentTime = current;
+              if (wasPlaying) void nextVideo.play().catch(() => {});
+            }, 0);
+            toast(text.compatiblePlaybackReady);
+          } else {
+            setPlaybackSource('local');
+          }
         }
       })
       .catch((error) => {
+        if (videoSessionRequestRef.current !== requestId) return;
+        setPlaybackSource('local');
         toast.error(text.freezeFailed(getApiErrorMessage(error)));
       });
   };
@@ -2052,14 +2080,17 @@ export default function PlayerMode() {
             )}
           </div>
 
-          {videoUrl && isFirefox && (
+          {videoUrl && playbackSource !== 'local' && (
             <div className={cn(
               'flex gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100',
               isFullscreen && 'hidden'
             )}>
               <AlertTriangle className="mt-0.5 h-4 w-4 flex-none" />
               <div>
-                {text.firefoxHint}
+                <span className="font-medium">
+                  {playbackSource === 'compatible' ? text.compatiblePlaybackReady : text.preparingCompatiblePlayback}
+                </span>
+                <span className="ml-1">{text.audioCodecHint}</span>
               </div>
             </div>
           )}

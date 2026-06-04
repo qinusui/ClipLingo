@@ -17,6 +17,7 @@ import uuid
 import asyncio
 import zipfile
 import tempfile
+import subprocess
 from datetime import datetime
 import logging
 import re
@@ -45,6 +46,7 @@ from core.media_cut import (
     apply_padding,
     capture_screenshot,
     cut_audio,
+    get_ffmpeg_path,
     get_video_duration,
 )
 
@@ -191,6 +193,41 @@ def _player_video_session_path(session_id: str) -> Path:
     return videos[0]
 
 
+def _prepare_player_playback_copy(video_path: Path, session_id: str) -> str | None:
+    """Create a Chrome-friendly playback copy without changing capture source."""
+    playback_dir = _base_output_dir() / "player_playback" / session_id
+    playback_dir.mkdir(parents=True, exist_ok=True)
+    playback_path = playback_dir / f"{_safe_stem(video_path.name)}_aac.mp4"
+    cmd = [
+        get_ffmpeg_path(),
+        "-y",
+        "-i", str(video_path),
+        "-map", "0:v:0",
+        "-map", "0:a:0?",
+        "-c:v", "copy",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-movflags", "+faststart",
+        str(playback_path),
+    ]
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=600,
+        )
+    except Exception as e:
+        logger.warning("生成播放器兼容视频失败: %s", e)
+        return None
+    if result.returncode != 0 or not playback_path.exists() or playback_path.stat().st_size == 0:
+        logger.warning("生成播放器兼容视频失败: %s", (result.stderr or "")[:300])
+        playback_path.unlink(missing_ok=True)
+        return None
+    return f"/output/player_playback/{session_id}/{playback_path.name}"
+
+
 def _freeze_single_player_capture(
     video_path: str,
     item: dict,
@@ -298,9 +335,12 @@ async def player_video_session(video: UploadFile = File(...)):
     video_path = session_dir / video_name
     with open(video_path, "wb") as f:
         shutil.copyfileobj(video.file, f)
+    playback_url = _prepare_player_playback_copy(video_path, session_id)
     return {
         "session_id": session_id,
         "video_name": video_name,
+        "playback_url": playback_url,
+        "playback_transcoded": playback_url is not None,
     }
 
 

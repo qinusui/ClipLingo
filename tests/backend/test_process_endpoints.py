@@ -510,10 +510,11 @@ class TestPlayerCaptureEndpoints:
     def test_player_capture_can_use_video_session(self, tmp_path):
         output_root = tmp_path / "output"
 
-        session_resp = client.post(
-            "/api/process/player-video-session",
-            files={"video": ("movie.mp4", b"fake video", "video/mp4")},
-        )
+        with patch("api.process._prepare_player_playback_copy", return_value=None):
+            session_resp = client.post(
+                "/api/process/player-video-session",
+                files={"video": ("movie.mp4", b"fake video", "video/mp4")},
+            )
         assert session_resp.status_code == 200
         session_id = session_resp.json()["session_id"]
 
@@ -546,6 +547,31 @@ class TestPlayerCaptureEndpoints:
 
         assert resp.status_code == 200
         assert resp.json()["video_name"] == "movie.mp4"
+
+    def test_player_video_session_returns_compatible_playback_url(self, tmp_path):
+        output_root = tmp_path / "output"
+
+        def fake_base_output_dir(output_dir=None):
+            return Path(output_dir) if output_dir else output_root
+
+        def fake_run(cmd, capture_output, encoding, errors, timeout):
+            output_path = Path(cmd[-1])
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(b"mp4")
+            return MagicMock(returncode=0, stderr="")
+
+        with patch("api.process._base_output_dir", side_effect=fake_base_output_dir), \
+             patch("api.process.subprocess.run", side_effect=fake_run):
+            resp = client.post(
+                "/api/process/player-video-session",
+                files={"video": ("movie.mkv", b"fake video", "video/x-matroska")},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["playback_transcoded"] is True
+        assert data["playback_url"].startswith("/output/player_playback/")
+        assert data["playback_url"].endswith("_aac.mp4")
 
     def test_prepare_player_captures_rejects_non_output_media(self, tmp_path):
         outside = tmp_path / "outside"

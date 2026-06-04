@@ -694,7 +694,12 @@ export const processAPI = {
 
   createPlayerVideoSession: async (
     video: File,
-  ): Promise<{ session_id: string; video_name: string }> => {
+  ): Promise<{
+    session_id: string;
+    video_name: string;
+    playback_url?: string | null;
+    playback_transcoded?: boolean;
+  }> => {
     const formData = new FormData();
     formData.append('video', video);
 
