@@ -194,7 +194,7 @@ const PLAYER_COPY: Record<PlayerLanguage, PlayerCopy> = {
     play: '播放',
     pause: '暂停',
     captureCurrent: '捕获当前句',
-    shortcutHint: 'Space 播放/暂停 · S 捕获',
+    shortcutHint: 'Space 播放/暂停 · S 捕获 · ↑/↓ 切换句子',
     subtitleList: '字幕列表',
     currentSubtitleLabel: '当前字幕',
     subtitleEmpty: '加载 SRT 后显示字幕',
@@ -296,7 +296,7 @@ const PLAYER_COPY: Record<PlayerLanguage, PlayerCopy> = {
     play: 'Play',
     pause: 'Pause',
     captureCurrent: 'Capture sentence',
-    shortcutHint: 'Space play/pause · S capture',
+    shortcutHint: 'Space play/pause · S capture · ↑/↓ switch sentence',
     subtitleList: 'Subtitles',
     currentSubtitleLabel: 'Current subtitle',
     subtitleEmpty: 'Load an SRT file to show subtitles',
@@ -902,13 +902,41 @@ export default function PlayerMode() {
     });
   }, [activeSubtitleIndex, isFullscreen, showFullscreenSubtitleList]);
 
+  const seekRelativeSubtitle = (direction: -1 | 1) => {
+    if (subtitles.length === 0) return;
+
+    const activeIndex = activeSubtitleIndex
+      ? subtitles.findIndex((subtitle) => subtitle.index === activeSubtitleIndex)
+      : -1;
+    let targetIndex: number;
+
+    if (activeIndex >= 0) {
+      targetIndex = activeIndex + direction;
+    } else {
+      const nextSubtitleIndex = subtitles.findIndex((subtitle) => currentTime < subtitle.start_sec);
+      const timelineIndex = nextSubtitleIndex >= 0 ? nextSubtitleIndex : subtitles.length;
+      targetIndex = direction > 0 ? timelineIndex : timelineIndex - 1;
+    }
+
+    const target = subtitles[Math.min(subtitles.length - 1, Math.max(0, targetIndex))];
+    if (target) seekToSubtitle(target);
+  };
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA') return;
+      if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.tagName === 'SELECT' || target?.isContentEditable) return;
       if (event.code === 'Space') {
         event.preventDefault();
         void togglePlay();
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        seekRelativeSubtitle(-1);
+      }
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        seekRelativeSubtitle(1);
       }
       if (event.key.toLowerCase() === 's') {
         event.preventDefault();
