@@ -137,7 +137,8 @@
       "advancedCard2": "Card front fallback: when Screenshot/Audio/Word field is empty, the original sentence text is shown instead",
       "advancedCard3": "Bidirectional learned words sync: extract learned words from Anki, auto-skip during screening; local SQLite tracking also supported",
       "advancedShortcutTitle": "Keyboard Shortcuts",
-      "advancedShortcut1": "Press Esc to exit the application"
+      "advancedShortcut1": "Press Esc to exit the application",
+      "advancedShortcut2": "Player Mode: Space play/pause, S capture current sentence, ↑/↓ previous/next sentence, F fullscreen"
     },
     "step1": {
       "title": "Prepare Materials",

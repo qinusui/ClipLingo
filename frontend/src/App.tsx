@@ -1949,6 +1949,13 @@ function App() {
                       <li>{t('app.help.advancedCard3')}</li>
                     </ul>
                   </div>
+                  <div>
+                    <h4 className="font-semibold text-gray-900 mb-1 dark:text-gray-100">{t('app.help.advancedShortcutTitle')}</h4>
+                    <ul className="list-disc list-inside space-y-1 ml-2">
+                      <li>{t('app.help.advancedShortcut1')}</li>
+                      <li>{t('app.help.advancedShortcut2')}</li>
+                    </ul>
+                  </div>
                 </div>
               )}
             </CardContent>

@@ -137,7 +137,8 @@
       "advancedCard2": "卡片正面空白回退：当截图/音频/单词字段为空时，自动显示原文句子",
       "advancedCard3": "双向已学词汇同步：从 Anki 提取已学词汇，筛选时自动跳过；同时也支持本地 SQLite 追踪",
       "advancedShortcutTitle": "快捷键",
-      "advancedShortcut1": "按 Esc 键随时退出应用"
+      "advancedShortcut1": "按 Esc 键随时退出应用",
+      "advancedShortcut2": "播放器模式：Space 播放/暂停，S 捕获当前句，↑/↓ 切换上一句/下一句，F 全屏"
     },
     "step1": {
       "title": "准备素材",

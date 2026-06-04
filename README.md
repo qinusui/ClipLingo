@@ -67,6 +67,7 @@ Requires Python 3.10+, ffmpeg (in PATH), and Node.js 18+.
 - **CSS Variable Editor**: Fine-tune built-in theme colors, fonts, spacing, and shadows with live preview; changes persist per theme and carry into .apkg generation and AnkiConnect sync
 - **2 Card Structures**: Sentence cards (screenshot + audio → original text + translation + notes) and Vocab cards (word → definition + example)
 - **Multi-Video Processing**: Upload multiple videos at once with per-video subtitle assignment; merge all into one deck or generate independent decks per video
+- **Player Mode**: Capture sentences while watching videos, with Space for play/pause, S to capture, ↑/↓ to switch sentences, and F for fullscreen; captured items keep subtitles, screenshots, and audio immediately, so sentences from different videos can be combined
 - **Rule-Based Filtering**: Duration range, learned word exclusion, keyword blacklist — quickly filter large subtitle sets
 - **Embedded Subtitle Extraction**: Auto-detect embedded soft subtitles in video files, no need to manually prepare SRT files
 
@@ -128,6 +129,7 @@ The interface uses a four-step vertical layout:
 
 - **Basic Mode** (no AI): Upload video → auto-extract/transcribe subtitles → rule filter or manual selection → machine translate (Bing/Google, free) → generate cards
 - **AI Mode** (optional): Configure AI → AI Screen → choose purpose & annotate → preview theme → generate cards
+- **Player Mode**: Open `/player`, choose a video, then load subtitles or transcription results. Press `S` during playback to capture the current sentence, use `↑` / `↓` to move between subtitle sentences, and press `F` for fullscreen. The capture queue freezes screenshots and audio immediately, so generating cards does not require re-uploading the source video.
 
 > Learned words are automatically recorded to local SQLite, and both AI screening and rule-based filtering will automatically skip them on subsequent runs.
 
